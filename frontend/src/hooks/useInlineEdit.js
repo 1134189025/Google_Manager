@@ -10,6 +10,8 @@ import {
 export const CLICK_COPY_DELAY_MS = 320;
 
 const focusEditableField = (element, multiline = false) => {
+    // 编辑框可能已卸载（例如微任务执行前编辑被取消），此时无需聚焦
+    if (!element) return;
 
     try {
         element.focus({ preventScroll: true });
