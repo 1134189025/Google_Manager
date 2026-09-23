@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GoogleManager - 谷歌账号管理系统</title>
+    <meta name="description" content="专业的谷歌账号资产管理工具，支持批量导入、2FA验证码生成、状态管理等功能" />
+    <script>
+        // 首帧前应用主题，避免暗色用户启动白闪。
+        (function () {
+            try {
+                var saved = localStorage.getItem('darkMode');
+                var dark = saved === null ? false : JSON.parse(saved) === true;
+                document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+            } catch (e) {
+                document.documentElement.dataset.theme = 'light';
+            }
+        })();
+    </script>
+  <script type="module" crossorigin src="/assets/index-BlaTZhBs.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CRi8DMcg.css">
+</head>
+
+<body>
+    <div id="root"></div>
+</body>
+
+</html>

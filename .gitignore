@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+package-lock.json
+frontend/package-lock.json
+
+# Rust
+src-tauri/target/
+**/*.rs.bk
+Cargo.lock
+
+# Tauri
+src-tauri/WixTools/
+
+# Build outputs
+static/assets/*.js
+static/assets/*.css
+frontend/dist/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Security - Keys and secrets
+master.key
+*.key
+.env
+.env.local
+.env.*.local
+
+# Exports
+exports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+*.log
+test-output.log
+test-data.txt
+test-*.sh
+test-*.js
+test-*.cjs
+
+# OMC and Claude
+.omc/
+.claude/
+.kiro/
+.playwright-mcp/
+
+# Local Cargo config (contains sccache/mold paths)
+src-tauri/.cargo/config.toml
+
+# Temporary files
+*.tmp
+*.temp
+
+# 个人计划笔记（不入库）
+.pi/
