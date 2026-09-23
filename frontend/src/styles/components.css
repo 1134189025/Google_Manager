@@ -157,6 +157,36 @@
   color: var(--text-primary);
 }
 
+/* 账号浏览器按钮：未创建（淡）/ 已创建（普通）/ 运行中（强调色 + 圆点） */
+.gm-browser-btn {
+  position: relative;
+}
+
+.gm-browser-btn[data-status="none"] {
+  color: var(--text-muted);
+}
+
+.gm-browser-btn[data-status="running"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.gm-browser-btn[data-status="running"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.gm-browser-btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 /* ---------- 分段控件 ---------- */
 .gm-seg {
   display: inline-flex;

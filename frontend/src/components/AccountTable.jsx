@@ -8,12 +8,44 @@ import {
     ArrowDown,
     ArrowUp,
     ArrowUpDown,
+    Globe,
 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
 import { isMultilineField, splitMultiValueLines } from '../utils/multiValueField';
 import { describeSmsUrl } from '../utils/smsUtils';
 import SmsCodeCell from './SmsCodeCell';
+
+const BROWSER_STATUS_LABELS = {
+    none: '未创建',
+    created: '已创建',
+    running: '运行中',
+};
+
+const BROWSER_STATUS_TITLES = {
+    none: '打开浏览器（首次打开会新建独立配置并进入 Google 登录页）',
+    created: '打开浏览器（使用该账号的独立配置）',
+    running: '浏览器运行中，点击切换到该窗口',
+};
+
+/** 账号独立浏览器按钮：颜色表示配置目录状态 */
+const BrowserButton = ({ account, status, opening, onOpen }) => {
+    const browserStatus = BROWSER_STATUS_LABELS[status] ? status : 'none';
+    return (
+        <button
+            onClick={() => onOpen(account)}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="gm-icon-btn gm-browser-btn"
+            data-status={browserStatus}
+            style={{ width: 28, height: 28 }}
+            title={opening ? '正在打开浏览器…' : BROWSER_STATUS_TITLES[browserStatus]}
+            aria-label={`打开浏览器（${BROWSER_STATUS_LABELS[browserStatus]}）`}
+            disabled={opening}
+        >
+            <Globe size={15} />
+        </button>
+    );
+};
 
 const splitDateTime = (value) => {
     const raw = String(value || '').trim();
@@ -77,6 +109,10 @@ const AccountTable = ({
     smsCodes,
     onSmsRefresh,
     onSmsCopy,
+    // 账号独立浏览器
+    browserStatuses,
+    openingBrowserIds,
+    onOpenBrowser,
 }) => {
     const selectAllCheckboxRef = useRef(null);
     const currentPageSelectedCount = paginatedData.reduce(
@@ -581,7 +617,7 @@ const AccountTable = ({
                             {renderSortableHeader('状态', 'status', 'px-2 py-2.5 !text-center w-[64px]', 'center')}
                             {renderSortableHeader('年份', 'regYear', 'px-2 py-2.5 !text-center w-[52px]', 'center')}
                             {renderSortableHeader('国家', 'country', 'px-2 py-2.5 !text-center w-[52px]', 'center')}
-                            <th className="px-2 py-2.5 !text-center w-[96px]">操作</th>
+                            <th className="px-2 py-2.5 !text-center w-[128px]">操作</th>
                             {renderSortableHeader('导入', 'createdAt', 'px-2 py-2.5 w-[104px]')}
                         </tr>
                     </thead>
@@ -699,6 +735,14 @@ const AccountTable = ({
                                 {/* 操作 */}
                                 <td className="px-2 py-2.5">
                                     <div className="flex items-center justify-center gap-0.5">
+                                        {onOpenBrowser && (
+                                            <BrowserButton
+                                                account={acc}
+                                                status={browserStatuses?.[acc.email]}
+                                                opening={openingBrowserIds?.has(acc.id)}
+                                                onOpen={onOpenBrowser}
+                                            />
+                                        )}
                                         <button onClick={() => onEdit(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 28, height: 28 }} title="编辑">
                                             <Edit3 size={15} />
                                         </button>

@@ -7,6 +7,7 @@ import {
     X,
     CheckSquare,
     ListChecks,
+    Eraser,
 } from 'lucide-react';
 
 /**
@@ -20,6 +21,7 @@ const BatchToolbar = ({
     onSelectAllCurrentResult,
     onBatchEdit,
     onBatchDelete,
+    onBatchClearBrowserCache,
     onClearSelection,
 }) => {
     if (selectedCount === 0) return null;
@@ -88,6 +90,18 @@ const BatchToolbar = ({
                         <Calendar size={16} />
                         <span>批量设置年份</span>
                     </button>
+
+                    {onBatchClearBrowserCache && (
+                        <button
+                            onClick={onBatchClearBrowserCache}
+                            disabled={isBatchProcessing}
+                            className={btnBase}
+                            title="清理选中账号的浏览器缓存（不影响登录状态，运行中的会跳过）"
+                        >
+                            <Eraser size={16} />
+                            <span>清理浏览器缓存</span>
+                        </button>
+                    )}
 
                     <div className="h-8 w-[1px]" style={{ background: 'var(--border)' }}></div>
 

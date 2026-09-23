@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import {
     Search,
     Tag,
@@ -14,6 +14,7 @@ import useInlineEdit from '../hooks/useInlineEdit';
 import useAccountSelection from '../hooks/useAccountSelection';
 import useTwoFA from '../hooks/useTwoFA';
 import useSmsCodes from '../hooks/useSmsCodes';
+import useBrowserStatus from '../hooks/useBrowserStatus';
 import HistoryDrawer from './HistoryDrawer';
 import ExportDialog from './ExportDialog';
 import BatchToolbar from './BatchToolbar';
@@ -21,6 +22,7 @@ import AccountTable from './AccountTable';
 import api from '../services/api';
 import { splitMultiValueLines } from '../utils/multiValueField';
 import { extractPhoneAndSmsUrl } from '../utils/smsUtils';
+import { describeClearCacheResult } from '../utils/browserUtils';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -120,6 +122,8 @@ const AccountListView = ({
     onRefreshAccounts,
     loading,
     onSearchChange,
+    onNotify,
+    openBrowserSettings,
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
     const [inlineRecentValuesByField, setInlineRecentValuesByField] = useState(() => buildEmptyRecentValues());
@@ -202,6 +206,53 @@ const AccountListView = ({
         accounts: pagination.paginatedData,
         fetchSmsCode: api.fetchSmsCode,
     });
+
+    // 账号独立浏览器：只查当前页账号的配置目录状态（默认 3 秒一轮）
+    const { browserStatuses, refresh: refreshBrowserStatus } = useBrowserStatus({
+        accounts: pagination.paginatedData,
+        getBrowserStatuses: api.getBrowserStatuses,
+    });
+    const [openingBrowserIds, setOpeningBrowserIds] = useState(() => new Set());
+    const openingBrowserIdsRef = useRef(new Set());
+
+    const setBrowserOpening = useCallback((accountId, opening) => {
+        if (opening) openingBrowserIdsRef.current.add(accountId);
+        else openingBrowserIdsRef.current.delete(accountId);
+        setOpeningBrowserIds(new Set(openingBrowserIdsRef.current));
+    }, []);
+
+    /**
+     * 打开账号浏览器：未运行则启动，运行中则切到已有窗口。
+     * 第一次使用时先确认浏览器与配置目录；首次打开某账号时复制邮箱方便登录。
+     */
+    const handleOpenBrowser = useCallback(async (acc) => {
+        if (openingBrowserIdsRef.current.has(acc.id)) return;
+        setBrowserOpening(acc.id, true);
+        try {
+            const settingsResult = await api.getBrowserSettings();
+            if (settingsResult.success && !settingsResult.data?.configured && openBrowserSettings) {
+                const saved = await openBrowserSettings({ firstRun: true });
+                if (!saved) return;
+            }
+
+            const result = await api.openAccountBrowser(acc.id);
+            if (!result.success) {
+                alert(result.message || '打开浏览器失败');
+                return;
+            }
+
+            if (result.data?.firstLaunch) {
+                await copyToClipboard(acc.email, '邮箱');
+                onNotify?.('已打开 Google 登录页并复制邮箱；密码、2FA 码和短信码可在表格里点击复制');
+            }
+
+            // 浏览器建立单实例窗口需要片刻，稍后再查一次
+            refreshBrowserStatus();
+            setTimeout(refreshBrowserStatus, 1500);
+        } finally {
+            setBrowserOpening(acc.id, false);
+        }
+    }, [copyToClipboard, onNotify, openBrowserSettings, refreshBrowserStatus, setBrowserOpening]);
 
     // 可复用列的最近 5 条值（用于行内编辑自动补全）
     const accountRecentValuesByField = useMemo(() => {
@@ -576,24 +627,78 @@ const AccountListView = ({
         }
     };
 
-    const handlePurgeDeleted = async (id) => {
+    /**
+     * 彻底删除前询问是否一起删除浏览器配置；只在确有配置目录时询问。
+     * 返回确认要删除配置的邮箱列表。
+     */
+    const askDeleteBrowserProfiles = async (emails) => {
+        const uniqueEmails = [...new Set(emails.filter(Boolean))];
+        if (uniqueEmails.length === 0) return [];
+
+        const statusResult = await api.getBrowserStatuses(uniqueEmails);
+        const withProfile = uniqueEmails.filter(email => (statusResult.data?.[email] || 'none') !== 'none');
+        if (withProfile.length === 0) return [];
+
+        const subject = withProfile.length === 1 && uniqueEmails.length === 1
+            ? '该账号'
+            : `其中 ${withProfile.length} 个账号`;
+        const confirmed = window.confirm(
+            `${subject}有浏览器配置（保存着登录状态），是否一起删除？\n选「取消」则保留配置目录。`
+        );
+        return confirmed ? withProfile : [];
+    };
+
+    const deleteBrowserProfilesAfterPurge = async (emails) => {
+        if (emails.length === 0) return;
+        const result = await api.deleteBrowserProfiles(emails);
+        if (!result.success) {
+            alert(result.message || '删除浏览器配置失败');
+            return;
+        }
+        const { deleted = 0, skipped = 0 } = result.data || {};
+        onNotify?.(skipped > 0
+            ? `已删除 ${deleted} 个浏览器配置，${skipped} 个因正在运行或仍被其他账号使用而保留`
+            : `已删除 ${deleted} 个浏览器配置`);
+    };
+
+    const handlePurgeDeleted = async (acc) => {
         if (!window.confirm('确定永久删除该账号吗？此操作不可撤销。')) return;
-        const result = await api.purgeAccount(id);
+        const profileEmails = await askDeleteBrowserProfiles([acc.email]);
+        const result = await api.purgeAccount(acc.id);
         if (!result.success) {
             alert(result.message || '永久删除失败');
             return;
         }
+        await deleteBrowserProfilesAfterPurge(profileEmails);
         await loadDeletedAccounts();
     };
 
     const handlePurgeAllDeleted = async () => {
         if (!window.confirm('确定清空回收站吗？此操作不可撤销。')) return;
+        const profileEmails = await askDeleteBrowserProfiles(recycleDrawer.accounts.map(acc => acc.email));
         const result = await api.purgeAllDeleted();
         if (!result.success) {
             alert(result.message || '清空回收站失败');
             return;
         }
+        await deleteBrowserProfilesAfterPurge(profileEmails);
         await loadDeletedAccounts();
+    };
+
+    // 批量清理选中账号的浏览器缓存（不影响登录状态，运行中的跳过）
+    const handleBatchClearBrowserCache = async () => {
+        if (selection.selectedIds.size === 0 || isBatchProcessing) return;
+        setIsBatchProcessing(true);
+        try {
+            const result = await api.clearBrowserCache(Array.from(selection.selectedIds));
+            if (!result.success) {
+                alert(result.message || '清理浏览器缓存失败');
+                return;
+            }
+            onNotify?.(describeClearCacheResult(result.data));
+        } finally {
+            setIsBatchProcessing(false);
+        }
     };
 
     return (
@@ -669,6 +774,7 @@ const AccountListView = ({
                     onSelectAllCurrentResult={handleSelectAllCurrentResult}
                     onBatchEdit={handleBatchEdit}
                     onBatchDelete={handleBatchDelete}
+                    onBatchClearBrowserCache={handleBatchClearBrowserCache}
                     onClearSelection={selection.clearSelection}
                 />
 
@@ -706,6 +812,9 @@ const AccountListView = ({
                     smsCodes={smsCodes}
                     onSmsRefresh={handleSmsRefresh}
                     onSmsCopy={handleSmsCopy}
+                    browserStatuses={browserStatuses}
+                    openingBrowserIds={openingBrowserIds}
+                    onOpenBrowser={handleOpenBrowser}
                 />
 
                 {/* 分页 */}
@@ -783,7 +892,7 @@ const AccountListView = ({
                                             恢复
                                         </button>
                                         <button
-                                            onClick={() => handlePurgeDeleted(acc.id)}
+                                            onClick={() => handlePurgeDeleted(acc)}
                                             className="gm-btn gm-btn-danger gm-btn-sm"
                                         >
                                             永久删除

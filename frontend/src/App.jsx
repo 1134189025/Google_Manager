@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     Users,
     UserPlus,
     ShieldCheck,
     CheckCircle2,
     Moon,
-    Sun
+    Sun,
+    Settings
 } from 'lucide-react';
 
 // 导入服务和组件
@@ -13,6 +14,7 @@ import api from './services/api';
 import AccountListView from './components/AccountListView';
 import ImportView from './components/ImportView';
 import EditModal from './components/EditModal';
+import BrowserSettingsDialog from './components/BrowserSettingsDialog';
 import { normalizePhoneNumber } from './utils/phoneUtils';
 import { normalizeSmsUrlInput } from './utils/smsUtils';
 import { normalizeMultiValueValue, splitGroupNameValues } from './utils/multiValueField';
@@ -35,6 +37,22 @@ const App = () => {
 
     // Undo state
     const [deletedAccounts, setDeletedAccounts] = useState([]);
+
+    // 账号浏览器设置弹窗；首次打开浏览器时由列表页等待其结果（是否已保存）
+    const [browserSettingsDialog, setBrowserSettingsDialog] = useState({ isOpen: false, firstRun: false });
+    const browserSettingsResolveRef = useRef(null);
+
+    const openBrowserSettings = useCallback(({ firstRun = false } = {}) => new Promise(resolve => {
+        browserSettingsResolveRef.current?.(false);
+        browserSettingsResolveRef.current = resolve;
+        setBrowserSettingsDialog({ isOpen: true, firstRun });
+    }), []);
+
+    const closeBrowserSettings = useCallback((saved) => {
+        setBrowserSettingsDialog({ isOpen: false, firstRun: false });
+        browserSettingsResolveRef.current?.(saved === true);
+        browserSettingsResolveRef.current = null;
+    }, []);
 
 
     // 暗色模式状态
@@ -429,6 +447,13 @@ const App = () => {
 
                 <div className="side-nav-footer">
                     <button
+                        onClick={() => openBrowserSettings()}
+                        className="gm-icon-btn"
+                        title="账号浏览器设置"
+                    >
+                        <Settings size={18} />
+                    </button>
+                    <button
                         onClick={() => setDarkMode(!darkMode)}
                         className="gm-icon-btn"
                         title={darkMode ? '切换亮色模式' : '切换暗色模式'}
@@ -464,6 +489,8 @@ const App = () => {
                         onInlineEditMany={handleInlineEditMany}
                         onRefreshAccounts={() => loadAccounts()}
                         loading={loading}
+                        onNotify={showNotification}
+                        openBrowserSettings={openBrowserSettings}
                     />
                 ) : (
                     <ImportView onImport={handleImport} onCancel={() => setView('list')} importing={importing} />
@@ -488,6 +515,13 @@ const App = () => {
                 account={editingAccount}
                 onClose={() => setEditingAccount(null)}
                 onSubmit={handleUpdate}
+            />
+
+            <BrowserSettingsDialog
+                isOpen={browserSettingsDialog.isOpen}
+                firstRun={browserSettingsDialog.firstRun}
+                onClose={closeBrowserSettings}
+                onNotify={showNotification}
             />
 
         </div>
