@@ -700,6 +700,7 @@ const AccountListView = ({
                     onDelete={onDelete}
                     copyToClipboard={copyToClipboard}
                     copyAllInfo={copyAllInfo}
+                    copyPhoneWithSmsUrl={copyPhoneWithSmsUrl}
                     openHistoryDrawer={openHistoryDrawer}
                     twoFACodes={twoFACodes}
                     smsCodes={smsCodes}
