@@ -9,6 +9,14 @@ import type {
   SmsCodeResult,
   ExportConfig,
   BackupInfo,
+  BrowserStatus,
+  BrowserStatusMap,
+  OpenBrowserResult,
+  BrowserSettings,
+  BrowserSettingsInput,
+  ClearBrowserCacheResult,
+  DeleteBrowserProfilesResult,
+  BrowserUsage,
 } from '../types';
 import { snakeToCamel, camelToSnake } from '../utils';
 
@@ -199,6 +207,85 @@ export class TauriAdapter implements ApiAdapter {
 
   async restoreBackup(backupName: string): Promise<void> {
     await this.invokeCommand('restore_backup', { backupName });
+  }
+
+  // ─── 账号独立浏览器 ───────────────────────────────────────────────
+
+  async openAccountBrowser(accountId: number): Promise<OpenBrowserResult> {
+    const result = await this.invokeCommand<any>('open_account_browser', { accountId });
+    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
+    const allowed = ['launched', 'focused', 'new_window'];
+    const action = String(data.action ?? 'launched');
+    return {
+      action: (allowed.includes(action) ? action : 'launched') as OpenBrowserResult['action'],
+      firstLaunch: data.firstLaunch === true,
+    };
+  }
+
+  /**
+   * 状态表以原始邮箱为键：邮箱里可能有下划线，
+   * 因此这里不能用 snakeToCamel，只校验值。
+   */
+  async getBrowserStatuses(emails: string[]): Promise<BrowserStatusMap> {
+    if (emails.length === 0) return {};
+    const result = await this.invokeCommand<Record<string, unknown>>('get_browser_statuses', { emails });
+    const allowed: BrowserStatus[] = ['none', 'created', 'running'];
+    const statuses: BrowserStatusMap = {};
+    for (const [email, value] of Object.entries(result || {})) {
+      const status = String(value) as BrowserStatus;
+      statuses[email] = allowed.includes(status) ? status : 'none';
+    }
+    return statuses;
+  }
+
+  async clearBrowserCache(accountIds: number[] | null): Promise<ClearBrowserCacheResult> {
+    const result = await this.invokeCommand<any>('clear_browser_cache', {
+      accountIds: accountIds || null,
+    });
+    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
+    return {
+      cleared: Number(data.cleared ?? 0),
+      skippedRunning: Number(data.skippedRunning ?? 0),
+      freedBytes: Number(data.freedBytes ?? 0),
+    };
+  }
+
+  async deleteBrowserProfiles(emails: string[]): Promise<DeleteBrowserProfilesResult> {
+    if (emails.length === 0) return { deleted: 0, skipped: 0 };
+    const result = await this.invokeCommand<any>('delete_browser_profiles', { emails });
+    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
+    return {
+      deleted: Number(data.deleted ?? 0),
+      skipped: Number(data.skipped ?? 0),
+    };
+  }
+
+  async getBrowserSettings(): Promise<BrowserSettings> {
+    const result = await this.invokeCommand<any>('get_browser_settings');
+    return snakeToCamel<BrowserSettings>(result || {});
+  }
+
+  async saveBrowserSettings(settings: BrowserSettingsInput): Promise<BrowserSettings> {
+    const result = await this.invokeCommand<any>('save_browser_settings', {
+      settings: {
+        browserPath: settings.browserPath || null,
+        profilesRoot: settings.profilesRoot || null,
+      },
+    });
+    return snakeToCamel<BrowserSettings>(result || {});
+  }
+
+  async getBrowserUsage(): Promise<BrowserUsage> {
+    const result = await this.invokeCommand<any>('get_browser_usage');
+    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
+    return {
+      profiles: Number(data.profiles ?? 0),
+      totalBytes: Number(data.totalBytes ?? 0),
+    };
+  }
+
+  async openBrowserProfileDir(accountId: number): Promise<void> {
+    await this.invokeCommand('open_browser_profile_dir', { accountId });
   }
 }
 

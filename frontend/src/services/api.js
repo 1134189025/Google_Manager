@@ -233,6 +233,92 @@ const api = {
             console.error('Failed to export accounts:', error);
             return { success: false, message: getErrorMessage(error) };
         }
+    },
+
+    // ─── 账号独立浏览器 ───────────────────────────────────────────
+
+    // 打开账号浏览器：未运行则启动，运行中则切到已有窗口
+    async openAccountBrowser(accountId) {
+        try {
+            const result = await adapter.openAccountBrowser(accountId);
+            return { success: true, data: result };
+        } catch (error) {
+            console.error('Failed to open account browser:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // 查询配置目录状态（键为原始邮箱）
+    async getBrowserStatuses(emails) {
+        try {
+            const statuses = await adapter.getBrowserStatuses(emails);
+            return { success: true, data: statuses };
+        } catch (error) {
+            console.error('Failed to get browser statuses:', error);
+            return { success: false, data: {}, message: getErrorMessage(error) };
+        }
+    },
+
+    // 清理缓存：accountIds 为 null 时清理全部配置
+    async clearBrowserCache(accountIds = null) {
+        try {
+            const result = await adapter.clearBrowserCache(accountIds);
+            return { success: true, data: result };
+        } catch (error) {
+            console.error('Failed to clear browser cache:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // 按邮箱删除配置目录（仍被其他记录使用或正在运行的会跳过）
+    async deleteBrowserProfiles(emails) {
+        try {
+            const result = await adapter.deleteBrowserProfiles(emails);
+            return { success: true, data: result };
+        } catch (error) {
+            console.error('Failed to delete browser profiles:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getBrowserSettings() {
+        try {
+            const settings = await adapter.getBrowserSettings();
+            return { success: true, data: settings };
+        } catch (error) {
+            console.error('Failed to get browser settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async saveBrowserSettings(settings) {
+        try {
+            const saved = await adapter.saveBrowserSettings(settings);
+            return { success: true, data: saved };
+        } catch (error) {
+            console.error('Failed to save browser settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getBrowserUsage() {
+        try {
+            const usage = await adapter.getBrowserUsage();
+            return { success: true, data: usage };
+        } catch (error) {
+            console.error('Failed to get browser usage:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async openBrowserProfileDir(accountId) {
+        try {
+            await adapter.openBrowserProfileDir(accountId);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to open browser profile dir:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
     }
 };
 

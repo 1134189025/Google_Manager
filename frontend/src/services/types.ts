@@ -67,6 +67,53 @@ export interface BackupInfo {
   checksum?: string | null;
 }
 
+/**
+ * 账号独立浏览器的配置目录状态：
+ * - none     还没有配置目录（从未打开过）
+ * - created  有配置目录，浏览器未运行
+ * - running  浏览器正在运行
+ */
+export type BrowserStatus = 'none' | 'created' | 'running';
+
+/** 以邮箱为键的状态表（键是原始邮箱，不能做大小写/命名转换） */
+export type BrowserStatusMap = Record<string, BrowserStatus>;
+
+export interface OpenBrowserResult {
+  action: 'launched' | 'focused' | 'new_window';
+  firstLaunch: boolean;
+}
+
+export interface BrowserSettings {
+  browserPath: string | null;
+  detectedBrowserPath: string | null;
+  effectiveBrowserPath: string | null;
+  profilesRoot: string | null;
+  defaultProfilesRoot: string;
+  effectiveProfilesRoot: string;
+  configured: boolean;
+}
+
+export interface BrowserSettingsInput {
+  browserPath: string | null;
+  profilesRoot: string | null;
+}
+
+export interface ClearBrowserCacheResult {
+  cleared: number;
+  skippedRunning: number;
+  freedBytes: number;
+}
+
+export interface DeleteBrowserProfilesResult {
+  deleted: number;
+  skipped: number;
+}
+
+export interface BrowserUsage {
+  profiles: number;
+  totalBytes: number;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -149,4 +196,12 @@ export interface ApiAdapter {
     search: string | null,
     config: ExportConfig,
   ): Promise<string>;
+  openAccountBrowser(accountId: number): Promise<OpenBrowserResult>;
+  getBrowserStatuses(emails: string[]): Promise<BrowserStatusMap>;
+  clearBrowserCache(accountIds: number[] | null): Promise<ClearBrowserCacheResult>;
+  deleteBrowserProfiles(emails: string[]): Promise<DeleteBrowserProfilesResult>;
+  getBrowserSettings(): Promise<BrowserSettings>;
+  saveBrowserSettings(settings: BrowserSettingsInput): Promise<BrowserSettings>;
+  getBrowserUsage(): Promise<BrowserUsage>;
+  openBrowserProfileDir(accountId: number): Promise<void>;
 }

@@ -232,3 +232,98 @@ describe('手机接码地址（smsUrl）契约', () => {
     expect((await adapter.fetchSmsCode(1)).status).toBe('unparsable');
   });
 });
+
+describe('账号独立浏览器命令契约', () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+  });
+
+  it('openAccountBrowser 传 camelCase 的 accountId，结果转成前端契约', async () => {
+    mockedInvoke.mockResolvedValue({ action: 'launched', first_launch: true } as never);
+    const result = await new TauriAdapter().openAccountBrowser(7);
+
+    expect(mockedInvoke).toHaveBeenCalledWith('open_account_browser', { accountId: 7 });
+    expect(result).toEqual({ action: 'launched', firstLaunch: true });
+  });
+
+  it('openAccountBrowser 未知 action 回退为 launched', async () => {
+    mockedInvoke.mockResolvedValue({ action: 'weird' } as never);
+    const result = await new TauriAdapter().openAccountBrowser(1);
+    expect(result).toEqual({ action: 'launched', firstLaunch: false });
+  });
+
+  it('getBrowserStatuses 保留邮箱原样作为键（含下划线），非法状态回退为 none', async () => {
+    mockedInvoke.mockResolvedValue({
+      'rec_user@gmail.com': 'running',
+      'Plain@Gmail.com': 'created',
+      'x@gmail.com': 'bogus',
+    } as never);
+    const emails = ['rec_user@gmail.com', 'Plain@Gmail.com', 'x@gmail.com'];
+    const result = await new TauriAdapter().getBrowserStatuses(emails);
+
+    expect(mockedInvoke).toHaveBeenCalledWith('get_browser_statuses', { emails });
+    expect(result).toEqual({
+      'rec_user@gmail.com': 'running',
+      'Plain@Gmail.com': 'created',
+      'x@gmail.com': 'none',
+    });
+  });
+
+  it('getBrowserStatuses 空列表不发起调用', async () => {
+    expect(await new TauriAdapter().getBrowserStatuses([])).toEqual({});
+    expect(mockedInvoke).not.toHaveBeenCalled();
+  });
+
+  it('clearBrowserCache 顶层 accountIds 为 camelCase，null 表示全部', async () => {
+    mockedInvoke.mockResolvedValue({ cleared: 2, skipped_running: 1, freed_bytes: 2048 } as never);
+    const adapter = new TauriAdapter();
+
+    const result = await adapter.clearBrowserCache([1, 2]);
+    expect(mockedInvoke).toHaveBeenCalledWith('clear_browser_cache', { accountIds: [1, 2] });
+    expect(result).toEqual({ cleared: 2, skippedRunning: 1, freedBytes: 2048 });
+
+    await adapter.clearBrowserCache(null);
+    expect(mockedInvoke).toHaveBeenLastCalledWith('clear_browser_cache', { accountIds: null });
+  });
+
+  it('saveBrowserSettings 顶层 settings、嵌套字段为 snake_case，空串转 null', async () => {
+    mockedInvoke.mockResolvedValue({
+      browser_path: null,
+      detected_browser_path: 'C:\\chrome.exe',
+      effective_browser_path: 'C:\\chrome.exe',
+      profiles_root: 'E:\\GoogleManagerProfiles',
+      default_profiles_root: 'C:\\Local\\googlemanager\\profiles',
+      effective_profiles_root: 'E:\\GoogleManagerProfiles',
+      configured: true,
+    } as never);
+
+    const result = await new TauriAdapter().saveBrowserSettings({
+      browserPath: '',
+      profilesRoot: 'E:\\GoogleManagerProfiles',
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith('save_browser_settings', {
+      settings: { browser_path: null, profiles_root: 'E:\\GoogleManagerProfiles' },
+    });
+    expect(result).toMatchObject({
+      detectedBrowserPath: 'C:\\chrome.exe',
+      effectiveProfilesRoot: 'E:\\GoogleManagerProfiles',
+      configured: true,
+    });
+  });
+
+  it('deleteBrowserProfiles / getBrowserUsage / openBrowserProfileDir 参数与结果转换', async () => {
+    const adapter = new TauriAdapter();
+
+    mockedInvoke.mockResolvedValue({ deleted: 1, skipped: 1 } as never);
+    expect(await adapter.deleteBrowserProfiles(['a@gmail.com'])).toEqual({ deleted: 1, skipped: 1 });
+    expect(mockedInvoke).toHaveBeenLastCalledWith('delete_browser_profiles', { emails: ['a@gmail.com'] });
+
+    mockedInvoke.mockResolvedValue({ profiles: 3, total_bytes: 1024 } as never);
+    expect(await adapter.getBrowserUsage()).toEqual({ profiles: 3, totalBytes: 1024 });
+
+    mockedInvoke.mockResolvedValue(undefined as never);
+    await adapter.openBrowserProfileDir(9);
+    expect(mockedInvoke).toHaveBeenLastCalledWith('open_browser_profile_dir', { accountId: 9 });
+  });
+});
