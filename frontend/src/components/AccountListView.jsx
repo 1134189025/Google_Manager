@@ -235,6 +235,20 @@ const AccountListView = ({
                 if (!saved) return;
             }
 
+            // 复制失败不能影响打开浏览器
+            const copyEmail = async () => {
+                try {
+                    await copyToClipboard(acc.email, '邮箱');
+                } catch (error) {
+                    console.warn('复制邮箱失败:', error);
+                }
+            };
+
+            // 预计是首次打开（还没有配置目录）时，先复制邮箱再启动：
+            // 浏览器窗口一出现就会抢走焦点，之后写剪贴板会失败
+            const expectFirstLaunch = (browserStatuses[acc.email] || 'none') === 'none';
+            if (expectFirstLaunch) await copyEmail();
+
             const result = await api.openAccountBrowser(acc.id);
             if (!result.success) {
                 alert(result.message || '打开浏览器失败');
@@ -242,7 +256,7 @@ const AccountListView = ({
             }
 
             if (result.data?.firstLaunch) {
-                await copyToClipboard(acc.email, '邮箱');
+                if (!expectFirstLaunch) await copyEmail();
                 onNotify?.('已打开 Google 登录页并复制邮箱；密码、2FA 码和短信码可在表格里点击复制');
             }
 
@@ -252,7 +266,7 @@ const AccountListView = ({
         } finally {
             setBrowserOpening(acc.id, false);
         }
-    }, [copyToClipboard, onNotify, openBrowserSettings, refreshBrowserStatus, setBrowserOpening]);
+    }, [browserStatuses, copyToClipboard, onNotify, openBrowserSettings, refreshBrowserStatus, setBrowserOpening]);
 
     // 可复用列的最近 5 条值（用于行内编辑自动补全）
     const accountRecentValuesByField = useMemo(() => {

@@ -593,8 +593,9 @@ mod win {
     use std::path::Path;
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, FindWindowExW, GetClassNameW, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible, SetForegroundWindow, ShowWindow, HWND_MESSAGE, SW_RESTORE,
+        EnumWindows, FindWindowExW, GetClassNameW, GetWindow, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER, HWND_MESSAGE, SW_MINIMIZE,
+        SW_RESTORE,
     };
 
     const MESSAGE_WINDOW_CLASS: &str = "Chrome_MessageWindow";
@@ -638,6 +639,11 @@ mod win {
         if pid != ctx.pid || IsWindowVisible(hwnd) == 0 {
             return 1;
         }
+        // 跳过有所有者的窗口：「要恢复页面吗？」等气泡也是 Chrome_WidgetWin_1，
+        // 且 Z 序在浏览器窗口之上；真正的浏览器窗口没有所有者
+        if !GetWindow(hwnd, GW_OWNER).is_null() {
+            return 1;
+        }
         let mut buf = [0u16; 64];
         let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
         if len > 0 && String::from_utf16_lossy(&buf[..len as usize]) == BROWSER_WINDOW_CLASS {
@@ -648,7 +654,7 @@ mod win {
         1
     }
 
-    /// 把浏览器进程最上层的可见窗口还原并切到前台；没有可见窗口时返回 false
+    /// 把浏览器进程最上层的可见主窗口还原并切到前台；没有可见窗口时返回 false
     pub fn focus_browser_window(pid: u32) -> bool {
         let mut ctx = FindContext {
             pid,
@@ -665,7 +671,10 @@ mod win {
                 ShowWindow(ctx.found, SW_RESTORE);
             }
             if SetForegroundWindow(ctx.found) == 0 {
-                log::warn!("切换浏览器窗口到前台失败（可能被系统焦点规则拦截）");
+                // 系统焦点规则拒绝时（例如管理器本身不在前台），
+                // 最小化后再还原会让窗口重新激活到前台（已在本机实测）
+                ShowWindow(ctx.found, SW_MINIMIZE);
+                ShowWindow(ctx.found, SW_RESTORE);
             }
         }
         true

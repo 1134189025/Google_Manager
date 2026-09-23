@@ -145,17 +145,36 @@ describe('AccountListView 打开浏览器与删除配置', () => {
         fireEvent.click(browserButtonOf('user1@gmail.com'));
 
         await waitFor(() => expect(mockApi.openAccountBrowser).toHaveBeenCalledWith(1));
-        await waitFor(() => expect(props.copyToClipboard).toHaveBeenCalledWith('user1@gmail.com', '邮箱'));
-        expect(props.onNotify).toHaveBeenCalledWith(expect.stringContaining('登录页'));
+        await waitFor(() => expect(props.onNotify).toHaveBeenCalledWith(expect.stringContaining('登录页')));
+        expect(props.copyToClipboard).toHaveBeenCalledTimes(1);
+        expect(props.copyToClipboard).toHaveBeenCalledWith('user1@gmail.com', '邮箱');
+        // 浏览器窗口会抢走焦点，必须在启动之前写剪贴板
+        expect(props.copyToClipboard.mock.invocationCallOrder[0])
+            .toBeLessThan(mockApi.openAccountBrowser.mock.invocationCallOrder[0]);
         expect(props.openBrowserSettings).not.toHaveBeenCalled();
     });
 
-    it('非首次打开不复制邮箱', async () => {
+    it('已有配置目录的账号打开时不复制邮箱', async () => {
+        mockApi.getBrowserStatuses.mockResolvedValue({ success: true, data: { 'user2@gmail.com': 'created' } });
         const props = baseProps();
         render(<AccountListView {...props} />);
+        await waitFor(() => expect(browserButtonOf('user2@gmail.com')).toHaveAttribute('data-status', 'created'));
+
         fireEvent.click(browserButtonOf('user2@gmail.com'));
         await waitFor(() => expect(mockApi.openAccountBrowser).toHaveBeenCalledWith(2));
         expect(props.copyToClipboard).not.toHaveBeenCalled();
+    });
+
+    it('状态过期（后端报告首次打开）时启动后补复制邮箱', async () => {
+        mockApi.getBrowserStatuses.mockResolvedValue({ success: true, data: { 'user2@gmail.com': 'created' } });
+        mockApi.openAccountBrowser.mockResolvedValue({ success: true, data: { action: 'launched', firstLaunch: true } });
+        const props = baseProps();
+        render(<AccountListView {...props} />);
+        await waitFor(() => expect(browserButtonOf('user2@gmail.com')).toHaveAttribute('data-status', 'created'));
+
+        fireEvent.click(browserButtonOf('user2@gmail.com'));
+        await waitFor(() => expect(props.copyToClipboard).toHaveBeenCalledWith('user2@gmail.com', '邮箱'));
+        expect(props.copyToClipboard).toHaveBeenCalledTimes(1);
     });
 
     it('未确认过配置目录：先弹设置，取消则不打开', async () => {
@@ -179,6 +198,15 @@ describe('AccountListView 打开浏览器与删除配置', () => {
 
         await waitFor(() => expect(mockApi.openAccountBrowser).toHaveBeenCalledWith(1));
         expect(props.openBrowserSettings).toHaveBeenCalledWith({ firstRun: true });
+    });
+
+    it('复制邮箱失败不影响打开浏览器', async () => {
+        const props = { ...baseProps(), copyToClipboard: vi.fn().mockRejectedValue(new Error('no clipboard')) };
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        render(<AccountListView {...props} />);
+
+        fireEvent.click(browserButtonOf('user1@gmail.com'));
+        await waitFor(() => expect(mockApi.openAccountBrowser).toHaveBeenCalledWith(1));
     });
 
     it('打开失败时提示后端给出的原因', async () => {
