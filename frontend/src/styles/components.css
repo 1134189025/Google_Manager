@@ -274,6 +274,44 @@
   border-collapse: collapse;
 }
 
+/* ---------- 表格列宽：窄窗口下按优先级隐藏次要列 ----------
+   固定列宽之和（备注除外）约 1236px，备注列不设宽度、占用其余空间（至少约 110px）。
+   容器变窄时依次隐藏：导入时间 → 年份与国家 → 恢复邮箱 → 序号 → 标签，
+   最窄约 846px，对应窗口最小宽度 1024。被隐藏的字段仍可在编辑弹窗中查看与修改。 */
+.gm-table-wrap {
+  container: gm-table / inline-size;
+}
+
+@container gm-table (max-width: 1345px) {
+  .gm-col-created { display: none; }
+}
+
+@container gm-table (max-width: 1249px) {
+  .gm-col-year,
+  .gm-col-country { display: none; }
+}
+
+@container gm-table (max-width: 1105px) {
+  .gm-col-recovery { display: none; }
+}
+
+@container gm-table (max-width: 985px) {
+  .gm-col-id { display: none; }
+}
+
+@container gm-table (max-width: 941px) {
+  .gm-col-tags { display: none; }
+}
+
+/* 窄列收紧左右内边距（需高于下方 th / td 的通用 padding） */
+.gm-table th.gm-col-year,
+.gm-table td.gm-col-year,
+.gm-table th.gm-col-country,
+.gm-table td.gm-col-country,
+.gm-table td.gm-col-actions {
+  padding-inline: 4px;
+}
+
 .gm-table thead th {
   background: var(--bg-tertiary);
   color: var(--text-secondary);

@@ -37,7 +37,7 @@ const BrowserButton = ({ account, status, opening, onOpen }) => {
             onMouseDown={(e) => e.stopPropagation()}
             className="gm-icon-btn gm-browser-btn"
             data-status={browserStatus}
-            style={{ width: 28, height: 28 }}
+            style={{ width: 26, height: 26 }}
             title={opening ? '正在打开浏览器…' : BROWSER_STATUS_TITLES[browserStatus]}
             aria-label={`打开浏览器（${BROWSER_STATUS_LABELS[browserStatus]}）`}
             disabled={opening}
@@ -592,8 +592,9 @@ const AccountTable = ({
     };
     return (
         <div className="gm-table-wrap">
+            {/* 列宽与窄窗口下按优先级隐藏的列见 components.css「表格列宽」 */}
             <div className="overflow-x-auto">
-                <table className="gm-table w-full min-w-[1400px] text-left table-fixed">
+                <table className="gm-table w-full text-left table-fixed">
                     <thead>
                         <tr>
                             <th className="px-2 py-2.5 !text-center w-[36px]">
@@ -606,19 +607,20 @@ const AccountTable = ({
                                     style={{ accentColor: 'var(--primary)' }}
                                 />
                             </th>
-                            {renderSortableHeader('序号', 'id', 'px-2 py-2.5 !text-center w-[44px]', 'center')}
+                            {renderSortableHeader('序号', 'id', 'gm-col-id px-2 py-2.5 !text-center w-[44px]', 'center')}
                             {renderSortableHeader('账号', 'email', 'px-3 py-2.5 w-[190px]')}
-                            {renderSortableHeader('恢复', 'recovery', 'px-2 py-2.5 w-[96px]')}
-                            {renderSortableHeader('2FA', 'secret', 'px-2 py-2.5 w-[76px]')}
-                            {renderSortableHeader('手机', 'phone', 'px-2 py-2.5 w-[84px]')}
-                            <th className="px-2 py-2.5 w-[124px]" title="短信验证码：双击配置接码地址">手机验证码</th>
-                            {renderSortableHeader('标签', 'groupName', 'px-2 py-2.5 w-[140px]')}
-                            {renderSortableHeader('备注', 'remark', 'px-3 py-2.5 w-[220px]')}
+                            {renderSortableHeader('恢复', 'recovery', 'gm-col-recovery px-2 py-2.5 w-[120px]')}
+                            {renderSortableHeader('2FA', 'secret', 'px-2 py-2.5 w-[84px]')}
+                            {renderSortableHeader('手机', 'phone', 'px-2 py-2.5 w-[96px]')}
+                            <th className="px-2 py-2.5 w-[116px]" title="短信验证码：双击配置接码地址">手机验证码</th>
+                            {renderSortableHeader('标签', 'groupName', 'gm-col-tags px-2 py-2.5 w-[96px]')}
+                            {/* 备注不设宽度：占用其余全部空间 */}
+                            {renderSortableHeader('备注', 'remark', 'px-3 py-2.5')}
                             {renderSortableHeader('状态', 'status', 'px-2 py-2.5 !text-center w-[64px]', 'center')}
-                            {renderSortableHeader('年份', 'regYear', 'px-2 py-2.5 !text-center w-[52px]', 'center')}
-                            {renderSortableHeader('国家', 'country', 'px-2 py-2.5 !text-center w-[52px]', 'center')}
-                            <th className="px-2 py-2.5 !text-center w-[128px]">操作</th>
-                            {renderSortableHeader('导入', 'createdAt', 'px-2 py-2.5 w-[104px]')}
+                            {renderSortableHeader('年份', 'regYear', 'gm-col-year px-2 py-2.5 !text-center w-[60px]', 'center')}
+                            {renderSortableHeader('国家', 'country', 'gm-col-country px-2 py-2.5 !text-center w-[84px]', 'center')}
+                            <th className="px-2 py-2.5 !text-center w-[150px]">操作</th>
+                            {renderSortableHeader('导入', 'createdAt', 'gm-col-created px-2 py-2.5 w-[96px]')}
                         </tr>
                     </thead>
                     <tbody>
@@ -655,7 +657,7 @@ const AccountTable = ({
                                     />
                                 </td>
                                 {/* 序号 */}
-                                <td className="px-2 py-2.5 text-center">
+                                <td className="gm-col-id px-2 py-2.5 text-center">
                                     <span
                                         className="inline-flex items-center justify-center w-6 h-6 text-xs font-bold"
                                         style={{
@@ -669,7 +671,7 @@ const AccountTable = ({
                                     </span>
                                 </td>
                                 {/* 账号 */}
-                                <td className="px-3 py-2.5 max-w-[200px] align-top">
+                                <td className="px-3 py-2.5 align-top">
                                     <div className="flex flex-col gap-1">
                                         <div className="flex items-center gap-1">
                                             <div className="flex-1 min-w-0">
@@ -689,8 +691,8 @@ const AccountTable = ({
                                     </div>
                                 </td>
                                 {/* 恢复邮箱 */}
-                                <td className="px-2 py-2.5 max-w-[96px] align-top">
-                                    {renderEditableCell(acc, 'recovery', acc.recovery, '恢复邮箱', '92px', 'recovery@example.com')}
+                                <td className="gm-col-recovery px-2 py-2.5 align-top">
+                                    {renderEditableCell(acc, 'recovery', acc.recovery, '恢复邮箱', '100%', 'recovery@example.com')}
                                 </td>
                                 {/* 2FA密钥 */}
                                 <td className="px-2 py-2.5 align-top">
@@ -705,7 +707,7 @@ const AccountTable = ({
                                     {renderSmsCell(acc)}
                                 </td>
                                 {/* 标签 */}
-                                <td className="px-2 py-2.5 align-top">
+                                <td className="gm-col-tags px-2 py-2.5 align-top">
                                     {renderGroupNameCell(acc)}
                                 </td>
                                 {/* 备注 */}
@@ -725,15 +727,15 @@ const AccountTable = ({
                                     </div>
                                 </td>
                                 {/* 年份 */}
-                                <td className="px-2 py-2.5 text-center align-top">
-                                    {renderEditableCell(acc, 'regYear', acc.regYear, '注册年份', '50px')}
+                                <td className="gm-col-year px-2 py-2.5 text-center align-top">
+                                    {renderEditableCell(acc, 'regYear', acc.regYear, '注册年份', '100%')}
                                 </td>
                                 {/* 国家 */}
-                                <td className="px-2 py-2.5 text-center align-top">
-                                    {renderEditableCell(acc, 'country', acc.country, '国家', '50px')}
+                                <td className="gm-col-country px-2 py-2.5 text-center align-top">
+                                    {renderEditableCell(acc, 'country', acc.country, '国家', '100%')}
                                 </td>
                                 {/* 操作 */}
-                                <td className="px-2 py-2.5">
+                                <td className="gm-col-actions px-2 py-2.5">
                                     <div className="flex items-center justify-center gap-0.5">
                                         {onOpenBrowser && (
                                             <BrowserButton
@@ -743,22 +745,22 @@ const AccountTable = ({
                                                 onOpen={onOpenBrowser}
                                             />
                                         )}
-                                        <button onClick={() => onEdit(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 28, height: 28 }} title="编辑">
+                                        <button onClick={() => onEdit(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="编辑">
                                             <Edit3 size={15} />
                                         </button>
-                                        <button onClick={() => onDelete(acc.id)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 28, height: 28 }} title="删除">
+                                        <button onClick={() => onDelete(acc.id)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="删除">
                                             <Trash2 size={15} />
                                         </button>
-                                        <button onClick={() => copyAllInfo(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 28, height: 28 }} title="复制全部信息">
+                                        <button onClick={() => copyAllInfo(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="复制全部信息">
                                             <Copy size={15} />
                                         </button>
-                                        <button onClick={() => copyPhoneWithSmsUrl(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 28, height: 28 }} title="复制号码与接码地址" disabled={!acc.smsUrl}>
+                                        <button onClick={() => copyPhoneWithSmsUrl(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="复制号码与接码地址" disabled={!acc.smsUrl}>
                                             <Link2 size={15} />
                                         </button>
                                     </div>
                                 </td>
                                 {/* 导入时间 */}
-                                <td className="px-2 py-2.5 align-top">
+                                <td className="gm-col-created px-2 py-2.5 align-top">
                                     {renderCreatedAtCell(acc.createdAt)}
                                 </td>
                             </tr>

@@ -139,6 +139,19 @@
   }
 }
 
+/* 中等宽度：收窄导航胶囊与页边距，把空间留给账号表格 */
+@media (max-width: 1599px) {
+  .side-nav {
+    inset-inline-start: 12px;
+    width: 84px;
+  }
+
+  .main-wrapper {
+    margin-inline-start: 108px;
+    padding: 28px 20px 40px;
+  }
+}
+
 @media (max-width: 900px) {
   .side-nav {
     inset-inline-start: 10px;
