@@ -40,6 +40,8 @@ pnpm run check:rust
 | 导入文本解析规则 | `frontend/src/utils/importParser.js` |
 | 导出字段与分隔符 | `frontend/src/components/ExportDialog.jsx` |
 | 2FA 验证码逻辑 | `frontend/src/hooks/useTwoFA.js` + `src-tauri/src/totp.rs` |
+| 手机短信验证码 | `frontend/src/hooks/useSmsCodes.js` + `src-tauri/src/sms.rs` |
+| 账号独立浏览器（打开/聚焦/清理） | `src-tauri/src/browser.rs` + `frontend/src/hooks/useBrowserStatus.js` + `BrowserSettingsDialog.jsx` |
 | 数据库查询 / 迁移 / 备份 | `src-tauri/src/database.rs` |
 | Tauri 命令与参数 | `src-tauri/src/commands.rs` + `src-tauri/src/lib.rs` |
 | invoke 参数名转换 | `frontend/src/services/adapters/tauri-adapter.ts` |
@@ -63,6 +65,11 @@ pnpm run check:rust
 6. **数据目录**：`%APPDATA%\googlemanager\`，可用 `GOOGLE_MANAGER_DATA_DIR` 覆盖。WAL 模式下会有 `data.db-wal` / `data.db-shm` 伴生文件。
 
 7. **历史追踪不含敏感字段**：`TRACKED_FIELDS` 刻意排除 `password` / `secret`。
+
+8. **账号浏览器**：配置目录名是邮箱 sha256 前 12 位（改哈希方式会让已有目录失联，有固定值单测）。
+   运行检测靠 Chromium 的 `Chrome_MessageWindow`，路径须反斜杠、无结尾分隔符。
+   浏览器是管理器的子进程：`tauri dev` 重新编译时会连带结束已打开的浏览器，正常关闭管理器则不会。
+   开发调试建议设 `GOOGLE_MANAGER_DATA_DIR`，配置目录会跟着放到 `<数据目录>\profiles`。
 
 ## 已知取舍（刻意未修）
 

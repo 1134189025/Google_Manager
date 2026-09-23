@@ -28,6 +28,7 @@
 - 💾 **本地备份** - 基于 `VACUUM INTO` 的一致性备份，启动时自动备份，保留最近 20 份
 - 📤 **文本导出** - 自定义字段、分隔符、排序与分组，实时预览
 - 📱 **手机验证码** - 账号绑定「手机号 + 接码地址」，列表内实时获取短信验证码（只查当前页、失败退避、验证码不落库）
+- 🌐 **账号独立浏览器** - 每个账号一个独立的 Chrome / Edge 配置，登录状态互不干扰且长期保留；点一下打开，已打开则切到该窗口。支持缓存清理与占用统计（只做会话隔离，不做指纹伪装）
 
 ## 环境要求
 
@@ -71,8 +72,11 @@ pnpm run check:rust    # Rust 编译检查
 | --- | --- |
 | 数据库 | `%APPDATA%\googlemanager\data.db` |
 | 自动备份 | `%APPDATA%\googlemanager\backups\data_*.db` |
+| 账号浏览器配置 | 默认 `%LOCALAPPDATA%\googlemanager\profiles\<邮箱哈希>\`，可在侧栏「账号浏览器设置」中修改 |
 
-可通过环境变量 `GOOGLE_MANAGER_DATA_DIR` 覆盖数据目录。
+可通过环境变量 `GOOGLE_MANAGER_DATA_DIR` 覆盖数据目录（此时浏览器配置默认放在 `<数据目录>\profiles`）。
+
+> 浏览器配置目录不在备份范围内。其中的登录 cookie 由 Windows 加密并绑定当前系统用户，复制到其他电脑或重装系统后需要重新登录。
 
 > 数据库使用 WAL 模式，因此同目录下会同时存在 `data.db-wal` 与 `data.db-shm`。手工备份请连同这两个文件一起复制，或直接复制 `backups/` 下的 `VACUUM INTO` 产物。
 
@@ -84,16 +88,19 @@ Google_Manager/
 │   └── src/
 │       ├── App.jsx               # 应用根组件与全局状态
 │       ├── components/           # 表格、导入、导出、历史抽屉、分页等
-│       ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination
+│       ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination /
+│       │                         # useSmsCodes / useBrowserStatus
 │       ├── services/
 │       │   ├── api.js            # 统一 API 门面
 │       │   └── adapters/         # tauri-adapter（invoke 调用）+ 工厂
-│       └── utils/                # importParser / phoneUtils / multiValueField
+│       └── utils/                # importParser / phoneUtils / multiValueField / smsUtils / browserUtils
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
 │   │   ├── lib.rs                # Tauri 应用入口与命令注册
 │   │   ├── commands.rs           # #[tauri::command] 命令层
 │   │   ├── database.rs           # SQLite 仓储 / 迁移 / 备份 / 导出渲染
+│   │   ├── browser.rs            # 账号独立浏览器（配置目录、启动/聚焦、缓存清理）
+│   │   ├── sms.rs                # 接码地址取短信验证码
 │   │   ├── totp.rs               # TOTP 生成
 │   │   └── app_paths.rs          # 数据目录解析
 │   └── tauri.conf.json
@@ -123,6 +130,7 @@ Tauri 2 的 `#[tauri::command]` 默认按 **camelCase** 匹配 Rust 参数名，
 - 精简为单机自用版：移除登录门禁、加密层、HTTP 服务，以及 CI、部署脚本、e2e 等运维文件
 - 界面改为浮动仪表盘风格，全局使用系统字体；移除「已售出 / 未售出」功能（数据库列保留以兼容旧库）
 - 新增手机验证码列：号码与接码地址绑定、导入解析、实时获取
+- 新增账号独立浏览器：每个账号一个 Chrome / Edge 配置目录，一键打开或切换窗口
 
 完整的早期提交历史请查看上述原仓库。
 

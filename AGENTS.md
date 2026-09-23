@@ -1,6 +1,6 @@
 # AGENTS.md — Google Manager 代码库文档（自用桌面版）
 
-> 自用精简版 · 最后更新 2026-09-18
+> 自用精简版 · 最后更新 2026-09-23
 
 ## 项目定位
 
@@ -10,7 +10,8 @@
 
 - **无登录门禁**：删除了 `auth.rs` 与登录页，打开即用
 - **无加密层**：删除了 `crypto.rs` / `key_manager.rs` / `master.key`，密码与 2FA 密钥**明文**存于本地 SQLite
-- **无 HTTP 服务**：删除了 `http_server.rs` 与 `test-server` feature，不再依赖 actix-web / tokio（tauri 自身仍会传递引入 tokio）
+- **无 HTTP 服务**：删除了 `http_server.rs` 与 `test-server` feature，不再依赖 actix-web；应用不监听任何端口
+  （短信取码用 `reqwest` 发出站请求，`tokio` 只启用 `time` / `sync` 特性）
 
 ## 架构总览
 
@@ -27,9 +28,9 @@
                          ▼
 ┌────────────────────────────────────────────────────────┐
 │                  Tauri/Rust (src-tauri/)               │
-│      lib.rs (Builder + 19 个命令注册)                   │
+│      lib.rs (Builder + 27 个命令注册)                   │
 │              commands.rs（薄包装层）                     │
-│              database.rs（仓储/迁移/备份/导出）            │
+│   database.rs（仓储/迁移/备份/导出）+ browser.rs / sms.rs │
 │                      ↓                                 │
 │                  SQLite (WAL)                          │
 │         %APPDATA%\googlemanager\data.db                │
@@ -44,8 +45,9 @@
 │   ├── App.jsx               # 根组件：全局状态、视图路由、搜索防抖、2FA
 │   ├── components/           # AccountListView / AccountTable / BatchToolbar /
 │   │                         # ImportView / ExportDialog / HistoryDrawer /
-│   │                         # EditModal / Pagination / ActionButton
-│   ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination
+│   │                         # EditModal / Pagination / SmsCodeCell / BrowserSettingsDialog
+│   ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination /
+│   │                         # useSmsCodes / useBrowserStatus
 │   ├── services/
 │   │   ├── api.js            # 统一 API 门面（Facade）
 │   │   ├── types.ts          # ApiAdapter 接口 + 类型定义
@@ -53,7 +55,8 @@
 │   │   └── adapters/
 │   │       ├── index.ts          # 工厂（只有 TauriAdapter）
 │   │       └── tauri-adapter.ts  # invoke 封装 + 参数命名转换
-│   ├── utils/                # importParser / phoneUtils / multiValueField / buildInfo
+│   ├── utils/                # importParser / phoneUtils / multiValueField / buildInfo /
+│   │                         # smsUtils / browserUtils
 │   └── __tests__/            # Vitest 单元测试
 │
 ├── src-tauri/
@@ -66,6 +69,8 @@
 │       ├── lib.rs            # Tauri builder + 命令注册
 │       ├── commands.rs       # #[tauri::command] 命令层
 │       ├── database.rs       # Database struct + 仓储/迁移/备份/导出
+│       ├── browser.rs        # 账号独立浏览器：配置目录、启动/聚焦、缓存清理
+│       ├── sms.rs            # 接码地址取短信验证码（出站请求）
 │       ├── totp.rs           # TOTP 生成（SHA1/6位/30秒）
 │       └── app_paths.rs      # 数据目录解析
 │
@@ -74,13 +79,13 @@
 └── package.json              # 根脚本：dev / build / test
 ```
 
-## 命令清单（`commands.rs`，19 个）
+## 命令清单（`commands.rs`，27 个）
 
 | 命令 | 功能 |
 |------|------|
 | `get_accounts` | 查询列表（search 筛选） |
 | `create_account` | 创建账号（默认 inactive） |
-| `update_account` | 更新账号 + 追踪字段变更 |
+| `update_account` | 更新账号 + 追踪字段变更；邮箱变化时同步重命名浏览器配置目录 |
 | `delete_account` | 软删除账号 |
 | `delete_all_accounts` | 全部软删除（自动先备份） |
 | `get_deleted_accounts` | 查询回收站 |
@@ -97,6 +102,14 @@
 | `batch_import` | 批量导入（单事务） |
 | `export_accounts_text` | 导出文本（自定义字段/分隔符/排序/分组） |
 | `fetch_sms_code` | 按账号的 `sms_url` 实时获取手机短信验证码（网络等待期间不持有数据库锁） |
+| `open_account_browser` | 打开账号浏览器：未运行则启动，运行中则切到已有窗口 |
+| `get_browser_statuses` | 按邮箱批量查询配置目录状态（none / created / running） |
+| `clear_browser_cache` | 清理缓存（`accountIds` 为空表示全部），运行中的跳过 |
+| `delete_browser_profiles` | 按邮箱删除配置目录；仍被账号记录使用或运行中的跳过 |
+| `get_browser_settings` | 读取浏览器程序、配置根目录（含自动检测结果与默认值） |
+| `save_browser_settings` | 校验并保存浏览器设置 |
+| `get_browser_usage` | 统计配置目录数量与总占用 |
+| `open_browser_profile_dir` | 用资源管理器打开账号的配置目录 |
 
 ## 数据库 Schema
 
@@ -119,6 +132,10 @@ deleted_at TEXT                -- 软删除标记
 id, account_id, field_name, old_value, new_value, changed_at
 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 
+-- app_settings 表（键值设置；restore_backup 不覆盖）
+key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT
+-- 已用键：browser.path / browser.profiles_root
+
 -- 索引
 idx_accounts_sold_status
 idx_accounts_email_active  -- UNIQUE ... WHERE deleted_at IS NULL
@@ -134,7 +151,8 @@ idx_accounts_deleted_at
 3. **包管理**：pnpm（前端）、cargo（Rust）
 4. **命名**：前端 camelCase ↔ 后端 snake_case。**Tauri 顶层参数用 camelCase，嵌套载荷用 snake_case** —— 由 `tauri-adapter.ts::prepareInvokeArgs()` 转换
 5. **构建**：Vite 输出到根 `static/`
-6. **数据目录**：`%APPDATA%\googlemanager\`，可用 `GOOGLE_MANAGER_DATA_DIR` 覆盖
+6. **数据目录**：`%APPDATA%\googlemanager\`，可用 `GOOGLE_MANAGER_DATA_DIR` 覆盖；
+   浏览器配置目录另见「账号独立浏览器」
 7. **状态值**：`status` = `"pro"` | `"inactive"`。`sold_status` 为遗留列，界面与命令均不再暴露
 8. **历史追踪**：`database.rs::TRACKED_FIELDS` 只含 `email`/`recovery`/`phone`/`reg_year`/`country`/`group_name`/`remark`（不含 `password`/`secret`）
 
@@ -170,6 +188,32 @@ idx_accounts_deleted_at
 - 请求失败时保留的旧验证码会标注「上次」，倒计时表示「下次刷新」，不是短信有效期
 - 迁移保护：`init_database()` 在改动旧库前会先做一次 `before_migration` 备份，
   备份失败则中止升级；旧备份（无 `sms_url` 列）恢复时按 `NULL` 处理
+
+### 账号独立浏览器
+
+- 一个账号对应一个 Chrome / Edge 配置目录（`--user-data-dir`），只做会话隔离：
+  不做指纹伪装，不用 CDP / 远程调试等自动化接口
+- **目录名**：`sha256(小写(去首尾空格(email)))` 前 12 位十六进制（`browser::profile_key`，有固定值单测守住）。
+  不用 id：「删除全部 → 重新导入」会换 id；不用邮箱原文：Chrome 内部路径很深，易超 260 字符
+- **配置根目录**：设置 `browser.profiles_root` 优先；否则设置了 `GOOGLE_MANAGER_DATA_DIR` 时为
+  `<数据目录>\profiles`；否则 `%LOCALAPPDATA%\googlemanager\profiles`。首次点「打开」前会弹设置确认
+- **运行检测**：Chromium 单实例消息窗口（类名 `Chrome_MessageWindow`，标题为配置目录路径）。
+  `FindWindowExW(HWND_MESSAGE, …)` 即可拿到主进程号；标题须反斜杠、无结尾分隔符（`normalize_path_str`），
+  比较不区分大小写。无内存状态，管理器重启后照样有效。已实测 Chrome 与 Edge
+- **聚焦**：取该进程最上层、**无所有者**的可见 `Chrome_WidgetWin_1`（跳过「要恢复页面吗？」等气泡），
+  最小化则还原；`SetForegroundWindow` 被拒时最小化再还原
+- **启动参数**：`--user-data-dir --no-first-run --no-default-browser-check --window-name=<邮箱>`；
+  首次打开附带 Google 登录页。以 `DETACHED_PROCESS` 启动，正常关闭管理器不影响浏览器
+  （但「结束进程树」会连带结束浏览器，`tauri dev` 重新编译时即如此）
+- **缓存清理**白名单：根层 `GrShaderCache` / `ShaderCache` / `GraphiteDawnCache` / `*Metrics`；
+  `Default` 与 `Profile *` 下 `Cache` / `Code Cache` / `GPUCache` / `Dawn*Cache` / `Service Worker` 缓存。
+  不碰 `Network`（cookie）、`Local Storage`、`IndexedDB`、`optimization_guide_model_store`
+- **删除**：进回收站保留目录；彻底删除时前端询问，后端跳过仍被任意账号记录（含回收站）使用或运行中的目录
+- **改邮箱**：运行中拒绝；目标目录已存在拒绝（不自动合并）；数据库失败则回滚目录名
+- 配置目录**不在备份范围**；cookie 由 Windows 加密并绑定当前系统用户，换机或重装需重新登录
+- 状态轮询 `useBrowserStatus`：只查当前页，3 秒一轮，页面隐藏时暂停；状态表以**原始邮箱**为键，
+  适配器不能对它做 `snakeToCamel`（邮箱里可能有下划线）
+- 首次打开某账号时，前端在**启动前**复制邮箱：浏览器窗口出现会抢走焦点，之后写剪贴板会失败
 
 ### 添加新 API 端点
 
