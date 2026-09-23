@@ -456,6 +456,51 @@ fn record_field_changes(
     Ok(())
 }
 
+// ─── 应用设置（键值表） ───────────────────────────────────────────────
+
+/// app_settings 表结构：init_database 与测试夹具共用
+pub const APP_SETTINGS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+)";
+
+/// 读取设置；未设置时返回 None
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    let mut stmt = conn
+        .prepare_cached("SELECT value FROM app_settings WHERE key = ?1")
+        .map_err(|e| format!("读取设置失败: {}", e))?;
+    let mut rows = stmt.query([key]).map_err(|e| format!("读取设置失败: {}", e))?;
+    match rows.next().map_err(|e| format!("读取设置失败: {}", e))? {
+        Some(row) => row.get(0).map(Some).map_err(|e| format!("读取设置失败: {}", e)),
+        None => Ok(None),
+    }
+}
+
+/// 写入设置；value 为 None 或空白时删除该键（回到默认值）
+pub fn set_setting(conn: &Connection, key: &str, value: Option<&str>) -> Result<(), String> {
+    match value.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+            params![key, value],
+        ),
+        None => conn.execute("DELETE FROM app_settings WHERE key = ?1", [key]),
+    }
+    .map(|_| ())
+    .map_err(|e| format!("保存设置失败: {}", e))
+}
+
+/// 是否还有任意账号记录（含回收站）使用该邮箱，比较时忽略大小写与首尾空格
+pub fn email_in_use(conn: &Connection, email: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE lower(trim(email)) = lower(trim(?1)))",
+        [email],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(|e| format!("查询邮箱占用失败: {}", e))
+}
+
 fn data_dir() -> PathBuf {
     app_paths::data_dir()
 }
@@ -897,6 +942,8 @@ pub fn init_database() -> Result<Connection> {
         [],
     )?;
 
+    conn.execute(APP_SETTINGS_SCHEMA, [])?;
+
     // 数据库迁移：补齐字段（字段已存在时忽略）
     for col in &[
         "phone",
@@ -1324,7 +1371,46 @@ mod tests {
             [],
         )
         .unwrap();
+        conn.execute(APP_SETTINGS_SCHEMA, []).unwrap();
         conn
+    }
+
+    #[test]
+    fn test_settings_roundtrip_and_clear() {
+        let conn = setup_test_db();
+        assert_eq!(get_setting(&conn, "browser.path").unwrap(), None);
+
+        set_setting(&conn, "browser.path", Some("  C:\\chrome.exe  ")).unwrap();
+        assert_eq!(
+            get_setting(&conn, "browser.path").unwrap().as_deref(),
+            Some("C:\\chrome.exe")
+        );
+
+        set_setting(&conn, "browser.path", Some("D:\\edge.exe")).unwrap();
+        assert_eq!(
+            get_setting(&conn, "browser.path").unwrap().as_deref(),
+            Some("D:\\edge.exe")
+        );
+
+        set_setting(&conn, "browser.path", Some("   ")).unwrap();
+        assert_eq!(get_setting(&conn, "browser.path").unwrap(), None);
+
+        set_setting(&conn, "browser.path", Some("x")).unwrap();
+        set_setting(&conn, "browser.path", None).unwrap();
+        assert_eq!(get_setting(&conn, "browser.path").unwrap(), None);
+    }
+
+    #[test]
+    fn test_email_in_use_ignores_case_and_includes_deleted() {
+        let conn = setup_test_db();
+        assert!(!email_in_use(&conn, "user@gmail.com").unwrap());
+        conn.execute(
+            "INSERT INTO accounts (email, password, deleted_at) VALUES ('User@Gmail.com', 'pw', CURRENT_TIMESTAMP)",
+            [],
+        )
+        .unwrap();
+        assert!(email_in_use(&conn, " user@gmail.com ").unwrap());
+        assert!(!email_in_use(&conn, "other@gmail.com").unwrap());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod app_paths;
+mod browser;
 mod commands;
 mod database;
 mod sms;
@@ -51,6 +52,14 @@ pub fn run() {
             commands::batch_import,
             commands::export_accounts_text,
             commands::fetch_sms_code,
+            commands::open_account_browser,
+            commands::get_browser_statuses,
+            commands::clear_browser_cache,
+            commands::delete_browser_profiles,
+            commands::get_browser_settings,
+            commands::save_browser_settings,
+            commands::get_browser_usage,
+            commands::open_browser_profile_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

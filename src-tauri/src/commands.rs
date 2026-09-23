@@ -1,7 +1,9 @@
+use crate::browser;
 use crate::database::{
     self, build_export_accounts_output, Account, AccountHistory, AccountInput, BackupInfo,
     Database, ExportConfig,
 };
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 #[tauri::command]
@@ -23,7 +25,16 @@ pub fn update_account(
     account: AccountInput,
 ) -> Result<Account, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    database::update_account(&conn, id, &account)
+    // 邮箱变化时同步重命名浏览器配置目录；数据库更新失败则改回原名
+    let old = database::get_account_by_id(&conn, id)?;
+    let root = browser::profiles_root(&read_browser_settings(&conn)?);
+    let renamed =
+        browser::rename_for_email_change(&root, &old.email, &account.email, browser::is_running)?;
+    database::update_account(&conn, id, &account).inspect_err(|_| {
+        if let Some(renamed) = &renamed {
+            browser::rollback_rename(renamed);
+        }
+    })
 }
 
 #[tauri::command]
@@ -257,6 +268,170 @@ pub fn export_accounts_text(
     output.push_str(&build_export_accounts_output(accounts, &config));
 
     Ok(output)
+}
+
+// ─── 账号独立浏览器 ─────────────────────────────────────────────────
+// 约定：只在块作用域内持有数据库锁读取设置，启动浏览器、遍历目录等耗时操作前释放
+
+fn read_browser_settings(conn: &rusqlite::Connection) -> Result<browser::BrowserSettings, String> {
+    Ok(browser::BrowserSettings {
+        browser_path: database::get_setting(conn, browser::SETTING_BROWSER_PATH)?,
+        profiles_root: database::get_setting(conn, browser::SETTING_PROFILES_ROOT)?,
+    })
+}
+
+async fn run_blocking<T: Send + 'static>(
+    task: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("后台任务失败: {}", e))
+}
+
+#[tauri::command]
+pub async fn open_account_browser(
+    db: State<'_, Database>,
+    account_id: i64,
+) -> Result<browser::OpenBrowserResult, String> {
+    let (email, settings) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let account = database::get_account_by_id(&conn, account_id)?;
+        (account.email, read_browser_settings(&conn)?)
+    };
+    run_blocking(move || {
+        let browser_path = browser::effective_browser(&settings);
+        browser::open_profile(
+            browser_path.as_deref(),
+            &browser::profiles_root(&settings),
+            &email,
+        )
+    })
+    .await?
+}
+
+#[tauri::command]
+pub fn get_browser_statuses(
+    db: State<Database>,
+    emails: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    let settings = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        read_browser_settings(&conn)?
+    };
+    Ok(browser::statuses(&browser::profiles_root(&settings), &emails))
+}
+
+/// account_ids 为空时清理配置根目录下的全部配置
+#[tauri::command]
+pub async fn clear_browser_cache(
+    db: State<'_, Database>,
+    account_ids: Option<Vec<i64>>,
+) -> Result<browser::ClearCacheResult, String> {
+    let (root, emails) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let root = browser::profiles_root(&read_browser_settings(&conn)?);
+        let emails = match account_ids {
+            Some(ids) => Some(
+                database::query_accounts_by_ids(&conn, &ids)?
+                    .into_iter()
+                    .map(|account| account.email)
+                    .collect::<Vec<_>>(),
+            ),
+            None => None,
+        };
+        (root, emails)
+    };
+    run_blocking(move || {
+        let dirs = match emails {
+            Some(emails) => emails
+                .iter()
+                .map(|email| browser::profile_dir(&root, email))
+                .collect(),
+            None => browser::list_profile_dirs(&root),
+        };
+        browser::clear_profiles_cache(&dirs, browser::is_running)
+    })
+    .await
+}
+
+/// 按邮箱删除配置目录；仍有账号记录（含回收站）使用该邮箱的会跳过
+#[tauri::command]
+pub async fn delete_browser_profiles(
+    db: State<'_, Database>,
+    emails: Vec<String>,
+) -> Result<browser::DeleteProfilesResult, String> {
+    let (root, in_use) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let root = browser::profiles_root(&read_browser_settings(&conn)?);
+        let mut in_use = HashSet::new();
+        for email in &emails {
+            if database::email_in_use(&conn, email)? {
+                in_use.insert(email.clone());
+            }
+        }
+        (root, in_use)
+    };
+    run_blocking(move || {
+        browser::delete_profiles(
+            &root,
+            &emails,
+            |email| in_use.contains(email),
+            browser::is_running,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn get_browser_settings(db: State<Database>) -> Result<browser::BrowserSettingsView, String> {
+    let settings = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        read_browser_settings(&conn)?
+    };
+    Ok(browser::settings_view(&settings))
+}
+
+#[tauri::command]
+pub fn save_browser_settings(
+    db: State<Database>,
+    settings: browser::BrowserSettingsInput,
+) -> Result<browser::BrowserSettingsView, String> {
+    let validated =
+        browser::validate_settings(&settings, &browser::system_default_profiles_root())?;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    database::set_setting(
+        &conn,
+        browser::SETTING_BROWSER_PATH,
+        validated.browser_path.as_deref(),
+    )?;
+    database::set_setting(
+        &conn,
+        browser::SETTING_PROFILES_ROOT,
+        validated.profiles_root.as_deref(),
+    )?;
+    Ok(browser::settings_view(&validated))
+}
+
+#[tauri::command]
+pub async fn get_browser_usage(db: State<'_, Database>) -> Result<browser::BrowserUsage, String> {
+    let root = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        browser::profiles_root(&read_browser_settings(&conn)?)
+    };
+    run_blocking(move || browser::usage(&root)).await
+}
+
+#[tauri::command]
+pub fn open_browser_profile_dir(db: State<Database>, account_id: i64) -> Result<(), String> {
+    let (email, settings) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let account = database::get_account_by_id(&conn, account_id)?;
+        (account.email, read_browser_settings(&conn)?)
+    };
+    browser::open_in_explorer(&browser::profile_dir(
+        &browser::profiles_root(&settings),
+        &email,
+    ))
 }
 
 #[cfg(test)]

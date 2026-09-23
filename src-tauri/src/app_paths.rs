@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-const DATA_DIR_ENV: &str = "GOOGLE_MANAGER_DATA_DIR";
+pub(crate) const DATA_DIR_ENV: &str = "GOOGLE_MANAGER_DATA_DIR";
 
 pub fn resolve_data_dir(env_value: Option<&str>, default_base: Option<PathBuf>) -> PathBuf {
     if let Some(value) = env_value.map(str::trim).filter(|value| !value.is_empty()) {
