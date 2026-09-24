@@ -1,6 +1,6 @@
 [package]
 name = "google-manager"
-version = "0.2.0"
+version = "0.2.1"
 description = "Google 账号管理器 - 自用桌面版"
 authors = ["yynxxxxx", "chengguijin-maker", "1134189025"]
 license = "MIT"
