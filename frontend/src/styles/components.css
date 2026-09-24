@@ -410,7 +410,11 @@
   animation: gmFadeIn 0.2s ease both;
 }
 
+/* 弹窗不超过窗口高度：头部和底部按钮固定，内容区单独滚动 */
 .gm-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
   width: 100%;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -429,7 +433,23 @@
   border-bottom: 1px solid var(--border-light);
 }
 
+.gm-modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.gm-modal-header,
+.gm-modal-footer {
+  flex-shrink: 0;
+}
+
 .gm-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px 20px;
 }
 
