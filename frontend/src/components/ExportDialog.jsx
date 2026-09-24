@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, ChevronUp, ChevronDown, FileText } from 'lucide-react';
+import { formatDbTimestamp } from '../utils/timeUtils';
 
 const DEFAULT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
 
@@ -202,9 +203,9 @@ const ExportDialog = ({
             case 'id':
                 return normalizeFieldValue(account?.id);
             case 'created_at':
-                return normalizeFieldValue(account?.createdAt ?? account?.created_at);
+                return normalizeFieldValue(formatDbTimestamp(account?.createdAt ?? account?.created_at));
             case 'updated_at':
-                return normalizeFieldValue(account?.updatedAt ?? account?.updated_at);
+                return normalizeFieldValue(formatDbTimestamp(account?.updatedAt ?? account?.updated_at));
             default:
                 return '';
         }

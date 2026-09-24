@@ -249,6 +249,54 @@ describe('useInlineEdit Hook', () => {
       expect(onInlineEdit).toHaveBeenCalledWith(1, 'phone', '+8613812345678');
     });
 
+    describe('清空手机号', () => {
+      const SMS_URL = 'https://sms6688.com/api/sms/recordText?token=t&tpl=1';
+      const startClearing = (hookOptions) => {
+        const { result } = renderHook(() => useInlineEdit({ onInlineEdit, allGroups, ...hookOptions }));
+        act(() => {
+          result.current.handleCellDoubleClick({ stopPropagation: vi.fn() }, 1, 'phone', '+8613800001111');
+        });
+        act(() => {
+          result.current.setEditValue('   ');
+        });
+        act(() => {
+          result.current.handleKeyDown({ key: 'Enter', preventDefault: vi.fn() });
+        });
+        return result;
+      };
+
+      it('没有接码地址时直接清除，不再提示「手机号无效」', () => {
+        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+        const result = startClearing({ getAccount: () => ({ id: 1, smsUrl: null }) });
+
+        expect(alertSpy).not.toHaveBeenCalled();
+        expect(onInlineEdit).toHaveBeenCalledWith(1, 'phone', '');
+        expect(result.current.editingCell).toBeNull();
+        alertSpy.mockRestore();
+      });
+
+      it('有接码地址时确认后一并清除', () => {
+        const onInlineEditMany = vi.fn();
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
+
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(onInlineEditMany).toHaveBeenCalledWith(1, { phone: '', smsUrl: '' });
+        confirmSpy.mockRestore();
+      });
+
+      it('取消确认则放弃保存', () => {
+        const onInlineEditMany = vi.fn();
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        const result = startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
+
+        expect(onInlineEditMany).not.toHaveBeenCalled();
+        expect(onInlineEdit).not.toHaveBeenCalled();
+        expect(result.current.editingCell).toBeNull();
+        confirmSpy.mockRestore();
+      });
+    });
+
     it('按 Escape 键取消编辑', () => {
       const { result } = renderHook(() => useInlineEdit({ onInlineEdit, allGroups }));
       const mockEvent = { stopPropagation: vi.fn() };

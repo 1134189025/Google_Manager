@@ -70,7 +70,7 @@ const createDefaultProps = (overrides = {}) => ({
 describe('AccountListView 导出弹窗与参数', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.__TAURI__ = { invoke: vi.fn() };
+    window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
     api.exportAccountsText.mockResolvedValue({ success: true, data: 'mock export result' });
     save.mockResolvedValue(null);
   });
@@ -183,13 +183,13 @@ describe('AccountListView 导出弹窗与参数', () => {
     const user = userEvent.setup();
     const props = createDefaultProps({ search: 'first' });
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    const originalTauri = window.__TAURI__;
+    const originalTauri = window.__TAURI_INTERNALS__;
     const originalCreateObjectURL = URL.createObjectURL;
     const originalRevokeObjectURL = URL.revokeObjectURL;
     const originalCreateElement = document.createElement.bind(document);
     const anchorClick = vi.fn();
 
-    window.__TAURI__ = undefined;
+    window.__TAURI_INTERNALS__ = undefined;
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       writable: true,
@@ -243,7 +243,7 @@ describe('AccountListView 导出弹窗与参数', () => {
         writable: true,
         value: originalRevokeObjectURL,
       });
-      window.__TAURI__ = originalTauri;
+      window.__TAURI_INTERNALS__ = originalTauri;
     }
   });
 });

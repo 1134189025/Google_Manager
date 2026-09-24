@@ -14,6 +14,7 @@ import { useEffect, useRef } from 'react';
 import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
 import { isMultilineField, splitMultiValueLines } from '../utils/multiValueField';
 import { describeSmsUrl } from '../utils/smsUtils';
+import { formatDbTimestamp } from '../utils/timeUtils';
 import SmsCodeCell from './SmsCodeCell';
 
 const BROWSER_STATUS_LABELS = {
@@ -48,7 +49,8 @@ const BrowserButton = ({ account, status, opening, onOpen }) => {
 };
 
 const splitDateTime = (value) => {
-    const raw = String(value || '').trim();
+    // 数据库存的是 UTC，先换算成本机时间再拆分
+    const raw = formatDbTimestamp(value);
     if (!raw) return { date: '-', time: '' };
 
     const normalized = raw.replace('T', ' ');

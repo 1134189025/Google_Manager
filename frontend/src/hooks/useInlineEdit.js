@@ -132,7 +132,20 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
             const currentSmsUrl = normalizeSmsUrlInput(account?.smsUrl || '');
 
             if (field === 'phone') {
-                const nextPhone = phone || (rawInput.trim() ? normalizePhoneNumber(rawInput) : '');
+                // 删空即清除手机号；号码与接码地址是绑定关系，有接码地址时一并确认清除
+                if (!rawInput.trim()) {
+                    if (!editingCell.originalValue) return { patch: {} };
+                    if (currentSmsUrl) {
+                        const confirmed = typeof window !== 'undefined' && typeof window.confirm === 'function'
+                            ? window.confirm('清空手机号后，是否同时清除该账号的接码地址？')
+                            : true;
+                        if (!confirmed) return { cancelled: true };
+                        return { patch: { phone: '', smsUrl: '' } };
+                    }
+                    return { patch: { phone: '' } };
+                }
+
+                const nextPhone = phone || normalizePhoneNumber(rawInput);
                 if (!nextPhone) return { error: '手机号无效，请检查后再保存' };
 
                 const phoneChanged = normalizePhoneNumber(nextPhone) !== normalizePhoneNumber(editingCell.originalValue || '');

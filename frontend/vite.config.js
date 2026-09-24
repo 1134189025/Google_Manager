@@ -12,8 +12,6 @@ const normalizeBasePath = (value) => {
     return withLeadingSlash.endsWith('/') ? withLeadingSlash : `${withLeadingSlash}/`
 }
 
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
 const resolveGitCommit = () => {
     if (process.env.GOOGLE_MANAGER_GIT_SHA) {
         return process.env.GOOGLE_MANAGER_GIT_SHA
@@ -30,15 +28,13 @@ const resolveGitCommit = () => {
     }
 }
 
-const frontendHost = process.env.GOOGLE_MANAGER_FRONTEND_HOST || '0.0.0.0'
+// 开发服务器只给本机的 Tauri 窗口用：默认只监听回环地址，不对局域网暴露
+const frontendHost = process.env.GOOGLE_MANAGER_FRONTEND_HOST || '127.0.0.1'
 const frontendPort = Number(process.env.GOOGLE_MANAGER_FRONTEND_PORT || '5173')
-const apiTarget = process.env.GOOGLE_MANAGER_API_TARGET || 'http://127.0.0.1:3001'
 const basePath = normalizeBasePath(process.env.GOOGLE_MANAGER_BASE_PATH || '/')
-const apiBasePath = process.env.VITE_API_URL || (basePath === '/' ? '/api' : `${basePath.slice(0, -1)}/api`)
 const buildOutDir = process.env.GOOGLE_MANAGER_FRONTEND_BUILD_DIR
     ? path.resolve(process.env.GOOGLE_MANAGER_FRONTEND_BUILD_DIR)
     : path.resolve(__dirname, '../static')
-const allowedHosts = true
 const hmrHost = process.env.GOOGLE_MANAGER_HMR_HOST
 const hmrProtocol = process.env.GOOGLE_MANAGER_HMR_PROTOCOL || 'wss'
 const hmrClientPort = Number(process.env.GOOGLE_MANAGER_HMR_CLIENT_PORT || '443')
@@ -56,27 +52,11 @@ const hmrConfig = hmrHost
     }
     : undefined
 
-const proxy = {
-    '/api': {
-        target: apiTarget,
-        changeOrigin: true,
-    },
-}
-
-if (apiBasePath !== '/api') {
-    proxy[apiBasePath] = {
-        target: apiTarget,
-        changeOrigin: true,
-        rewrite: (requestPath) => requestPath.replace(new RegExp(`^${escapeRegex(apiBasePath)}`), '/api'),
-    }
-}
-
 // https://vitejs.dev/config/
 export default defineConfig({
     plugins: [react()],
     base: basePath,
     define: {
-        'import.meta.env.VITE_API_URL': JSON.stringify(apiBasePath),
         __APP_VERSION__: JSON.stringify(appVersion),
         __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
         __APP_COMMIT_SHA__: JSON.stringify(appCommitSha),
@@ -89,14 +69,11 @@ export default defineConfig({
         host: frontendHost,
         port: frontendPort,
         strictPort: true,
-        allowedHosts,
         ...(hmrConfig ? { hmr: hmrConfig } : {}),
-        proxy,
     },
     preview: {
         host: frontendHost,
         port: frontendPort,
         strictPort: true,
-        allowedHosts,
     },
 })

@@ -5,7 +5,7 @@
   "identifier": "com.googlemanager.app",
   "build": {
     "frontendDist": "../static",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://127.0.0.1:5173",
     "beforeDevCommand": "cd frontend && pnpm run dev",
     "beforeBuildCommand": "cd frontend && pnpm run build"
   },

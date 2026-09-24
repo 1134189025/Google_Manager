@@ -22,10 +22,8 @@ const useTwoFA = (accounts, visibleAccountIds = null) => {
 
     const generate2FACodes = useCallback((accountsList) => {
         const now = Math.floor(Date.now() / 1000);
+        const period = Math.floor(now / 30);
         const remaining = 30 - (now % 30);
-
-        // 如果即将过期（剩余 < 5 秒），强制重新生成
-        const forceRegenerate = remaining < 5;
 
         const newCodes = {};
         accountsList.forEach(acc => {
@@ -34,51 +32,49 @@ const useTwoFA = (accounts, visibleAccountIds = null) => {
             // 过滤明显无效的 secret，避免重复报错阻塞
             if (cleanSecret.length < 16 || !/^[A-Z2-7]+$/.test(cleanSecret)) return;
 
-            const cacheKey = `${acc.id}_${cleanSecret}_${Math.floor(now / 30)}`; // 30 秒一个缓存周期
+            const cacheKey = `${acc.id}_${cleanSecret}_${period}`; // 30 秒一个缓存周期
 
-            // 检查缓存
-            if (!forceRegenerate && codeCache.current.has(cacheKey)) {
-                newCodes[acc.id] = codeCache.current.get(cacheKey);
-                return;
-            }
-
-            try {
-                const code = generateSync({ secret: cleanSecret });
-                const result = { code, expiry: remaining };
-                newCodes[acc.id] = result;
-
-                // 缓存结果（30 秒有效）
-                codeCache.current.set(cacheKey, result);
+            let code = codeCache.current.get(cacheKey);
+            if (code === undefined) {
+                try {
+                    code = generateSync({ secret: cleanSecret });
+                } catch {
+                    // secret 解析失败时静默跳过，避免每次循环打印错误日志
+                    return;
+                }
+                codeCache.current.set(cacheKey, code);
 
                 // 清理旧缓存（保留最近 100 个）
                 if (codeCache.current.size > 100) {
-                    const entries = Array.from(codeCache.current.entries());
-                    entries.slice(0, 50).forEach(([key]) => {
-                        codeCache.current.delete(key);
-                    });
+                    const keys = Array.from(codeCache.current.keys());
+                    keys.slice(0, 50).forEach(key => codeCache.current.delete(key));
                 }
-            } catch {
-                // secret 解析失败时静默跳过，避免每次循环打印错误日志
             }
+
+            // period 记录验证码所属的 30 秒周期，定时器据此判断是否过期
+            newCodes[acc.id] = { code, expiry: remaining, period };
         });
 
         return newCodes;
     }, []);
 
     const generateAll2FACodes = useCallback((accountsList) => {
-        setTwoFACodes(generate2FACodes(accountsList));
+        const next = generate2FACodes(accountsList);
+        // 结果为空时沿用原对象，避免无意义的重渲染
+        setTwoFACodes(prev => (Object.keys(next).length === 0 && Object.keys(prev).length === 0 ? prev : next));
     }, [generate2FACodes]);
 
     useEffect(() => {
+        const clearCodes = () => setTwoFACodes(prev => (Object.keys(prev).length === 0 ? prev : {}));
         if (accounts.length === 0) {
-            setTwoFACodes({});
+            clearCodes();
             return;
         }
 
         // 增量计算：只计算可见页，且仅处理有 secret 的账号
         const accountsToProcess = getAccountsToProcess(accounts).filter(acc => Boolean(acc.secret));
         if (accountsToProcess.length === 0) {
-            setTwoFACodes({});
+            clearCodes();
             return;
         }
 
@@ -87,12 +83,14 @@ const useTwoFA = (accounts, visibleAccountIds = null) => {
         const timer = setInterval(() => {
             setTwoFACodes(prev => {
                 const now = Math.floor(Date.now() / 1000);
+                const period = Math.floor(now / 30);
                 const remaining = 30 - (now % 30);
 
-                // 每 30 秒重新生成一次代码
-                if (remaining === 30) {
-                    const accountsToRegenerate = getAccountsToProcess(accounts).filter(acc => Boolean(acc.secret));
-                    return generate2FACodes(accountsToRegenerate);
+                // 只要有验证码不属于当前 30 秒周期就整体重算。
+                // 不能只在「剩余 30 秒」那一刻判断：电脑睡眠唤醒、窗口最小化导致定时器被节流、
+                // 或某一秒被跳过时都会错过这一刻，界面会继续显示已过期的验证码
+                if (Object.values(prev).some(info => info.period !== period)) {
+                    return generate2FACodes(getAccountsToProcess(accounts).filter(acc => Boolean(acc.secret)));
                 }
 
                 // 仅更新过期时间，不重新计算代码
@@ -110,7 +108,17 @@ const useTwoFA = (accounts, visibleAccountIds = null) => {
             });
         }, 1000);
 
-        return () => clearInterval(timer);
+        // 窗口恢复可见时立即重算，不等下一次定时器
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') return;
+            generateAll2FACodes(getAccountsToProcess(accounts).filter(acc => Boolean(acc.secret)));
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            clearInterval(timer);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, [accounts, generateAll2FACodes, generate2FACodes, getAccountsToProcess]);
 
     return { twoFACodes, generateAll2FACodes };
