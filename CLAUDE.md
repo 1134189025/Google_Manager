@@ -31,6 +31,10 @@ pnpm run test:rust
 pnpm run check:rust
 ```
 
+**发布新版本**：改 4 处版本号（`frontend/package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`），
+新增 `.github/release-notes/v<版本号>.md` 后推送。`.github/workflows/release.yml` 会在 Windows 上跑测试、构建，
+并创建 tag 与 Release（安装版 / MSI / 免安装版）；同名 Release 已存在时跳过。
+
 ## 快速定位
 
 | 我想改… | 去这里 |

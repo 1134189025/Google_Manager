@@ -166,6 +166,13 @@ idx_accounts_deleted_at
 7. **状态值**：`status` = `"pro"` | `"inactive"`。`sold_status` 为遗留列，界面与命令均不再暴露
 8. **历史追踪**：`database.rs::TRACKED_FIELDS` 只含 `email`/`recovery`/`phone`/`reg_year`/`country`/`group_name`/`remark`（不含 `password`/`secret`）
 
+## 发布
+
+`.github/workflows/release.yml`：推送 `.github/release-notes/v<版本号>.md`（或在 Actions 页面手动运行）即触发，
+在 `windows-latest` 上依次跑前端测试、`cargo test`、`pnpm run build`，
+再以 `v<版本号>` 创建 tag 与 Release，上传 `*_x64-setup.exe` / `*_x64_en-US.msi` / `*_x64_portable.exe`。
+版本号取自 `tauri.conf.json`；同名 Release 已存在时跳过。
+
 ## 测试
 
 | 层 | 框架 | 命令 |
