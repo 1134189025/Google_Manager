@@ -22,6 +22,13 @@ const SAMPLE_URL = 'https://sms6688.com/api/sms/recordText?token=a1b2c3d4e5f6071
 const SAMPLE_INPUT = `12025550123|${SAMPLE_URL}`;
 
 describe('normalizeSmsUrlInput / isSmsUrl', () => {
+    it('拒绝主机部分带账号密码或反斜杠的地址（与后端校验一致），查询串里的 @ 不受影响', () => {
+        expect(normalizeSmsUrlInput('https://user:pass@sms6688.com/api?token=x')).toBe('');
+        expect(normalizeSmsUrlInput('https://evil.com\\@sms6688.com/api?token=x')).toBe('');
+        expect(normalizeSmsUrlInput('https://sms6688.com/api?token=x&mail=a@b.com'))
+            .toBe('https://sms6688.com/api?token=x&mail=a@b.com');
+    });
+
     it('接受合法 https 地址并完整保留查询串', () => {
         expect(normalizeSmsUrlInput(`  ${SAMPLE_URL}  `)).toBe(SAMPLE_URL);
         expect(isSmsUrl(SAMPLE_URL)).toBe(true);

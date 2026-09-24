@@ -572,40 +572,62 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn cleanup_old_backups(dir: &Path, keep: usize) -> Result<(), String> {
-    let mut entries: Vec<_> = fs::read_dir(dir)
+/// 启动时的例行备份最多保留份数
+const KEEP_STARTUP_BACKUPS: usize = 10;
+/// 其余备份（删除全部 / 恢复 / 迁移前等保护性备份）最多保留份数
+const KEEP_OTHER_BACKUPS: usize = 20;
+
+/// 是否为启动时的例行备份（文件名形如 `data_<时间>_startup_<纳秒>.db`）
+fn is_startup_backup(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.contains("_startup_"))
+        .unwrap_or(false)
+}
+
+fn remove_backup_files(path: &Path) {
+    if let Err(e) = fs::remove_file(path) {
+        log::warn!("清理旧备份失败 ({}): {}", path.display(), e);
+    }
+    let manifest = path.with_extension("json");
+    if let Err(e) = fs::remove_file(&manifest) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("清理旧备份清单失败 ({}): {}", manifest.display(), e);
+        }
+    }
+}
+
+/// 清理旧备份：例行备份与保护性备份分开计数，
+/// 频繁启动产生的例行备份不会把删除 / 恢复 / 迁移前的备份挤掉
+fn cleanup_old_backups(dir: &Path) -> Result<(), String> {
+    let mut startup = Vec::new();
+    let mut others = Vec::new();
+    for entry in fs::read_dir(dir)
         .map_err(|e| format!("读取备份目录失败: {}", e))?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "db")
-                .unwrap_or(false)
-        })
-        .collect();
-
-    entries.sort_by_key(|entry| {
-        entry
+    {
+        let path = entry.path();
+        if !path.extension().map(|ext| ext == "db").unwrap_or(false) {
+            continue;
+        }
+        let modified = entry
             .metadata()
             .and_then(|m| m.modified())
-            .ok()
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-    });
-    entries.reverse();
-
-    for old in entries.into_iter().skip(keep) {
-        if let Err(e) = fs::remove_file(old.path()) {
-            log::warn!("清理旧备份失败 ({}): {}", old.path().display(), e);
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if is_startup_backup(&path) {
+            startup.push((modified, path));
+        } else {
+            others.push((modified, path));
         }
-        if let Err(e) = fs::remove_file(old.path().with_extension("json")) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!(
-                    "清理旧备份清单失败 ({}): {}",
-                    old.path().with_extension("json").display(),
-                    e
-                );
-            }
+    }
+
+    for (mut group, keep) in [
+        (startup, KEEP_STARTUP_BACKUPS),
+        (others, KEEP_OTHER_BACKUPS),
+    ] {
+        group.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, path) in group.into_iter().skip(keep) {
+            remove_backup_files(&path);
         }
     }
     Ok(())
@@ -621,7 +643,16 @@ pub fn create_backup(conn: &Connection, reason: Option<&str>) -> Result<PathBuf,
         _ => {}
     }
 
-    let dir = backups_dir()?;
+    create_backup_in(conn, &backups_dir()?, reason)
+}
+
+/// 在指定目录创建备份（测试可传临时目录，不依赖全局数据目录）
+fn create_backup_in(
+    conn: &Connection,
+    dir: &Path,
+    reason: Option<&str>,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(dir).map_err(|e| format!("创建备份目录失败: {}", e))?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S%.3f");
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -658,7 +689,7 @@ pub fn create_backup(conn: &Connection, reason: Option<&str>) -> Result<PathBuf,
     )
     .map_err(|e| format!("写入备份清单失败: {}", e))?;
 
-    cleanup_old_backups(&dir, 20)?;
+    cleanup_old_backups(dir)?;
     Ok(backup_path)
 }
 
@@ -708,10 +739,55 @@ pub fn list_backups() -> Result<Vec<BackupInfo>, String> {
     Ok(backups)
 }
 
-/// 读取已 ATTACH 的备份库中 accounts 表的实际列名集合（小写）
-fn backup_account_columns(conn: &Connection) -> Result<std::collections::HashSet<String>, String> {
+/// accounts 表结构（init_database 与旧库迁移共用），`{name}` 为表名
+fn accounts_table_sql(name: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            password TEXT NOT NULL,
+            recovery TEXT,
+            phone TEXT,
+            secret TEXT,
+            sms_url TEXT,
+            reg_year TEXT,
+            country TEXT,
+            group_name TEXT,
+            remark TEXT,
+            status TEXT DEFAULT 'inactive',
+            sold_status TEXT DEFAULT 'unsold',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TEXT
+        )",
+        name
+    )
+}
+
+/// 复制 accounts 数据时的可选列与缺列默认表达式（旧备份 / 旧库可能缺少部分列）
+const ACCOUNT_COPY_COLUMNS: &[(&str, &str)] = &[
+    ("recovery", "NULL"),
+    ("phone", "NULL"),
+    ("secret", "NULL"),
+    ("sms_url", "NULL"),
+    ("reg_year", "NULL"),
+    ("country", "NULL"),
+    ("group_name", "NULL"),
+    ("remark", "NULL"),
+    ("status", "'inactive'"),
+    ("sold_status", "'unsold'"),
+    ("created_at", "CURRENT_TIMESTAMP"),
+    ("updated_at", "CURRENT_TIMESTAMP"),
+    ("deleted_at", "NULL"),
+];
+
+/// 读取指定 schema（main / backup_db）中 accounts 表的实际列名集合（小写）
+fn account_columns(
+    conn: &Connection,
+    schema: &str,
+) -> Result<std::collections::HashSet<String>, String> {
     let mut stmt = conn
-        .prepare("PRAGMA backup_db.table_info(accounts)")
+        .prepare(&format!("PRAGMA {}.table_info(accounts)", schema))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| row.get::<_, String>(1))
@@ -725,6 +801,39 @@ fn backup_account_columns(conn: &Connection) -> Result<std::collections::HashSet
     Ok(columns)
 }
 
+/// 按源表实际列拼出复制语句：`INSERT INTO <target> (...) SELECT ... FROM <source>`，
+/// 源表缺少的可选列用默认表达式补齐；缺少 id / email / password 时报错
+fn build_account_copy_sql(
+    target: &str,
+    source: &str,
+    source_columns: &std::collections::HashSet<String>,
+) -> Result<String, String> {
+    let mut insert_columns: Vec<&str> = Vec::new();
+    let mut select_exprs: Vec<&str> = Vec::new();
+    for required in ["id", "email", "password"] {
+        if !source_columns.contains(required) {
+            return Err(format!("数据缺少必要字段: {}", required));
+        }
+        insert_columns.push(required);
+        select_exprs.push(required);
+    }
+    for (column, fallback) in ACCOUNT_COPY_COLUMNS {
+        insert_columns.push(column);
+        select_exprs.push(if source_columns.contains(*column) {
+            column
+        } else {
+            fallback
+        });
+    }
+    Ok(format!(
+        "INSERT INTO {} ({}) SELECT {} FROM {}",
+        target,
+        insert_columns.join(", "),
+        select_exprs.join(", "),
+        source
+    ))
+}
+
 pub fn restore_backup(conn: &Connection, backup_name: &str) -> Result<(), String> {
     let backup_name = sanitize_backup_name(backup_name)?;
     let backup_path = backups_dir()?.join(&backup_name);
@@ -732,101 +841,84 @@ pub fn restore_backup(conn: &Connection, backup_name: &str) -> Result<(), String
         return Err("备份文件不存在".to_string());
     }
 
-    let backup_conn = Connection::open(&backup_path).map_err(|e| format!("打开备份失败: {}", e))?;
+    check_backup_integrity(&backup_path)?;
+    create_backup(conn, Some("before_restore"))?;
+    restore_from_file(conn, &backup_path)
+}
+
+fn check_backup_integrity(backup_path: &Path) -> Result<(), String> {
+    let backup_conn = Connection::open(backup_path).map_err(|e| format!("打开备份失败: {}", e))?;
     let integrity: String = backup_conn
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(|e| format!("备份完整性检查失败: {}", e))?;
     if integrity.to_lowercase() != "ok" {
         return Err(format!("备份文件损坏: {}", integrity));
     }
+    Ok(())
+}
 
-    create_backup(conn, Some("before_restore"))?;
-
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("恢复事务启动失败: {}", e))?;
-    tx.execute(
+/// 用备份文件整体替换 accounts 与 account_history。
+///
+/// ATTACH / DETACH 必须放在事务之外：事务内读过备份库后它一直持有读锁，
+/// 在 commit 之前 DETACH 会报 `database backup_db is locked`。
+/// 无论复制成功与否都要卸载备份库，否则下一次恢复会报「already in use」。
+fn restore_from_file(conn: &Connection, backup_path: &Path) -> Result<(), String> {
+    conn.execute(
         "ATTACH DATABASE ?1 AS backup_db",
         [backup_path.to_string_lossy().to_string()],
     )
     .map_err(|e| format!("挂载备份库失败: {}", e))?;
 
-    // 兼容旧备份：按备份实际列集合动态拼 SQL（缺失列用默认表达式补齐）
-    let backup_columns = backup_account_columns(&tx)?;
-    for required in ["id", "email", "password"] {
-        if !backup_columns.contains(required) {
-            return Err(format!("备份缺少必要字段: {}", required));
-        }
-    }
+    let copied = copy_from_attached_backup(conn);
+    let detached = conn
+        .execute_batch("DETACH DATABASE backup_db")
+        .map_err(|e| format!("卸载备份库失败: {}", e));
+    copied?;
+    detached
+}
 
-    // (目标列名, 备份缺列时的默认表达式)
-    const COPY_COLUMNS: &[(&str, &str)] = &[
-        ("recovery", "NULL"),
-        ("phone", "NULL"),
-        ("secret", "NULL"),
-        ("sms_url", "NULL"),
-        ("reg_year", "NULL"),
-        ("country", "NULL"),
-        ("group_name", "NULL"),
-        ("remark", "NULL"),
-        ("status", "'inactive'"),
-        ("sold_status", "'unsold'"),
-        ("created_at", "CURRENT_TIMESTAMP"),
-        ("updated_at", "CURRENT_TIMESTAMP"),
-        ("deleted_at", "NULL"),
-    ];
-
-    let mut insert_columns: Vec<&str> = vec!["id", "email", "password"];
-    let mut select_exprs: Vec<String> = vec![
-        "id".to_string(),
-        "email".to_string(),
-        "password".to_string(),
-    ];
-    for (column, fallback) in COPY_COLUMNS {
-        insert_columns.push(column);
-        if backup_columns.contains(*column) {
-            select_exprs.push((*column).to_string());
-        } else {
-            select_exprs.push((*fallback).to_string());
-        }
-    }
-
-    tx.execute("DELETE FROM account_history", [])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM accounts", [])
-        .map_err(|e| e.to_string())?;
-
-    let copy_sql = format!(
-        "INSERT INTO accounts ({}) SELECT {} FROM backup_db.accounts",
-        insert_columns.join(", "),
-        select_exprs.join(", ")
-    );
-    tx.execute_batch(&copy_sql)
-        .map_err(|e| format!("恢复 accounts 失败: {}", e))?;
-
-    let has_history_table: i64 = tx
+/// 在单个事务里把已挂载的 backup_db 数据复制到主库；任何一步失败都整体回滚
+fn copy_from_attached_backup(conn: &Connection) -> Result<(), String> {
+    // 先校验备份结构，再动主库数据
+    let backup_columns = account_columns(conn, "backup_db")?;
+    let copy_sql = build_account_copy_sql("main.accounts", "backup_db.accounts", &backup_columns)?;
+    let has_history_table: i64 = conn
         .query_row(
             "SELECT COUNT(1) FROM backup_db.sqlite_master WHERE type='table' AND name='account_history'",
             [],
             |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("恢复事务启动失败: {}", e))?;
+    tx.execute("DELETE FROM main.account_history", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM main.accounts", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute_batch(&copy_sql)
+        .map_err(|e| format!("恢复 accounts 失败: {}", e))?;
+
     if has_history_table > 0 {
+        // 旧库可能残留已无对应账号的历史记录：外键开启时跳过它们，避免整体恢复失败
         tx.execute_batch(
-            "INSERT INTO account_history (id, account_id, field_name, old_value, new_value, changed_at)
+            "INSERT INTO main.account_history (id, account_id, field_name, old_value, new_value, changed_at)
              SELECT id, account_id, field_name, old_value, new_value, changed_at
-             FROM backup_db.account_history",
+             FROM backup_db.account_history
+             WHERE account_id IN (SELECT id FROM main.accounts)",
         )
         .map_err(|e| format!("恢复 account_history 失败: {}", e))?;
     }
 
-    tx.execute_batch("DETACH DATABASE backup_db")
-        .map_err(|e| format!("卸载备份库失败: {}", e))?;
-    tx.commit()
-        .map_err(|e| format!("提交恢复事务失败: {}", e))?;
-    Ok(())
+    tx.commit().map_err(|e| format!("提交恢复事务失败: {}", e))
 }
 
+/// 旧版 accounts 表的 email 带内联 UNIQUE（含回收站记录），
+/// 迁移为「无内联约束 + 仅约束未删除记录的部分唯一索引」。
+///
+/// 按 SQLite 推荐的重建流程：建新表 → 复制 → 删旧表 → 新表改名，全部在一个事务内。
+/// 删旧表时必须关闭外键，否则会级联删掉 account_history；这里自行关闭并在结束后还原。
 fn ensure_soft_delete_unique_migration(conn: &Connection) -> Result<(), String> {
     let schema: String = conn
         .query_row(
@@ -840,46 +932,52 @@ fn ensure_soft_delete_unique_migration(conn: &Connection) -> Result<(), String> 
         return Ok(());
     }
 
+    let foreign_keys_on: bool = conn
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if foreign_keys_on {
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .map_err(|e| format!("关闭外键失败: {}", e))?;
+    }
+    let result = rebuild_accounts_table(conn);
+    if foreign_keys_on {
+        if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON;") {
+            log::error!("迁移后恢复外键失败: {}", e);
+        }
+    }
+    result
+}
+
+fn rebuild_accounts_table(conn: &Connection) -> Result<(), String> {
+    // 旧表的列可能不全：按实际列复制，缺的列用默认值补齐
+    let columns = account_columns(conn, "main")?;
+    let copy_sql = build_account_copy_sql("accounts_new", "accounts", &columns)?;
+
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("迁移事务启动失败: {}", e))?;
+    // 旧版迁移只复制不改名，可能遗留半成品 accounts_new，先清掉
+    tx.execute_batch("DROP TABLE IF EXISTS accounts_new;")
+        .map_err(|e| format!("清理旧迁移表失败: {}", e))?;
+    tx.execute_batch(&accounts_table_sql("accounts_new"))
+        .map_err(|e| format!("创建迁移表失败: {}", e))?;
+    tx.execute_batch(&copy_sql)
+        .map_err(|e| format!("迁移数据失败: {}", e))?;
     tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS accounts_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL,
-            password TEXT NOT NULL,
-            recovery TEXT,
-            phone TEXT,
-            secret TEXT,
-            sms_url TEXT,
-            reg_year TEXT,
-            country TEXT,
-            group_name TEXT,
-            remark TEXT,
-            status TEXT DEFAULT 'inactive',
-            sold_status TEXT DEFAULT 'unsold',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TEXT
-        )",
+        "DROP TABLE accounts;
+         ALTER TABLE accounts_new RENAME TO accounts;",
     )
-    .map_err(|e| format!("创建迁移表失败: {}", e))?;
-    tx.execute_batch(
-        "INSERT INTO accounts_new (id, email, password, recovery, phone, secret, sms_url, reg_year, country, group_name, remark, status, sold_status, created_at, updated_at, deleted_at)
-         SELECT id, email, password, recovery, phone, secret, sms_url, reg_year, country, group_name, remark, status, sold_status, created_at, updated_at, deleted_at
-         FROM accounts",
-    )
-    .map_err(|e| format!("迁移数据失败: {}", e))?;
+    .map_err(|e| format!("替换旧表失败: {}", e))?;
     tx.commit().map_err(|e| format!("迁移提交失败: {}", e))?;
     Ok(())
 }
 
 /// 迁移前备份：仅当数据库文件已存在（即用户已有数据）时执行。
 ///
-/// 目的：本次升级会新增 `sms_url` 列并可能重建 accounts 表，
+/// 目的：升级可能新增列或重建 accounts 表，
 /// 一旦中途失败必须能从升级前的完整副本恢复。
 /// 备份失败直接返回错误并中止升级，避免在无保护的情况下改动旧库。
-fn backup_before_migration(db_path: &std::path::Path) -> Result<(), String> {
+fn backup_before_migration(db_path: &Path, backups: &Path) -> Result<(), String> {
     if !db_path.exists() {
         // 全新安装，没有旧数据需要保护
         return Ok(());
@@ -889,45 +987,32 @@ fn backup_before_migration(db_path: &std::path::Path) -> Result<(), String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
     conn.execute_batch("PRAGMA wal_checkpoint(FULL);")
         .map_err(|e| format!("迁移前 WAL checkpoint 失败: {}", e))?;
-    create_backup(&conn, Some("before_migration"))
+    create_backup_in(&conn, backups, Some("before_migration"))
         .map_err(|e| format!("迁移前备份失败，已中止升级以保护旧数据: {}", e))?;
 
     Ok(())
 }
 
+fn string_to_sql_error(message: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        message,
+    )))
+}
+
 pub fn init_database() -> Result<Connection> {
-    let db_path = get_db_path();
+    let backups = backups_dir().map_err(string_to_sql_error)?;
+    init_database_at(&get_db_path(), &backups)
+}
+
+/// 打开（必要时创建 / 迁移）指定路径的数据库；迁移前备份写到 `backups`
+fn init_database_at(db_path: &Path, backups: &Path) -> Result<Connection> {
     // 迁移前保护：先对「已有旧库」做一次完整备份，备份失败就中止升级，不冒险改动旧数据
-    backup_before_migration(&db_path).map_err(|e| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e,
-        )))
-    })?;
+    backup_before_migration(db_path, backups).map_err(string_to_sql_error)?;
 
-    let conn = Connection::open(&db_path)?;
+    let conn = Connection::open(db_path)?;
 
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL,
-            password TEXT NOT NULL,
-            recovery TEXT,
-            phone TEXT,
-            secret TEXT,
-            sms_url TEXT,
-            reg_year TEXT,
-            country TEXT,
-            group_name TEXT,
-            remark TEXT,
-            status TEXT DEFAULT 'inactive',
-            sold_status TEXT DEFAULT 'unsold',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TEXT
-        )",
-        [],
-    )?;
+    conn.execute(&accounts_table_sql("accounts"), [])?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS account_history (
@@ -957,12 +1042,8 @@ pub fn init_database() -> Result<Connection> {
     }
 
     // 迁移旧版 email UNIQUE 约束到软删除友好的部分唯一索引
-    ensure_soft_delete_unique_migration(&conn).map_err(|e| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("软删除迁移失败: {}", e),
-        )))
-    })?;
+    ensure_soft_delete_unique_migration(&conn)
+        .map_err(|e| string_to_sql_error(format!("软删除迁移失败: {}", e)))?;
 
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
@@ -990,7 +1071,7 @@ pub fn init_database() -> Result<Connection> {
     Ok(conn)
 }
 
-// ─── 导出功能（desktop + test-server 两个 feature 共用） ───────────────────
+// ─── 导出功能 ─────────────────────────────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default)]
 pub struct ExportAccountOrder {
@@ -1158,10 +1239,34 @@ impl ExportField {
             Self::GroupName => account.group_name.clone().unwrap_or_default(),
             Self::Remark => account.remark.clone().unwrap_or_default(),
             Self::Status => account.status.clone(),
-            Self::CreatedAt => account.created_at.clone(),
-            Self::UpdatedAt => account.updated_at.clone(),
-            Self::DeletedAt => account.deleted_at.clone().unwrap_or_default(),
+            Self::CreatedAt => utc_timestamp_to_local(&account.created_at),
+            Self::UpdatedAt => utc_timestamp_to_local(&account.updated_at),
+            Self::DeletedAt => account
+                .deleted_at
+                .as_deref()
+                .map(utc_timestamp_to_local)
+                .unwrap_or_default(),
         }
+    }
+}
+
+/// 数据库时间戳由 SQLite `CURRENT_TIMESTAMP` 写入，是 UTC；导出时换算成本机时间
+fn utc_timestamp_to_local(value: &str) -> String {
+    utc_timestamp_to_tz(value, &chrono::Local)
+}
+
+/// 把 `YYYY-MM-DD HH:MM:SS`（UTC）换算到指定时区；无法解析时原样返回
+fn utc_timestamp_to_tz<Tz: chrono::TimeZone>(value: &str, tz: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    match chrono::NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S") {
+        Ok(naive) => naive
+            .and_utc()
+            .with_timezone(tz)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        Err(_) => value.to_string(),
     }
 }
 
@@ -1244,6 +1349,7 @@ fn render_group_label(
 
     group_label_template
         .replace("{index}", &group_index.to_string())
+        .replace("{groupFieldLabel}", group_field.label())
         .replace("{groupField}", field_name)
         .replace("{field}", field_name)
         .replace("{groupValue}", display_value)
@@ -2000,5 +2106,272 @@ mod tests {
         let found = query_accounts(&conn, Some("alice")).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].email, "alice@example.com");
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    fn open_temp_db(dir: &Path) -> Connection {
+        init_database_at(&dir.join("data.db"), &dir.join("backups")).unwrap()
+    }
+
+    fn sample_input(email: &str) -> AccountInput {
+        AccountInput {
+            email: email.to_string(),
+            password: "pw".to_string(),
+            recovery: None,
+            phone: None,
+            secret: None,
+            sms_url: None,
+            reg_year: None,
+            country: None,
+            group_name: None,
+            remark: None,
+        }
+    }
+
+    #[test]
+    fn test_restore_from_file_roundtrip_and_repeatable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_temp_db(tmp.path());
+        let kept = create_account(&conn, &sample_input("kept@example.com")).unwrap();
+        update_account(
+            &conn,
+            kept.id,
+            &AccountInput {
+                remark: Some("备注".to_string()),
+                ..sample_input("kept@example.com")
+            },
+        )
+        .unwrap();
+        let backup = create_backup_in(&conn, &tmp.path().join("backups"), Some("manual")).unwrap();
+
+        create_account(&conn, &sample_input("later@example.com")).unwrap();
+        delete_account(&conn, kept.id).unwrap();
+
+        // 第一次恢复：回到备份时的状态（含历史记录）
+        restore_from_file(&conn, &backup).unwrap();
+        let accounts = query_accounts(&conn, None).unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].email, "kept@example.com");
+        assert_eq!(accounts[0].remark.as_deref(), Some("备注"));
+        assert_eq!(get_account_history(&conn, kept.id).unwrap().len(), 1);
+
+        // 第二次恢复必须同样成功（备份库已正确卸载，不会报 already in use）
+        create_account(&conn, &sample_input("again@example.com")).unwrap();
+        restore_from_file(&conn, &backup).unwrap();
+        assert_eq!(query_accounts(&conn, None).unwrap().len(), 1);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM pragma_database_list WHERE name = 'backup_db'"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn test_restore_fills_missing_columns_and_skips_orphan_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_temp_db(tmp.path());
+        create_account(&conn, &sample_input("current@example.com")).unwrap();
+
+        let legacy = tmp.path().join("legacy.db");
+        {
+            let old = Connection::open(&legacy).unwrap();
+            old.execute_batch(
+                "CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT, password TEXT);
+                 INSERT INTO accounts VALUES (7, 'old@example.com', 'pw');
+                 CREATE TABLE account_history (id INTEGER PRIMARY KEY, account_id INTEGER, field_name TEXT,
+                     old_value TEXT, new_value TEXT, changed_at TEXT);
+                 INSERT INTO account_history VALUES (1, 7, 'remark', 'a', 'b', '2026-01-01 00:00:00');
+                 INSERT INTO account_history VALUES (2, 99, 'remark', 'a', 'b', '2026-01-01 00:00:00');",
+            )
+            .unwrap();
+        }
+
+        restore_from_file(&conn, &legacy).unwrap();
+        let restored = get_account_by_id(&conn, 7).unwrap();
+        assert_eq!(restored.email, "old@example.com");
+        assert_eq!(restored.status, "inactive");
+        assert!(restored.sms_url.is_none());
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM account_history"), 1);
+    }
+
+    #[test]
+    fn test_restore_rejects_invalid_backup_without_touching_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_temp_db(tmp.path());
+        create_account(&conn, &sample_input("current@example.com")).unwrap();
+
+        let broken = tmp.path().join("broken.db");
+        Connection::open(&broken)
+            .unwrap()
+            .execute_batch("CREATE TABLE accounts (id INTEGER PRIMARY KEY, email TEXT);")
+            .unwrap();
+
+        let err = restore_from_file(&conn, &broken).unwrap_err();
+        assert!(err.contains("password"), "{}", err);
+        assert_eq!(query_accounts(&conn, None).unwrap().len(), 1);
+
+        // 失败后备份库也已卸载，之后仍可正常恢复
+        let good = create_backup_in(&conn, &tmp.path().join("backups"), None).unwrap();
+        restore_from_file(&conn, &good).unwrap();
+    }
+
+    fn write_legacy_unique_db(path: &Path) {
+        let old = Connection::open(path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE accounts (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 email TEXT UNIQUE NOT NULL,
+                 password TEXT NOT NULL,
+                 recovery TEXT,
+                 secret TEXT,
+                 remark TEXT
+             );
+             CREATE TABLE account_history (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 account_id INTEGER NOT NULL,
+                 field_name TEXT NOT NULL,
+                 old_value TEXT,
+                 new_value TEXT,
+                 changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+             );
+             INSERT INTO accounts (email, password, remark) VALUES ('x@example.com', 'pw', 'r');
+             INSERT INTO account_history (account_id, field_name, old_value, new_value) VALUES (1, 'remark', NULL, 'r');",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_legacy_unique_migration_survives_restarts() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_legacy_unique_db(&tmp.path().join("data.db"));
+
+        for _ in 0..3 {
+            let conn = open_temp_db(tmp.path());
+            let schema: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = 'accounts'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!schema.to_lowercase().contains("email text unique"));
+            assert_eq!(
+                count(
+                    &conn,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'accounts_new'"
+                ),
+                0
+            );
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM accounts"), 1);
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM account_history"), 1);
+        }
+
+        // 迁移后：软删除再导入同一邮箱不再冲突，默认值也已补齐
+        let conn = open_temp_db(tmp.path());
+        let migrated = get_account_by_id(&conn, 1).unwrap();
+        assert_eq!(migrated.status, "inactive");
+        assert_eq!(migrated.remark.as_deref(), Some("r"));
+        delete_account(&conn, 1).unwrap();
+        create_account(&conn, &sample_input("x@example.com")).unwrap();
+        assert!(create_account(&conn, &sample_input("x@example.com")).is_err());
+    }
+
+    #[test]
+    fn test_legacy_migration_cleans_leftover_accounts_new() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("data.db");
+        write_legacy_unique_db(&db_path);
+        // 模拟旧版迁移留下的半成品：只复制了数据，没有删旧表、没有改名
+        Connection::open(&db_path)
+            .unwrap()
+            .execute_batch(&format!(
+                "{}; INSERT INTO accounts_new (id, email, password) SELECT id, email, password FROM accounts;",
+                accounts_table_sql("accounts_new")
+            ))
+            .unwrap();
+
+        let conn = open_temp_db(tmp.path());
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'accounts_new'"
+            ),
+            0
+        );
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM accounts"), 1);
+        let foreign_keys: i64 = count(&conn, "PRAGMA foreign_keys");
+        assert_eq!(foreign_keys, 1);
+    }
+
+    #[test]
+    fn test_cleanup_keeps_protective_backups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = std::time::SystemTime::now() - std::time::Duration::from_secs(10_000);
+        let touch = |name: &str, age_secs: u64| {
+            let path = tmp.path().join(name);
+            let file = fs::File::create(&path).unwrap();
+            file.set_modified(base + std::time::Duration::from_secs(age_secs))
+                .unwrap();
+            fs::write(path.with_extension("json"), b"{}").unwrap();
+        };
+        // 保护性备份最旧，例行备份更新且数量超过上限
+        touch("data_1_before_delete_all_1.db", 0);
+        touch("data_2_before_migration_2.db", 1);
+        for i in 0..(KEEP_STARTUP_BACKUPS + 5) {
+            touch(&format!("data_s{}_startup_{}.db", i, i), 100 + i as u64);
+        }
+
+        cleanup_old_backups(tmp.path()).unwrap();
+
+        assert!(tmp.path().join("data_1_before_delete_all_1.db").exists());
+        assert!(tmp.path().join("data_2_before_migration_2.db").exists());
+        let startup_left = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                is_startup_backup(&e.path())
+                    && e.path().extension().map(|x| x == "db").unwrap_or(false)
+            })
+            .count();
+        assert_eq!(startup_left, KEEP_STARTUP_BACKUPS);
+        // 最旧的例行备份连同清单一起被删除，最新的保留
+        assert!(!tmp.path().join("data_s0_startup_0.db").exists());
+        assert!(!tmp.path().join("data_s0_startup_0.json").exists());
+        assert!(tmp
+            .path()
+            .join(format!(
+                "data_s{0}_startup_{0}.db",
+                KEEP_STARTUP_BACKUPS + 4
+            ))
+            .exists());
+    }
+
+    #[test]
+    fn test_group_label_supports_chinese_field_label() {
+        let label = render_group_label(
+            "{groupFieldLabel}={groupValue}",
+            ExportField::Country,
+            "US",
+            1,
+            1,
+        );
+        assert_eq!(label, "国家=US");
+    }
+
+    #[test]
+    fn test_utc_timestamp_converts_to_target_timezone() {
+        let beijing = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+        assert_eq!(
+            utc_timestamp_to_tz("2026-01-01 16:30:00", &beijing),
+            "2026-01-02 00:30:00"
+        );
+        assert_eq!(utc_timestamp_to_tz("not a time", &beijing), "not a time");
+        assert_eq!(utc_timestamp_to_tz("", &beijing), "");
     }
 }

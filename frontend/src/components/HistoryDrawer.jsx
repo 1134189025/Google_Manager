@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Clock, Key, Mail, Shield, History, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+    X, Clock, Key, Mail, Shield, History, ArrowRight, ChevronDown, ChevronUp,
+    AtSign, Phone, Calendar, Globe, Tag, FileText, ToggleRight,
+} from 'lucide-react';
 import api from '../services/api';
+import { formatDbTimestamp } from '../utils/timeUtils';
 
 // 旧数据库可能残留已下线字段的历史记录，渲染时静默跳过
 const LEGACY_HIDDEN_FIELDS = ['sold_status'];
@@ -15,17 +19,35 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
     const [expandedFields, setExpandedFields] = useState({});
 
     // 字段名称映射（图标渐变统一走主题令牌）
+    // 与后端 TRACKED_FIELDS 及 toggle_status 写入的字段一致；
+    // password / secret 现已不记录历史，保留映射只为显示旧库里的历史记录
     const fieldNames = {
+        email: { name: '邮箱', icon: AtSign, gradient: 'var(--gradient-primary)' },
+        recovery: { name: '恢复邮箱', icon: Mail, gradient: 'var(--gradient-danger)' },
+        phone: { name: '手机号', icon: Phone, gradient: 'var(--gradient-success)' },
+        status: { name: '状态', icon: ToggleRight, gradient: 'var(--gradient-primary)' },
+        group_name: { name: '标签', icon: Tag, gradient: 'var(--gradient-success)' },
+        remark: { name: '备注', icon: FileText, gradient: 'var(--gradient-danger)' },
+        reg_year: { name: '注册年份', icon: Calendar, gradient: 'var(--gradient-primary)' },
+        country: { name: '国家', icon: Globe, gradient: 'var(--gradient-success)' },
         password: { name: '密码', icon: Key, gradient: 'var(--gradient-success)' },
         secret: { name: '2FA密钥', icon: Shield, gradient: 'var(--gradient-primary)' },
-        recovery: { name: '恢复邮箱', icon: Mail, gradient: 'var(--gradient-danger)' }
+    };
+
+    // status 存的是 pro / inactive，按表格里的叫法显示
+    const formatValue = (fieldKey, value) => {
+        if (fieldKey === 'status') {
+            if (value === 'pro') return 'Pro';
+            if (value === 'inactive') return '普通';
+        }
+        return value;
     };
 
     // 加载历史记录
     useEffect(() => {
         if (isOpen && account) {
             loadHistory();
-            setExpandedFields({ password: true, secret: true, recovery: true });
+            setExpandedFields(Object.fromEntries(Object.keys(fieldNames).map(field => [field, true])));
         }
     }, [isOpen, account]);
 
@@ -66,10 +88,10 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
         (item) => fieldNames[item.fieldName] && !LEGACY_HIDDEN_FIELDS.includes(item.fieldName)
     ).length;
 
-    // 格式化时间显示
+    // 格式化时间显示（数据库存的是 UTC，换算成本机时间）
     const formatTime = (timeStr) => {
         if (!timeStr) return '';
-        const parts = timeStr.split(' ');
+        const parts = formatDbTimestamp(timeStr).split(' ');
         return {
             date: parts[0] || '',
             time: parts[1] || ''
@@ -144,7 +166,7 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
                                 <History size={32} className="opacity-40" />
                             </div>
                             <p className="font-medium mb-1">暂无修改记录</p>
-                            <p className="text-sm">修改密码、2FA密钥或恢复邮箱后<br />会在这里显示历史记录</p>
+                            <p className="text-sm">修改邮箱、手机号、标签、备注等信息后<br />会在这里显示历史记录（密码与 2FA 密钥不记录）</p>
                         </div>
                     ) : (
                         <div className="space-y-4">
@@ -201,7 +223,7 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
                                                                 <div className="flex-1 p-3 rounded-xl gm-solid" style={{ borderColor: 'var(--danger)' }}>
                                                                     <p className="text-[10px] font-medium mb-1" style={{ color: 'var(--danger)' }}>修改前</p>
                                                                     <p className="text-sm font-mono break-all gm-text-2">
-                                                                        {record.oldValue || <span className="italic opacity-50">(空)</span>}
+                                                                        {formatValue(fieldKey, record.oldValue) || <span className="italic opacity-50">(空)</span>}
                                                                     </p>
                                                                 </div>
 
@@ -214,7 +236,7 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
                                                                 <div className="flex-1 p-3 rounded-xl gm-solid" style={{ borderColor: 'var(--success)' }}>
                                                                     <p className="text-[10px] font-medium mb-1" style={{ color: 'var(--success)' }}>修改后</p>
                                                                     <p className="text-sm font-mono break-all gm-text-2">
-                                                                        {record.newValue || <span className="italic opacity-50">(空)</span>}
+                                                                        {formatValue(fieldKey, record.newValue) || <span className="italic opacity-50">(空)</span>}
                                                                     </p>
                                                                 </div>
                                                             </div>

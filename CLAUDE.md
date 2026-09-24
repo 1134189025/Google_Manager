@@ -31,6 +31,10 @@ pnpm run test:rust
 pnpm run check:rust
 ```
 
+**发布新版本**：改 4 处版本号（`frontend/package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`），
+新增 `.github/release-notes/v<版本号>.md` 后推送。`.github/workflows/release.yml` 会在 Windows 上跑测试、构建，
+并创建 tag 与 Release（安装版 / MSI / 免安装版）；同名 Release 已存在时跳过。
+
 ## 快速定位
 
 | 我想改… | 去这里 |
@@ -71,13 +75,18 @@ pnpm run check:rust
    浏览器是管理器的子进程：`tauri dev` 重新编译时会连带结束已打开的浏览器，正常关闭管理器则不会。
    开发调试建议设 `GOOGLE_MANAGER_DATA_DIR`，配置目录会跟着放到 `<数据目录>\profiles`。
 
+9. **判断是否在桌面环境**：用 `utils/tauriRuntime.js::isTauriRuntime()`，**不要**用 `window.__TAURI__`
+   （它只在开启 `withGlobalTauri` 时才注入，本项目没开）。
+
+10. **时间戳是 UTC**：数据库里的时间由 SQLite `CURRENT_TIMESTAMP` 写入，显示前用 `formatDbTimestamp` 换算本机时间。
+
+11. **取码失败不抛异常**：`api.fetchSmsCode` 出错时返回 `status: 'error'`，`useSmsCodes` 据此退避并把旧码标为「上次」。
+
 ## 已知取舍（刻意未修）
 
 按「不影响本地使用」的取舍保留，改之前请先确认必要性：
 
 - 批量删除无二次确认；批量设置时空输入按回车会清空字段
-- `HistoryDrawer.jsx` 字段映射未覆盖全部后端追踪字段
 - `AccountTable` 无行级 memo / 虚拟滚动
-- 迁移依赖 `PRAGMA foreign_keys` 的调用顺序
 - `init_database()` 失败时 `expect` panic
 - 导入解析器对含分隔符的密码、空段等边界输入存在误判

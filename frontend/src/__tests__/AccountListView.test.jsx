@@ -450,6 +450,20 @@ describe('AccountListView 组件', () => {
       expect(callArgs[1]).toBe('全部信息');
     });
 
+    it('复制全部信息时缺失字段显示为「无」，不输出 null 或空的 2FA 链接', async () => {
+      const user = userEvent.setup();
+      const bareAccount = { ...buildMockAccount(3), recovery: null, secret: null };
+      render(<AccountListView {...defaultProps} accounts={[bareAccount]} />);
+
+      await user.click(screen.getByTitle('复制全部信息'));
+
+      const [text] = defaultProps.copyToClipboard.mock.calls.at(-1);
+      expect(text).toContain('恢复邮箱：无');
+      expect(text).toContain('谷歌验证码获取：无');
+      expect(text).not.toContain('null');
+      expect(text).not.toContain('2fa.run');
+    });
+
     it('手机号列支持分开复制手机号和国别+手机号', async () => {
       const user = userEvent.setup();
       const phoneAccounts = [{
@@ -687,7 +701,8 @@ describe('AccountListView 组件', () => {
         expect(screen.getByText('test1@gmail.com')).toBeInTheDocument();
       });
       expect(defaultProps.setSearch).toHaveBeenCalled();
-    });
+      // 要渲染 100 行表格，jsdom 下单跑就接近默认 5 秒，全量并行时会偶发超时
+    }, 20000);
   });
 
   describe('多选链路', () => {

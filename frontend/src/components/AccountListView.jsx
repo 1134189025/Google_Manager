@@ -23,6 +23,8 @@ import api from '../services/api';
 import { splitMultiValueLines } from '../utils/multiValueField';
 import { extractPhoneAndSmsUrl } from '../utils/smsUtils';
 import { describeClearCacheResult } from '../utils/browserUtils';
+import { isTauriRuntime } from '../utils/tauriRuntime';
+import { formatDbTimestamp } from '../utils/timeUtils';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -493,7 +495,9 @@ const AccountListView = ({
     // 复制全部信息
     const copyAllInfo = (acc) => {
         const cleanSecret = acc.secret ? acc.secret.replace(/\s/g, '') : '';
-        const fullInfo = `邮箱账号：${acc.email}\n密码：${acc.password}\n恢复邮箱：${acc.recovery}\n手机号：${acc.phone || '无'}\n注册年份：${acc.regYear || '无'}\n国家：${acc.country || '无'}\n谷歌验证码获取：https://2fa.run/2fa/${cleanSecret}\n【账号到手后必备工作】：https://qcn4p837qb99.feishu.cn/wiki/S2bFwQ5vBifHgCkrmgrcAUzlnJd?from=from_copylink`;
+        // 没有 2FA 密钥时不输出空链接
+        const twoFALink = cleanSecret ? `https://2fa.run/2fa/${cleanSecret}` : '无';
+        const fullInfo = `邮箱账号：${acc.email}\n密码：${acc.password}\n恢复邮箱：${acc.recovery || '无'}\n手机号：${acc.phone || '无'}\n注册年份：${acc.regYear || '无'}\n国家：${acc.country || '无'}\n谷歌验证码获取：${twoFALink}\n【账号到手后必备工作】：https://qcn4p837qb99.feishu.cn/wiki/S2bFwQ5vBifHgCkrmgrcAUzlnJd?from=from_copylink`;
         copyToClipboard(fullInfo, '全部信息');
     };
 
@@ -575,7 +579,7 @@ const AccountListView = ({
 
             const dateStr = new Date().toISOString().split('T')[0];
 
-            if (window.__TAURI__) {
+            if (isTauriRuntime()) {
                 const filePath = await save({
                     defaultPath: `accounts_export_${dateStr}.txt`,
                     filters: [{ name: 'Text Files', extensions: ['txt'] }]
@@ -586,7 +590,7 @@ const AccountListView = ({
                     alert('账号导出成功！');
                 }
             } else {
-                // HTTP 模式：用浏览器原生 Blob 下载
+                // 非桌面环境（例如直接用浏览器打开前端）：用浏览器原生 Blob 下载
                 const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -894,7 +898,7 @@ const AccountListView = ({
                                     <div className="min-w-0">
                                         <p className="font-medium truncate gm-text-1">{acc.email}</p>
                                         <p className="text-xs truncate gm-text-3">
-                                            删除时间：{acc.deletedAt || '-'}
+                                            删除时间：{formatDbTimestamp(acc.deletedAt) || '-'}
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">

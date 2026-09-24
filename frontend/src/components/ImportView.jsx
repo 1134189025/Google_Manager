@@ -363,10 +363,11 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                             >
                                 返回列表
                             </button>
+                            {/* 解析防抖期间预览还是旧文本的结果，此时禁止导入，保证导入的就是看到的 */}
                             <button
-                                disabled={preview.length === 0 || importing}
+                                disabled={preview.length === 0 || importing || isParsing}
                                 onClick={() => {
-                                    if (!importing) onImport(preview);
+                                    if (!importing && !isParsing) onImport(preview);
                                 }}
                                 className="gm-btn gm-btn-primary flex-2 py-4 px-8 font-bold"
                             >

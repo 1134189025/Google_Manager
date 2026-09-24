@@ -742,7 +742,12 @@ mod tests {
             Some(PathBuf::from("C:\\Local")),
         );
         assert_eq!(candidates.len(), 5);
-        assert!(candidates[0].ends_with("Google\\Chrome\\Application\\chrome.exe"));
+        assert!(candidates[0].ends_with(
+            Path::new("Google")
+                .join("Chrome")
+                .join("Application")
+                .join("chrome.exe")
+        ));
 
         let only_edge = |p: &Path| p.to_string_lossy().ends_with("msedge.exe");
         let found = detect_browser(&candidates, only_edge).unwrap();
@@ -905,6 +910,8 @@ mod tests {
         );
     }
 
+    /// 路径规范化按 Windows 语义（统一为反斜杠），只在 Windows 上验证
+    #[cfg(windows)]
     #[test]
     fn validate_settings_defaults_root_and_checks_browser() {
         let tmp = tempfile::tempdir().unwrap();

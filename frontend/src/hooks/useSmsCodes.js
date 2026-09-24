@@ -143,6 +143,42 @@ const useSmsCodes = ({
                 : buildInitialEntry(configKey)
         ));
 
+        /**
+         * 记一次失败：按连续失败次数退避（服务端给了 Retry-After 时取较长者），
+         * 保留上一次的验证码但标记为 stale，界面必须显示为「上次获取」
+         */
+        const recordFailure = (errorMessage, retryAfterMs = 0) => {
+            const now = Date.now();
+            const failureStreak = (schedule.failureStreak || 0) + 1;
+            const backoff = BACKOFF_STEPS_MS[Math.min(failureStreak - 1, BACKOFF_STEPS_MS.length - 1)];
+            const nextRefreshAt = now + Math.max(backoff, retryAfterMs);
+
+            scheduleRef.current.set(accountId, {
+                configKey,
+                failureStreak,
+                loading: false,
+                autoPaused: false,
+                nextRefreshAt,
+            });
+
+            updateEntry(accountId, current => {
+                const base = current && current.configKey === configKey ? current : buildInitialEntry(configKey);
+                return {
+                    ...base,
+                    configKey,
+                    status: 'error',
+                    code: base.code || null,
+                    stale: Boolean(base.code),
+                    error: errorMessage,
+                    loading: false,
+                    autoPaused: false,
+                    failureStreak,
+                    nextRefreshAt,
+                    secondsLeft: secondsUntil(nextRefreshAt, now),
+                };
+            });
+        };
+
         try {
             const result = await fetcher(accountId);
 
@@ -157,13 +193,24 @@ const useSmsCodes = ({
                 : result;
 
             const status = String(payload?.status || 'error');
-            const code = payload?.code ? String(payload.code) : null;
-            const autoPaused = PAUSED_STATUSES.has(status);
-            const now = Date.now();
             // 服务端要求退避时优先遵守（防止把对方接口打爆）
             const retryAfterMs = Number(payload?.retryAfterSeconds) > 0
                 ? Number(payload.retryAfterSeconds) * 1000
                 : 0;
+
+            // api 门面不会抛异常：网络错误、后端报错都以 status=error 正常返回，
+            // 因此失败必须在这里识别，否则退避与「上次」标记都不会生效
+            if (status === 'error') {
+                recordFailure(
+                    String(payload?.error || payload?.message || result?.message || '获取失败'),
+                    retryAfterMs
+                );
+                return result;
+            }
+
+            const code = payload?.code ? String(payload.code) : null;
+            const autoPaused = PAUSED_STATUSES.has(status);
+            const now = Date.now();
             const waitMs = Math.max(effectiveIntervalRef.current, retryAfterMs);
             const nextRefreshAt = autoPaused ? 0 : now + waitMs;
 
@@ -200,37 +247,7 @@ const useSmsCodes = ({
                 return null;
             }
 
-            const now = Date.now();
-            const failureStreak = (schedule.failureStreak || 0) + 1;
-            const backoff = BACKOFF_STEPS_MS[Math.min(failureStreak - 1, BACKOFF_STEPS_MS.length - 1)];
-            const nextRefreshAt = now + backoff;
-
-            scheduleRef.current.set(accountId, {
-                configKey,
-                failureStreak,
-                loading: false,
-                autoPaused: false,
-                nextRefreshAt,
-            });
-
-            updateEntry(accountId, current => {
-                const base = current && current.configKey === configKey ? current : buildInitialEntry(configKey);
-                return {
-                    ...base,
-                    configKey,
-                    status: 'error',
-                    // 保留上一次的验证码，但标记为 stale，界面必须显示为「上次获取」
-                    code: base.code || null,
-                    stale: Boolean(base.code),
-                    error: error instanceof Error ? error.message : String(error || '获取失败'),
-                    loading: false,
-                    autoPaused: false,
-                    failureStreak,
-                    nextRefreshAt,
-                    secondsLeft: secondsUntil(nextRefreshAt, now),
-                };
-            });
-
+            recordFailure(error instanceof Error ? error.message : String(error || '获取失败'));
             return null;
         } finally {
             inFlightRef.current.delete(accountId);

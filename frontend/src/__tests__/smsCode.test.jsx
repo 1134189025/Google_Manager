@@ -140,6 +140,84 @@ describe('useSmsCodes 轮询 Hook', () => {
         expect(result.current.smsCodes[4]?.stale).toBe(true);
     });
 
+    it('api 门面以 status=error 正常返回（不抛异常）时同样保留「上次」验证码并退避', async () => {
+        // 与 api.fetchSmsCode 的真实返回形状一致：出错时 success=false，但不会 reject
+        const errorPayload = {
+            success: false,
+            message: '网络请求超时（sms6688.com）',
+            data: {
+                status: 'error',
+                code: null,
+                message: null,
+                error: '网络请求超时（sms6688.com）',
+                retryAfterSeconds: null,
+                fetchedAt: '2024-01-01T00:00:06.000Z',
+            },
+        };
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(successPayload('821371'))
+            .mockResolvedValue(errorPayload);
+        const accounts = [buildAccount({ id: 14 })];
+
+        const { result } = renderHook(() => useSmsCodes({ accounts, fetchSmsCode: fetcher }));
+
+        await waitFor(() => {
+            expect(result.current.smsCodes[14]?.code).toBe('821371');
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(6000);
+        });
+
+        await waitFor(() => {
+            expect(result.current.smsCodes[14]?.status).toBe('error');
+        });
+        const entry = result.current.smsCodes[14];
+        expect(entry.code).toBe('821371');
+        expect(entry.stale).toBe(true);
+        expect(entry.error).toBe('网络请求超时（sms6688.com）');
+        expect(entry.failureStreak).toBe(1);
+        // 第一次失败退避 10 秒，而不是按正常周期 5 秒后重试
+        expect(entry.secondsLeft).toBeGreaterThan(5);
+
+        const callsAfterFailure = fetcher.mock.calls.length;
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(6000);
+        });
+        expect(fetcher.mock.calls.length).toBe(callsAfterFailure);
+
+        // 连续失败时退避继续拉长
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(5000);
+        });
+        await waitFor(() => {
+            expect(result.current.smsCodes[14]?.failureStreak).toBe(2);
+        });
+        expect(result.current.smsCodes[14].secondsLeft).toBeGreaterThan(10);
+    });
+
+    it('status=error 且带 Retry-After 时取较长的等待时间', async () => {
+        const fetcher = vi.fn().mockResolvedValue({
+            success: true,
+            data: {
+                status: 'error',
+                code: null,
+                message: null,
+                error: '接码服务返回 429，请稍后再试',
+                retryAfterSeconds: 90,
+                fetchedAt: '2024-01-01T00:00:00.000Z',
+            },
+        });
+        const accounts = [buildAccount({ id: 15 })];
+
+        const { result } = renderHook(() => useSmsCodes({ accounts, fetchSmsCode: fetcher }));
+
+        await waitFor(() => {
+            expect(result.current.smsCodes[15]?.status).toBe('error');
+        });
+        expect(result.current.smsCodes[15].secondsLeft).toBeGreaterThanOrEqual(89);
+    });
+
     it('翻页后旧页账号的运行时状态被清理', async () => {
         const fetcher = vi.fn().mockResolvedValue(successPayload('821371'));
         const firstPage = [buildAccount({ id: 5 })];

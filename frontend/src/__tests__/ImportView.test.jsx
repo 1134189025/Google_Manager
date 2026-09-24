@@ -446,6 +446,22 @@ describe('ImportView 组件', () => {
       expect(importButton).not.toBeDisabled();
     });
 
+    it('修改文本后、解析完成前禁止导入，避免导入旧的预览结果', async () => {
+      const user = userEvent.setup();
+      render(<ImportView onImport={mockOnImport} onCancel={mockOnCancel} />);
+
+      await user.click(screen.getByRole('button', { name: /批量导入/i }));
+      const textarea = screen.getByPlaceholderText(/示例：/i);
+
+      fireEvent.change(textarea, { target: { value: 'a@gmail.com----pass1' } });
+      expect(await screen.findByRole('button', { name: /立即导入 \(1条\)/i })).not.toBeDisabled();
+
+      fireEvent.change(textarea, { target: { value: 'a@gmail.com----pass1\nb@gmail.com----pass2' } });
+      expect(screen.getByRole('button', { name: /立即导入/i })).toBeDisabled();
+
+      expect(await screen.findByRole('button', { name: /立即导入 \(2条\)/i })).not.toBeDisabled();
+    });
+
     it('点击批量导入按钮调用 onImport', async () => {
       const user = userEvent.setup();
       render(<ImportView onImport={mockOnImport} onCancel={mockOnCancel} />);

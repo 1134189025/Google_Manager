@@ -113,6 +113,9 @@ export const normalizeSmsUrlInput = (value) => {
     const candidate = stripWrapping(value);
     if (!candidate) return '';
     if (!/^https:\/\//i.test(candidate)) return '';
+    // 与后端校验一致：主机部分不能带用户名 / 密码（`@`），也不能含反斜杠；
+    // 否则这里能保存，后端取码时却永远报「未配置」
+    if (/^https:\/\/[^/?#]*[@\\]/i.test(candidate)) return '';
 
     try {
         const parsed = new URL(candidate);

@@ -297,9 +297,6 @@ fn validate_sms_url(url: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("手机接码地址为空".to_string());
     }
-    if trimmed.contains('@') {
-        return Err("手机接码地址不能包含用户名或密码信息".to_string());
-    }
 
     let scheme_end = trimmed
         .find("://")
@@ -315,6 +312,11 @@ fn validate_sms_url(url: &str) -> Result<String, String> {
     let authority = &rest[..authority_end];
     if authority.is_empty() {
         return Err("手机接码地址缺少主机名".to_string());
+    }
+    // 主机部分带 `@` 即含用户名 / 密码；反斜杠会被 URL 解析器当成 `/`，同样拒绝，避免与实际请求的主机不一致。
+    // 查询串里的 `@`（例如邮箱参数）不受影响
+    if authority.contains('@') || authority.contains('\\') {
+        return Err("手机接码地址不能包含用户名或密码信息".to_string());
     }
     if authority
         .chars()
@@ -810,6 +812,13 @@ mod tests {
     #[test]
     fn validate_url_rejects_credentials() {
         assert!(validate_sms_url("https://user:pass@sms6688.com/api?token=abc").is_err());
+    }
+
+    #[test]
+    fn validate_url_allows_at_sign_in_query_only() {
+        let host = validate_sms_url("https://sms6688.com/api?token=abc&email=a@b.com").unwrap();
+        assert_eq!(host, "sms6688.com");
+        assert!(validate_sms_url("https://evil.com\\@sms6688.com/api?token=abc").is_err());
     }
 
     #[test]
