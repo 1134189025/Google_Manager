@@ -1,0 +1,111 @@
+name: 发布 Windows 版本
+
+# 推送 .github/release-notes/v<版本号>.md 后自动测试、构建并发布该版本，也可在 Actions 页面手动运行。
+# 版本号取自 src-tauri/tauri.conf.json；同名 Release 已存在时跳过，不会重复发布。
+on:
+  push:
+    paths:
+      - '.github/release-notes/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取版本号并检查是否已发布
+        id: version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          notes=".github/release-notes/v${version}.md"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "notes=${notes}" >> "$GITHUB_OUTPUT"
+          if [ ! -f "$notes" ]; then
+            echo "::error::缺少发布说明 ${notes}"
+            exit 1
+          fi
+          if gh release view "v${version}" > /dev/null 2>&1; then
+            echo "v${version} 已发布，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.version.outputs.skip != 'true'
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.version.outputs.skip != 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.version.outputs.skip != 'true'
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          cd frontend && pnpm install --frozen-lockfile
+
+      - name: 前端测试
+        if: steps.version.outputs.skip != 'true'
+        working-directory: frontend
+        run: pnpm test -- --run
+
+      - name: Rust 测试
+        if: steps.version.outputs.skip != 'true'
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: 构建安装包
+        if: steps.version.outputs.skip != 'true'
+        run: pnpm run build
+
+      - name: 整理发布文件
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          out=dist-release
+          mkdir -p "$out"
+          cp "src-tauri/target/release/bundle/nsis/GoogleManager_${v}_x64-setup.exe" "$out/"
+          cp "src-tauri/target/release/bundle/msi/GoogleManager_${v}_x64_en-US.msi" "$out/"
+          # 免安装版就是主程序本身
+          exe=src-tauri/target/release/google-manager.exe
+          [ -f "$exe" ] || exe=src-tauri/target/release/GoogleManager.exe
+          cp "$exe" "$out/GoogleManager_${v}_x64_portable.exe"
+          ls -la "$out"
+
+      - name: 创建 Release
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          gh release create "v${v}" dist-release/* \
+            --target "${{ github.sha }}" \
+            --title "v${v}" \
+            --notes-file "${{ steps.version.outputs.notes }}" \
+            --latest
