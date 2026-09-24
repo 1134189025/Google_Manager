@@ -23,9 +23,9 @@
 - 🔐 **2FA 验证码** - 内置 TOTP 生成，列表内直接显示实时验证码与倒计时
 - ✏️ **行内编辑** - 双击单元格直接改，标签/备注支持多值合并与自动补全
 - 🗂️ **分组与筛选** - 按标签组织账号，支持关键词搜索
-- 🕘 **修改历史** - 字段级变更追踪（`email`/`recovery`/`phone`/`reg_year`/`country`/`group_name`/`remark`）
+- 🕘 **修改历史** - 字段级变更追踪（`email`/`recovery`/`phone`/`reg_year`/`country`/`group_name`/`remark`/`status`）
 - 🗑️ **回收站** - 软删除 + 恢复 + 彻底清除
-- 💾 **本地备份** - 基于 `VACUUM INTO` 的一致性备份，启动时自动备份，保留最近 20 份
+- 💾 **本地备份** - 基于 `VACUUM INTO` 的一致性备份，启动时自动备份（保留最近 10 份），删除全部 / 恢复 / 升级前的保护性备份另外保留最近 20 份
 - 📤 **文本导出** - 自定义字段、分隔符、排序与分组，实时预览
 - 📱 **手机验证码** - 账号绑定「手机号 + 接码地址」，列表内实时获取短信验证码（只查当前页、失败退避、验证码不落库）
 - 🌐 **账号独立浏览器** - 每个账号一个独立的 Chrome / Edge 配置，登录状态互不干扰且长期保留；点一下打开，已打开则切到该窗口。支持缓存清理与占用统计（只做会话隔离，不做指纹伪装）
@@ -93,7 +93,7 @@ Google_Manager/
 │       ├── services/
 │       │   ├── api.js            # 统一 API 门面
 │       │   └── adapters/         # tauri-adapter（invoke 调用）+ 工厂
-│       └── utils/                # importParser / phoneUtils / multiValueField / smsUtils / browserUtils
+│       └── utils/                # importParser / phoneUtils / multiValueField / smsUtils / browserUtils / timeUtils
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
 │   │   ├── lib.rs                # Tauri 应用入口与命令注册

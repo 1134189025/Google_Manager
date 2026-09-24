@@ -56,7 +56,7 @@
 │   │       ├── index.ts          # 工厂（只有 TauriAdapter）
 │   │       └── tauri-adapter.ts  # invoke 封装 + 参数命名转换
 │   ├── utils/                # importParser / phoneUtils / multiValueField / buildInfo /
-│   │                         # smsUtils / browserUtils
+│   │                         # smsUtils / browserUtils / timeUtils / tauriRuntime
 │   └── __tests__/            # Vitest 单元测试
 │
 ├── src-tauri/
@@ -144,6 +144,16 @@ idx_accounts_deleted_at
 
 **注意**：`PRAGMA foreign_keys = ON` 与 `journal_mode = WAL` 在 `init_database()` 中设置。测试夹具必须自行开启 `foreign_keys` 才能验证级联删除。
 
+**时间戳**：`created_at` / `updated_at` / `deleted_at` / `changed_at` 由 SQLite `CURRENT_TIMESTAMP` 写入，是 **UTC**。
+界面显示前用 `utils/timeUtils.js::formatDbTimestamp` 换算本机时间；导出文本在 `database.rs::utc_timestamp_to_local` 换算。
+
+**旧库迁移**：旧版 `email TEXT UNIQUE` 内联约束由 `ensure_soft_delete_unique_migration` 按「建新表 → 复制 → 删旧表 → 改名」重建，
+缺失的列用默认值补齐；它自行关闭并还原 `foreign_keys`，不依赖调用顺序。
+
+**备份**：`create_backup` 用 `VACUUM INTO`；启动时的例行备份（文件名含 `_startup_`）最多保留 10 份，
+删除全部 / 恢复 / 迁移前等其他备份另外最多保留 20 份，互不挤占。
+`restore_backup` 的 `ATTACH` / `DETACH` 必须在事务之外（事务内 `DETACH` 会报 `database backup_db is locked`）。
+
 ## 关键约定
 
 1. **语言**：中文（注释、UI、commit message）
@@ -186,6 +196,8 @@ idx_accounts_deleted_at
   不改变 `updated_at`；`sms_url` 含 token，故也不进 `TRACKED_FIELDS`
 - 界面与 tooltip 只展示来源域名（`describeSmsUrl`），不展示 token；复制验证码时只复制验证码本身
 - 请求失败时保留的旧验证码会标注「上次」，倒计时表示「下次刷新」，不是短信有效期
+- `api.fetchSmsCode` 出错时不抛异常，而是返回 `status: 'error'`；`useSmsCodes` 必须把它当失败处理（退避 + 「上次」），
+  测试里要用这种返回形状，而不是只用 `mockRejectedValue`
 - 迁移保护：`init_database()` 在改动旧库前会先做一次 `before_migration` 备份，
   备份失败则中止升级；旧备份（无 `sms_url` 列）恢复时按 `NULL` 处理
 
@@ -241,8 +253,6 @@ idx_accounts_deleted_at
 以下问题在审查中被确认存在，但按「不影响本地使用」的取舍**未修复**：
 
 - 批量删除无二次确认；批量设置时空输入按回车会清空字段
-- `HistoryDrawer.jsx` 字段映射只覆盖部分后端追踪字段
 - `AccountTable` 无行级 memo/虚拟滚动（大列表会重渲染）
-- 迁移依赖 `PRAGMA foreign_keys` 的调用顺序（`DROP TABLE` 在 `PRAGMA ON` 之前）
 - `init_database()` 失败时直接 `expect` panic
 - 导入解析器对含分隔符的密码、空段等边界输入存在误判
