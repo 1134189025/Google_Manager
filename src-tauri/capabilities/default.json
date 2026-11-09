@@ -9,14 +9,9 @@
     "core:default",
     "dialog:default",
     "dialog:allow-save",
-    "fs:default",
-    {
-      "identifier": "fs:allow-write-text-file",
-      "allow": [
-        {
-          "path": "$APPDATA/googlemanager/**"
-        }
-      ]
-    }
+    "dialog:allow-ask",
+    "dialog:allow-message",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

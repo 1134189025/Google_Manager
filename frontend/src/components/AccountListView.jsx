@@ -7,7 +7,6 @@ import {
     Trash2,
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
 import Pagination from './Pagination';
 import usePagination from '../hooks/usePagination';
 import useInlineEdit from '../hooks/useInlineEdit';
@@ -17,6 +16,7 @@ import useSmsCodes from '../hooks/useSmsCodes';
 import useBrowserStatus from '../hooks/useBrowserStatus';
 import HistoryDrawer from './HistoryDrawer';
 import ExportDialog from './ExportDialog';
+import PromptDialog from './PromptDialog';
 import BatchToolbar from './BatchToolbar';
 import AccountTable from './AccountTable';
 import api from '../services/api';
@@ -25,6 +25,7 @@ import { extractPhoneAndSmsUrl } from '../utils/smsUtils';
 import { describeClearCacheResult } from '../utils/browserUtils';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { confirmDialog, messageDialog } from '../utils/dialogs';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -54,6 +55,15 @@ const extractReusableCandidates = (field, value) => {
 
 const normalizeSortDirection = (direction, fallbackDirection) =>
     direction === 'asc' || direction === 'desc' ? direction : fallbackDirection;
+
+const pad2 = (value) => String(value).padStart(2, '0');
+
+/** 本机日期 YYYY-MM-DD（toISOString 是 UTC，东八区凌晨会得到前一天） */
+const formatLocalDate = (date) =>
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+
+/** 路径中的文件名（兼容 / 与 \） */
+const baseName = (path) => String(path || '').split(/[\\/]/).pop();
 
 const normalizeExportConfig = (rawConfig) => {
     const rawFields = Array.isArray(rawConfig?.fields)
@@ -129,6 +139,15 @@ const AccountListView = ({
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
     const [inlineRecentValuesByField, setInlineRecentValuesByField] = useState(() => buildEmptyRecentValues());
+
+    // 错误提示：优先用右上角提示条，没有时退回系统提示框
+    const notifyError = useCallback((msg) => {
+        if (onNotify) {
+            onNotify(msg, 'error');
+        } else {
+            messageDialog(msg, { kind: 'error' });
+        }
+    }, [onNotify]);
 
     const sortedAccounts = useMemo(() => {
         if (!sortConfig.key || !sortConfig.direction) return accounts;
@@ -253,7 +272,7 @@ const AccountListView = ({
 
             const result = await api.openAccountBrowser(acc.id);
             if (!result.success) {
-                alert(result.message || '打开浏览器失败');
+                notifyError(result.message || '打开浏览器失败');
                 return;
             }
 
@@ -268,7 +287,7 @@ const AccountListView = ({
         } finally {
             setBrowserOpening(acc.id, false);
         }
-    }, [browserStatuses, copyToClipboard, onNotify, openBrowserSettings, refreshBrowserStatus, setBrowserOpening]);
+    }, [browserStatuses, copyToClipboard, notifyError, onNotify, openBrowserSettings, refreshBrowserStatus, setBrowserOpening]);
 
     // 可复用列的最近 5 条值（用于行内编辑自动补全）
     const accountRecentValuesByField = useMemo(() => {
@@ -515,20 +534,22 @@ const AccountListView = ({
         }
     };
 
-    // 批量编辑
-    const handleBatchEdit = useCallback(async (field, fieldLabel) => {
+    // 批量编辑：先弹应用内输入框（macOS 的 WebView 不支持 window.prompt），提交后逐个更新
+    const [batchEditPrompt, setBatchEditPrompt] = useState(null);
+
+    const handleBatchEdit = useCallback((field, fieldLabel) => {
         if (selection.selectedIds.size === 0 || isBatchProcessing) return;
+        setBatchEditPrompt({ field, fieldLabel, count: selection.selectedIds.size });
+    }, [selection, isBatchProcessing]);
 
-        const value = window.prompt(`请输入要设置的${fieldLabel}（将应用到选中的 ${selection.selectedIds.size} 个账号）：`);
-        if (value === null) return;
-
+    const applyBatchEdit = useCallback(async (field, value) => {
         if (field === 'regYear' && value.trim() !== '') {
             if (!/^\d{4}$/.test(value.trim())) {
-                alert('注册年份必须是4位数字（如：2021）');
-                return;
+                return '注册年份必须是4位数字（如：2021）';
             }
         }
 
+        setBatchEditPrompt(null);
         setIsBatchProcessing(true);
         try {
             const updatePromises = Array.from(selection.selectedIds).map(id =>
@@ -545,19 +566,22 @@ const AccountListView = ({
             const failCount = results.length - successCount;
 
             if (failCount > 0 && successCount === 0) {
-                alert(`批量更新失败，共 ${failCount} 个账号`);
+                notifyError(`批量更新失败，共 ${failCount} 个账号`);
             } else if (failCount > 0) {
-                alert(`成功更新 ${successCount} 个账号，${failCount} 个失败`);
+                notifyError(`成功更新 ${successCount} 个账号，${failCount} 个失败`);
+            } else {
+                onNotify?.(`已更新 ${successCount} 个账号`);
             }
 
             selection.clearSelection();
         } catch (error) {
             console.error('批量编辑失败:', error);
-            alert('批量编辑失败');
+            notifyError('批量编辑失败');
         } finally {
             setIsBatchProcessing(false);
         }
-    }, [selection, isBatchProcessing, handleInlineEditWithRecent]);
+        return undefined;
+    }, [selection, handleInlineEditWithRecent, notifyError, onNotify]);
 
     // 导出账号
     const handleOpenExportDialog = () => {
@@ -568,43 +592,46 @@ const AccountListView = ({
         try {
             const { accountIds, searchParam } = buildExportRequestParams(exportDialog.mode);
             const normalizedConfig = normalizeExportConfig(config);
-            const result = await api.exportAccountsText(accountIds, searchParam, normalizedConfig);
+            const fileName = `accounts_export_${formatLocalDate(new Date())}.txt`;
 
-            // TauriAdapter 返回 {success, data} 包装对象
-            const textContent = typeof result === 'string' ? result : (result?.data ?? '');
-            if (typeof result === 'object' && result !== null && !result.success) {
-                alert('导出失败: ' + result.message);
+            if (isTauriRuntime()) {
+                // 先选保存位置，再由后端生成并直接写入文件（不经过前端 fs 插件的路径权限）
+                const filePath = await save({
+                    defaultPath: fileName,
+                    filters: [{ name: '文本文件', extensions: ['txt'] }]
+                });
+                if (!filePath) return;
+
+                const result = await api.exportAccountsToFile(accountIds, searchParam, normalizedConfig, filePath);
+                if (!result.success) {
+                    notifyError('导出失败：' + (result.message || '未知错误'));
+                    return;
+                }
+                setExportDialog({ isOpen: false, mode: 'all' });
+                onNotify?.(`已导出 ${result.data.count} 个账号到 ${baseName(result.data.path)}`);
                 return;
             }
 
-            const dateStr = new Date().toISOString().split('T')[0];
-
-            if (isTauriRuntime()) {
-                const filePath = await save({
-                    defaultPath: `accounts_export_${dateStr}.txt`,
-                    filters: [{ name: 'Text Files', extensions: ['txt'] }]
-                });
-                if (filePath) {
-                    await writeTextFile(filePath, textContent);
-                    setExportDialog({ isOpen: false, mode: 'all' });
-                    alert('账号导出成功！');
-                }
-            } else {
-                // 非桌面环境（例如直接用浏览器打开前端）：用浏览器原生 Blob 下载
-                const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `accounts_export_${dateStr}.txt`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                setExportDialog({ isOpen: false, mode: 'all' });
+            // 非桌面环境（例如直接用浏览器打开前端）：用浏览器原生 Blob 下载
+            const result = await api.exportAccountsText(accountIds, searchParam, normalizedConfig);
+            const textContent = typeof result === 'string' ? result : (result?.data ?? '');
+            if (typeof result === 'object' && result !== null && !result.success) {
+                notifyError('导出失败：' + result.message);
+                return;
             }
+            const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setExportDialog({ isOpen: false, mode: 'all' });
         } catch (error) {
             console.error('导出账号失败:', error);
-            alert('导出失败: ' + error.message);
+            notifyError('导出失败：' + (error?.message || String(error)));
         }
     };
 
@@ -616,11 +643,11 @@ const AccountListView = ({
                 setRecycleDrawer(prev => ({ ...prev, accounts: result.data || [], loading: false }));
             } else {
                 setRecycleDrawer(prev => ({ ...prev, loading: false }));
-                alert(result.message || '加载回收站失败');
+                notifyError(result.message || '加载回收站失败');
             }
         } catch (error) {
             setRecycleDrawer(prev => ({ ...prev, loading: false }));
-            alert(error.message || '加载回收站失败');
+            notifyError(error.message || '加载回收站失败');
         }
     };
 
@@ -636,7 +663,7 @@ const AccountListView = ({
     const handleRestoreDeleted = async (id) => {
         const result = await api.restoreAccount(id);
         if (!result.success) {
-            alert(result.message || '恢复失败');
+            notifyError(result.message || '恢复失败');
             return;
         }
         await loadDeletedAccounts();
@@ -660,8 +687,9 @@ const AccountListView = ({
         const subject = withProfile.length === 1 && uniqueEmails.length === 1
             ? '该账号'
             : `其中 ${withProfile.length} 个账号`;
-        const confirmed = window.confirm(
-            `${subject}有浏览器配置（保存着登录状态），是否一起删除？\n选「取消」则保留配置目录。`
+        const confirmed = await confirmDialog(
+            `${subject}有浏览器配置（保存着登录状态），是否一起删除？\n选「取消」则保留配置目录。`,
+            { okLabel: '一起删除', cancelLabel: '保留配置' }
         );
         return confirmed ? withProfile : [];
     };
@@ -670,7 +698,7 @@ const AccountListView = ({
         if (emails.length === 0) return;
         const result = await api.deleteBrowserProfiles(emails);
         if (!result.success) {
-            alert(result.message || '删除浏览器配置失败');
+            notifyError(result.message || '删除浏览器配置失败');
             return;
         }
         const { deleted = 0, skipped = 0 } = result.data || {};
@@ -680,11 +708,11 @@ const AccountListView = ({
     };
 
     const handlePurgeDeleted = async (acc) => {
-        if (!window.confirm('确定永久删除该账号吗？此操作不可撤销。')) return;
+        if (!await confirmDialog('确定永久删除该账号吗？此操作不可撤销。', { okLabel: '永久删除' })) return;
         const profileEmails = await askDeleteBrowserProfiles([acc.email]);
         const result = await api.purgeAccount(acc.id);
         if (!result.success) {
-            alert(result.message || '永久删除失败');
+            notifyError(result.message || '永久删除失败');
             return;
         }
         await deleteBrowserProfilesAfterPurge(profileEmails);
@@ -692,11 +720,11 @@ const AccountListView = ({
     };
 
     const handlePurgeAllDeleted = async () => {
-        if (!window.confirm('确定清空回收站吗？此操作不可撤销。')) return;
+        if (!await confirmDialog('确定清空回收站吗？此操作不可撤销。', { okLabel: '清空' })) return;
         const profileEmails = await askDeleteBrowserProfiles(recycleDrawer.accounts.map(acc => acc.email));
         const result = await api.purgeAllDeleted();
         if (!result.success) {
-            alert(result.message || '清空回收站失败');
+            notifyError(result.message || '清空回收站失败');
             return;
         }
         await deleteBrowserProfilesAfterPurge(profileEmails);
@@ -710,7 +738,7 @@ const AccountListView = ({
         try {
             const result = await api.clearBrowserCache(Array.from(selection.selectedIds));
             if (!result.success) {
-                alert(result.message || '清理浏览器缓存失败');
+                notifyError(result.message || '清理浏览器缓存失败');
                 return;
             }
             onNotify?.(describeClearCacheResult(result.data));
@@ -865,6 +893,16 @@ const AccountListView = ({
                 exportMode={exportDialog.mode}
                 exportScopeCounts={exportScopeCounts}
                 previewAccounts={previewAccountsForExport}
+            />
+
+            <PromptDialog
+                isOpen={Boolean(batchEditPrompt)}
+                title={batchEditPrompt ? `批量设置${batchEditPrompt.fieldLabel}` : ''}
+                description={batchEditPrompt ? `将应用到选中的 ${batchEditPrompt.count} 个账号；留空表示清空该字段。` : ''}
+                label={batchEditPrompt?.fieldLabel || ''}
+                submitLabel="应用"
+                onSubmit={(value) => applyBatchEdit(batchEditPrompt.field, value)}
+                onCancel={() => setBatchEditPrompt(null)}
             />
 
             {recycleDrawer.isOpen && (

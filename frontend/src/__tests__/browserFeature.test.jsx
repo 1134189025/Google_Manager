@@ -6,10 +6,10 @@ import AccountListView from '../components/AccountListView';
 import BrowserSettingsDialog from '../components/BrowserSettingsDialog';
 import App from '../App';
 import { formatBytes, describeClearCacheResult } from '../utils/browserUtils';
+import { open as dialogOpen, ask } from '@tauri-apps/plugin-dialog';
 
 vi.mock('../services/api', () => ({ default: mockApi }));
-vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn(), open: vi.fn() }));
-vi.mock('@tauri-apps/plugin-fs', () => ({ writeTextFile: vi.fn() }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn(), open: vi.fn(), ask: vi.fn(), message: vi.fn() }));
 vi.mock('../components/HistoryDrawer', () => ({ default: () => null }));
 
 const buildAccount = (id, overrides = {}) => ({
@@ -211,11 +211,11 @@ describe('AccountListView 打开浏览器与删除配置', () => {
 
     it('打开失败时提示后端给出的原因', async () => {
         mockApi.openAccountBrowser.mockResolvedValue({ success: false, message: '未找到 Chrome 或 Edge' });
-        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-        render(<AccountListView {...baseProps()} />);
+        const props = baseProps();
+        render(<AccountListView {...props} />);
 
         fireEvent.click(browserButtonOf('user1@gmail.com'));
-        await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('未找到 Chrome 或 Edge'));
+        await waitFor(() => expect(props.onNotify).toHaveBeenCalledWith('未找到 Chrome 或 Edge', 'error'));
     });
 
     describe('回收站彻底删除', () => {
@@ -238,7 +238,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
                 data: Object.fromEntries(emails.map(email => [email, email === 'gone@gmail.com' ? 'created' : 'none'])),
             }));
             mockApi.deleteBrowserProfiles.mockResolvedValue({ success: true, data: { deleted: 1, skipped: 0 } });
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
             const props = baseProps();
             render(<AccountListView {...props} />);
             await openRecycleBin();
@@ -256,7 +256,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
 
         it('选择保留配置时只删除账号', async () => {
             mockApi.getBrowserStatuses.mockResolvedValue({ success: true, data: { 'gone@gmail.com': 'created' } });
-            vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false);
+            vi.mocked(ask).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
             render(<AccountListView {...baseProps()} />);
             await openRecycleBin();
 
@@ -267,7 +267,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
         });
 
         it('没有配置目录时不追加询问', async () => {
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
             render(<AccountListView {...baseProps()} />);
             await openRecycleBin();
 
@@ -284,7 +284,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
                 data: Object.fromEntries(emails.map(email => [email, 'created'])),
             }));
             mockApi.deleteBrowserProfiles.mockResolvedValue({ success: true, data: { deleted: 0, skipped: 1 } });
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
             const props = baseProps();
             render(<AccountListView {...props} />);
             await openRecycleBin();
@@ -345,7 +345,7 @@ describe('BrowserSettingsDialog', () => {
     it('计算占用与清理全部缓存', async () => {
         mockApi.getBrowserUsage.mockResolvedValue({ success: true, data: { profiles: 2, totalBytes: 1572864 } });
         mockApi.clearBrowserCache.mockResolvedValue({ success: true, data: { cleared: 2, skippedRunning: 1, freedBytes: 2048 } });
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        vi.mocked(ask).mockResolvedValue(true);
         const onNotify = vi.fn();
         render(<BrowserSettingsDialog isOpen onClose={vi.fn()} onNotify={onNotify} />);
 
@@ -360,6 +360,44 @@ describe('BrowserSettingsDialog', () => {
     it('关闭状态不渲染', () => {
         render(<BrowserSettingsDialog isOpen={false} onClose={vi.fn()} />);
         expect(screen.queryByText('账号浏览器设置')).toBeNull();
+    });
+
+    it('macOS：浏览器选择框只选 .app 应用，提示钥匙串', async () => {
+        const bundle = '/Applications/Google Chrome.app';
+        mockApi.getBrowserSettings.mockResolvedValue({
+            success: true,
+            data: settingsData({
+                platform: 'macos',
+                detectedBrowserPath: bundle,
+                effectiveBrowserPath: bundle,
+                profilesRoot: '/Users/me/Library/Application Support/googlemanager/profiles',
+            }),
+        });
+        vi.mocked(dialogOpen).mockResolvedValue('/Applications/Microsoft Edge.app');
+        render(<BrowserSettingsDialog isOpen onClose={vi.fn()} />);
+
+        expect(await screen.findByText(`自动检测到：${bundle}`)).toBeInTheDocument();
+        expect(screen.getByText(/macOS 钥匙串/)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByTitle('选择浏览器程序'));
+        await waitFor(() => expect(screen.getByLabelText('浏览器程序')).toHaveValue('/Applications/Microsoft Edge.app'));
+        expect(dialogOpen).toHaveBeenCalledWith(expect.objectContaining({
+            defaultPath: '/Applications',
+            filters: [{ name: '应用程序', extensions: ['app'] }],
+        }));
+    });
+
+    it('Windows：浏览器选择框只选 .exe', async () => {
+        mockApi.getBrowserSettings.mockResolvedValue({ success: true, data: settingsData({ platform: 'windows' }) });
+        vi.mocked(dialogOpen).mockResolvedValue(null);
+        render(<BrowserSettingsDialog isOpen onClose={vi.fn()} />);
+
+        await screen.findByText(/自动检测到/);
+        expect(screen.getByText(/Windows DPAPI/)).toBeInTheDocument();
+        fireEvent.click(screen.getByTitle('选择浏览器程序'));
+        await waitFor(() => expect(dialogOpen).toHaveBeenCalledWith(expect.objectContaining({
+            filters: [{ name: '浏览器程序', extensions: ['exe'] }],
+        })));
     });
 });
 

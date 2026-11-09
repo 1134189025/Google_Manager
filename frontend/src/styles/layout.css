@@ -110,6 +110,22 @@
   word-break: break-all;
 }
 
+/* 检查更新按钮：有新版本时右上角显示提示点 */
+.gm-update-btn {
+  position: relative;
+}
+
+.gm-update-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--bg-card);
+}
+
 /* 主内容区 */
 .main-wrapper {
   flex: 1;

@@ -6,6 +6,7 @@ import {
     isMultilineField,
     normalizeMultiValueValue,
 } from '../utils/multiValueField';
+import { confirmDialog, messageDialog } from '../utils/dialogs';
 
 export const CLICK_COPY_DELAY_MS = 320;
 
@@ -36,6 +37,7 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
     const inputRef = useRef(null);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const isSelectingSuggestionRef = useRef(false);
+    const confirmingRef = useRef(false);
     const clickTimerRef = useRef(null);
 
     const getSuggestionsForField = (field) => {
@@ -136,11 +138,10 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
                 if (!rawInput.trim()) {
                     if (!editingCell.originalValue) return { patch: {} };
                     if (currentSmsUrl) {
-                        const confirmed = typeof window !== 'undefined' && typeof window.confirm === 'function'
-                            ? window.confirm('清空手机号后，是否同时清除该账号的接码地址？')
-                            : true;
-                        if (!confirmed) return { cancelled: true };
-                        return { patch: { phone: '', smsUrl: '' } };
+                        return {
+                            confirm: '清空手机号后，是否同时清除该账号的接码地址？',
+                            patch: { phone: '', smsUrl: '' },
+                        };
                     }
                     return { patch: { phone: '' } };
                 }
@@ -150,13 +151,10 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
 
                 const phoneChanged = normalizePhoneNumber(nextPhone) !== normalizePhoneNumber(editingCell.originalValue || '');
                 if (phoneChanged && currentSmsUrl && !smsUrl) {
-                    const confirmed = typeof window !== 'undefined' && typeof window.confirm === 'function'
-                        ? window.confirm('手机号已改变，是否同时清除该账号原来的接码地址？')
-                        : true;
-                    if (!confirmed) return { cancelled: true };
-                    patch.phone = normalizePhoneNumber(nextPhone);
-                    patch.smsUrl = '';
-                    return { patch };
+                    return {
+                        confirm: '手机号已改变，是否同时清除该账号原来的接码地址？',
+                        patch: { phone: normalizePhoneNumber(nextPhone), smsUrl: '' },
+                    };
                 }
 
                 patch.phone = normalizePhoneNumber(nextPhone);
@@ -186,39 +184,52 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
         return { patch };
     };
 
-    const saveEdit = (rawValueOverride) => {
-        if (!editingCell) {
-            cancelEdit();
-            return;
-        }
-
-        const { patch, error, cancelled } = buildSavePatch(rawValueOverride);
-        if (cancelled) {
-            // 用户取消了「同时清除旧接码地址」的确认，放弃本次保存
-            cancelEdit();
-            return;
-        }
-        if (error) {
-            if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-                window.alert(error);
-            }
-            return;
-        }
-        if (!patch || Object.keys(patch).length === 0) {
-            cancelEdit();
-            return;
-        }
-
+    const commitPatch = (accountId, patch) => {
         const keys = Object.keys(patch);
         if (typeof onInlineEditMany === 'function' && keys.length > 1) {
-            onInlineEditMany(editingCell.accountId, patch);
+            onInlineEditMany(accountId, patch);
         } else if (onInlineEdit) {
             // 单字段，或没有批量回调时退化为逐字段提交
             for (const key of keys) {
-                onInlineEdit(editingCell.accountId, key, patch[key]);
+                onInlineEdit(accountId, key, patch[key]);
             }
         }
+    };
+
+    const saveEdit = (rawValueOverride) => {
+        // 确认框弹出时输入框会失焦，再次触发的保存直接忽略
+        if (confirmingRef.current) return undefined;
+        if (!editingCell) {
+            cancelEdit();
+            return undefined;
+        }
+
+        const { accountId } = editingCell;
+        const { patch, error, confirm } = buildSavePatch(rawValueOverride);
+        if (confirm) {
+            // 例如「同时清除旧接码地址」：取消则放弃本次保存
+            confirmingRef.current = true;
+            return confirmDialog(confirm)
+                .then((confirmed) => {
+                    if (confirmed) commitPatch(accountId, patch);
+                })
+                .finally(() => {
+                    confirmingRef.current = false;
+                    cancelEdit();
+                });
+        }
+        if (error) {
+            messageDialog(error, { kind: 'warning' });
+            return undefined;
+        }
+        if (!patch || Object.keys(patch).length === 0) {
+            cancelEdit();
+            return undefined;
+        }
+
+        commitPatch(accountId, patch);
         cancelEdit();
+        return undefined;
     };
 
     const handleEditableInputBlur = () => {

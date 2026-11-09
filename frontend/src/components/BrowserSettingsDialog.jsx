@@ -3,6 +3,7 @@ import { X, FolderOpen, HardDrive, Eraser } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import api from '../services/api';
 import { formatBytes, describeClearCacheResult } from '../utils/browserUtils';
+import { confirmDialog } from '../utils/dialogs';
 
 const EMPTY_FORM = { browserPath: '', profilesRoot: '' };
 
@@ -53,12 +54,18 @@ const BrowserSettingsDialog = ({ isOpen, firstRun = false, onClose, onNotify }) 
         setForm(prev => ({ ...prev, [field]: value }));
     };
 
+    const isMac = settings?.platform === 'macos';
+
     const pickBrowser = async () => {
         try {
+            // macOS 上选择 .app 应用包（选择框会把应用包当作单个文件）
             const selected = await open({
                 multiple: false,
                 directory: false,
-                filters: [{ name: '浏览器程序', extensions: ['exe'] }],
+                defaultPath: isMac ? '/Applications' : undefined,
+                filters: [isMac
+                    ? { name: '应用程序', extensions: ['app'] }
+                    : { name: '浏览器程序', extensions: ['exe'] }],
             });
             if (typeof selected === 'string') setForm(prev => ({ ...prev, browserPath: selected }));
         } catch (err) {
@@ -114,7 +121,7 @@ const BrowserSettingsDialog = ({ isOpen, firstRun = false, onClose, onNotify }) 
     };
 
     const handleClearAll = async () => {
-        if (!window.confirm('清理全部账号浏览器的缓存吗？\n不会影响登录状态；正在运行的浏览器会被跳过。')) return;
+        if (!await confirmDialog('清理全部账号浏览器的缓存吗？\n不会影响登录状态；正在运行的浏览器会被跳过。', { okLabel: '清理' })) return;
         setClearing(true);
         try {
             const result = await api.clearBrowserCache(null);
@@ -208,7 +215,8 @@ const BrowserSettingsDialog = ({ isOpen, firstRun = false, onClose, onNotify }) 
                         )}
 
                         <p className="text-xs gm-text-3 leading-5">
-                            配置目录不在数据库备份范围内。浏览器的登录 cookie 由 Windows 加密并绑定当前系统用户，
+                            配置目录不在数据库备份范围内。浏览器的登录 cookie 由系统加密并绑定当前系统用户
+                            {isMac ? '（macOS 钥匙串）' : '（Windows DPAPI）'}，
                             复制到其他电脑或重装系统后需要重新登录。
                         </p>
 

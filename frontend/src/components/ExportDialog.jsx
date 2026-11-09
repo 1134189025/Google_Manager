@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, ChevronUp, ChevronDown, FileText } from 'lucide-react';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { messageDialog } from '../utils/dialogs';
 
 const DEFAULT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
 
@@ -249,7 +250,7 @@ const ExportDialog = ({
 
     const handleExport = () => {
         if (selectedFields.length === 0) {
-            alert('请至少选择一个字段');
+            messageDialog('请至少选择一个字段', { kind: 'warning' });
             return;
         }
 

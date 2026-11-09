@@ -18,8 +18,10 @@ pub fn run() {
     let db = Database(Mutex::new(conn));
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        // 在线更新：从 GitHub Releases 的 latest.json 检查新版本，安装包须带签名（公钥在 tauri.conf.json）
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(db)
         .manage(sms::SmsService::new())
         .setup(|app| {
@@ -51,6 +53,7 @@ pub fn run() {
             commands::generate_totp,
             commands::batch_import,
             commands::export_accounts_text,
+            commands::export_accounts_to_file,
             commands::fetch_sms_code,
             commands::open_account_browser,
             commands::get_browser_statuses,

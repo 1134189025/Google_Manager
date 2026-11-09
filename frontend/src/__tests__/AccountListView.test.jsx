@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import AccountListView from '../components/AccountListView';
 import { CLICK_COPY_DELAY_MS } from '../hooks/useInlineEdit';
+import { formatDbTimestamp } from '../utils/timeUtils';
 
 // Mock HistoryDrawer to avoid API calls and state issues
 vi.mock('../components/HistoryDrawer', () => ({
@@ -207,8 +208,10 @@ describe('AccountListView 组件', () => {
 
       render(<AccountListView {...defaultProps} accounts={accountsWithTime} />);
 
-      expect(screen.getByText('2024-01-01')).toBeInTheDocument();
-      expect(screen.getByText('12:34:56')).toBeInTheDocument();
+      // 数据库时间是 UTC，界面按本机时区显示，期望值同样按本机时区换算
+      const [date, time] = formatDbTimestamp('2024-01-01 12:34:56').split(' ');
+      expect(screen.getByText(date)).toBeInTheDocument();
+      expect(screen.getByText(time)).toBeInTheDocument();
     });
 
     it('显示账号序号', () => {

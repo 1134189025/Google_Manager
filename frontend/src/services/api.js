@@ -235,6 +235,17 @@ const api = {
         }
     },
 
+    // 生成导出文本并由后端直接写入指定文件，返回 { path, count }
+    async exportAccountsToFile(accountIds, search, config, path) {
+        try {
+            const result = await adapter.exportAccountsToFile(accountIds, search, config, path);
+            return { success: true, data: result };
+        } catch (error) {
+            console.error('Failed to export accounts to file:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
     // ─── 账号独立浏览器 ───────────────────────────────────────────
 
     // 打开账号浏览器：未运行则启动，运行中则切到已有窗口

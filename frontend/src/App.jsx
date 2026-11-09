@@ -6,7 +6,8 @@ import {
     CheckCircle2,
     Moon,
     Sun,
-    Settings
+    Settings,
+    RefreshCw
 } from 'lucide-react';
 
 // 导入服务和组件
@@ -15,12 +16,15 @@ import AccountListView from './components/AccountListView';
 import ImportView from './components/ImportView';
 import EditModal from './components/EditModal';
 import BrowserSettingsDialog from './components/BrowserSettingsDialog';
+import UpdateDialog from './components/UpdateDialog';
+import useAppUpdater from './hooks/useAppUpdater';
 import { normalizePhoneNumber } from './utils/phoneUtils';
 import { normalizeSmsUrlInput } from './utils/smsUtils';
 import { normalizeMultiValueValue, splitGroupNameValues } from './utils/multiValueField';
 import { APP_BUILD_TIME, buildVersionLabel, formatBuildTime } from './utils/buildInfo';
 
 const App = () => {
+    const updater = useAppUpdater();
     const [view, setView] = useState('list');
     const [accounts, setAccounts] = useState([]);
     const [search, setSearch] = useState('');
@@ -460,6 +464,15 @@ const App = () => {
                     >
                         {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                     </button>
+                    <button
+                        onClick={updater.checkNow}
+                        className="gm-icon-btn gm-update-btn"
+                        title={updater.hasUpdate ? `发现新版本 v${updater.version}，点击查看` : '检查更新'}
+                        aria-label="检查更新"
+                    >
+                        <RefreshCw size={18} />
+                        {updater.hasUpdate && <span className="gm-update-dot" aria-hidden="true" />}
+                    </button>
                     <div
                         className="side-nav-version"
                         title={`版本 ${buildVersionLabel} · 编译 ${APP_BUILD_TIME || '未知'}`}
@@ -516,6 +529,8 @@ const App = () => {
                 onClose={() => setEditingAccount(null)}
                 onSubmit={handleUpdate}
             />
+
+            <UpdateDialog updater={updater} />
 
             <BrowserSettingsDialog
                 isOpen={browserSettingsDialog.isOpen}

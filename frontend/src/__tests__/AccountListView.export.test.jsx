@@ -11,15 +11,14 @@ vi.mock('../components/HistoryDrawer', () => ({
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn(),
-}));
-
-vi.mock('@tauri-apps/plugin-fs', () => ({
-  writeTextFile: vi.fn(),
+  ask: vi.fn(),
+  message: vi.fn(),
 }));
 
 vi.mock('../services/api', () => ({
   default: {
     exportAccountsText: vi.fn(),
+    exportAccountsToFile: vi.fn(),
   },
 }));
 
@@ -72,7 +71,8 @@ describe('AccountListView 导出弹窗与参数', () => {
     vi.clearAllMocks();
     window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
     api.exportAccountsText.mockResolvedValue({ success: true, data: 'mock export result' });
-    save.mockResolvedValue(null);
+    api.exportAccountsToFile.mockResolvedValue({ success: true, data: { path: '/tmp/out.txt', count: 2 } });
+    save.mockResolvedValue('/tmp/out.txt');
   });
 
   it('筛选模式显示数量并传递 search 参数', async () => {
@@ -89,7 +89,7 @@ describe('AccountListView 导出弹窗与参数', () => {
     await user.click(screen.getByRole('button', { name: '导出' }));
 
     await waitFor(() => {
-      expect(api.exportAccountsText).toHaveBeenCalledWith(
+      expect(api.exportAccountsToFile).toHaveBeenCalledWith(
         null,
         'first',
         expect.objectContaining({
@@ -98,6 +98,7 @@ describe('AccountListView 导出弹窗与参数', () => {
           categorySort: { field: '', direction: 'asc' },
           categoryLabelTemplate: '{index}. {groupField}: {groupValue}（共 {count} 条）',
         }),
+        '/tmp/out.txt',
       );
     });
   });
@@ -114,10 +115,11 @@ describe('AccountListView 导出弹窗与参数', () => {
     await user.click(screen.getByRole('button', { name: '导出' }));
 
     await waitFor(() => {
-      expect(api.exportAccountsText).toHaveBeenCalledWith(
+      expect(api.exportAccountsToFile).toHaveBeenCalledWith(
         [1, 2],
         null,
         expect.any(Object),
+        '/tmp/out.txt',
       );
     });
   });
@@ -137,10 +139,11 @@ describe('AccountListView 导出弹窗与参数', () => {
     await user.click(screen.getByRole('button', { name: '导出' }));
 
     await waitFor(() => {
-      expect(api.exportAccountsText).toHaveBeenCalledWith(
+      expect(api.exportAccountsToFile).toHaveBeenCalledWith(
         [1],
         null,
         expect.any(Object),
+        '/tmp/out.txt',
       );
     });
   });
@@ -167,7 +170,7 @@ describe('AccountListView 导出弹窗与参数', () => {
     await user.click(screen.getByRole('button', { name: '导出' }));
 
     await waitFor(() => {
-      expect(api.exportAccountsText).toHaveBeenCalledWith(
+      expect(api.exportAccountsToFile).toHaveBeenCalledWith(
         null,
         null,
         expect.objectContaining({
@@ -175,8 +178,54 @@ describe('AccountListView 导出弹窗与参数', () => {
           categorySort: { field: 'country', direction: 'desc' },
           categoryLabelTemplate: '[{index}] {groupField}-{groupValue} 共{count}条',
         }),
+        '/tmp/out.txt',
       );
     });
+  });
+
+  it('导出成功：用本机日期作为默认文件名，提示导出条数并关闭弹窗', async () => {
+    const user = userEvent.setup();
+    const onNotify = vi.fn();
+    render(<AccountListView {...createDefaultProps({ onNotify })} />);
+
+    await user.click(screen.getByRole('button', { name: '导出账号' }));
+    await user.click(screen.getByRole('button', { name: '导出' }));
+
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const localDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith('已导出 2 个账号到 out.txt'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      defaultPath: `accounts_export_${localDate}.txt`,
+    }));
+    expect(api.exportAccountsText).not.toHaveBeenCalled();
+    expect(screen.queryByText('导出账号配置')).not.toBeInTheDocument();
+  });
+
+  it('取消保存对话框时不导出、弹窗保留', async () => {
+    const user = userEvent.setup();
+    save.mockResolvedValue(null);
+    render(<AccountListView {...createDefaultProps()} />);
+
+    await user.click(screen.getByRole('button', { name: '导出账号' }));
+    await user.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(api.exportAccountsToFile).not.toHaveBeenCalled();
+    expect(screen.getByText('导出账号配置')).toBeInTheDocument();
+  });
+
+  it('导出失败时提示原因、弹窗保留', async () => {
+    const user = userEvent.setup();
+    const onNotify = vi.fn();
+    api.exportAccountsToFile.mockResolvedValue({ success: false, message: '写入导出文件失败 /x：权限不足' });
+    render(<AccountListView {...createDefaultProps({ onNotify })} />);
+
+    await user.click(screen.getByRole('button', { name: '导出账号' }));
+    await user.click(screen.getByRole('button', { name: '导出' }));
+
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith('导出失败：写入导出文件失败 /x：权限不足', 'error'));
+    expect(screen.getByText('导出账号配置')).toBeInTheDocument();
   });
 
   it('非 Tauri 环境下导出时支持直接消费字符串结果并触发浏览器下载', async () => {

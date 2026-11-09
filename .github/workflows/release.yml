@@ -1,7 +1,10 @@
-name: 发布 Windows 版本
+name: 发布 Windows / macOS 版本
 
 # 推送 .github/release-notes/v<版本号>.md 后自动测试、构建并发布该版本，也可在 Actions 页面手动运行。
 # 版本号取自 src-tauri/tauri.conf.json；同名 Release 已存在时跳过，不会重复发布。
+# Windows 与 macOS 并行构建，两边都成功后才创建 Release。
+# 在线更新：构建时用仓库 Secrets 里的私钥给更新包签名（TAURI_SIGNING_PRIVATE_KEY / _PASSWORD），
+# 发布时生成 latest.json 一并上传；已安装的应用从 releases/latest/download/latest.json 检查新版本。
 on:
   push:
     paths:
@@ -16,13 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
+  prepare:
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes: ${{ steps.version.outputs.notes }}
+      skip: ${{ steps.version.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,13 +48,21 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+  windows:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
-        if: steps.version.outputs.skip != 'true'
         with:
           version: 10
 
       - uses: actions/setup-node@v4
-        if: steps.version.outputs.skip != 'true'
         with:
           node-version: 22
           cache: pnpm
@@ -59,40 +71,37 @@ jobs:
             frontend/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.version.outputs.skip != 'true'
 
       - uses: Swatinem/rust-cache@v2
-        if: steps.version.outputs.skip != 'true'
         with:
           workspaces: src-tauri
 
       - name: 安装依赖
-        if: steps.version.outputs.skip != 'true'
         run: |
           pnpm install --frozen-lockfile
           cd frontend && pnpm install --frozen-lockfile
 
       - name: 前端测试
-        if: steps.version.outputs.skip != 'true'
         working-directory: frontend
         run: pnpm test -- --run
 
       - name: Rust 测试
-        if: steps.version.outputs.skip != 'true'
         working-directory: src-tauri
         run: cargo test
 
-      - name: 构建安装包
-        if: steps.version.outputs.skip != 'true'
+      - name: 构建安装包（含签名的更新包）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm run build
 
       - name: 整理发布文件
-        if: steps.version.outputs.skip != 'true'
         run: |
-          v="${{ steps.version.outputs.version }}"
+          v="${{ needs.prepare.outputs.version }}"
           out=dist-release
           mkdir -p "$out"
           cp "src-tauri/target/release/bundle/nsis/GoogleManager_${v}_x64-setup.exe" "$out/"
+          cp "src-tauri/target/release/bundle/nsis/GoogleManager_${v}_x64-setup.exe.sig" "$out/"
           cp "src-tauri/target/release/bundle/msi/GoogleManager_${v}_x64_en-US.msi" "$out/"
           # 免安装版就是主程序本身
           exe=src-tauri/target/release/google-manager.exe
@@ -100,12 +109,105 @@ jobs:
           cp "$exe" "$out/GoogleManager_${v}_x64_portable.exe"
           ls -la "$out"
 
-      - name: 创建 Release
-        if: steps.version.outputs.skip != 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist-release/*
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+
+      # 通用二进制：同时支持 Apple 芯片与 Intel
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
         run: |
-          v="${{ steps.version.outputs.version }}"
+          pnpm install --frozen-lockfile
+          cd frontend && pnpm install --frozen-lockfile
+
+      - name: 前端测试
+        working-directory: frontend
+        run: pnpm test -- --run
+
+      - name: Rust 测试
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: 构建 dmg 与更新包（通用二进制，ad-hoc 签名）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm run build -- --target universal-apple-darwin
+
+      - name: 整理发布文件
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          out=dist-release
+          mkdir -p "$out"
+          cp "$bundle/dmg/GoogleManager_${v}_universal.dmg" "$out/"
+          # 在线更新包：改名带上版本号，签名针对文件内容，改名不影响校验
+          cp "$bundle/macos/GoogleManager.app.tar.gz" "$out/GoogleManager_${v}_universal.app.tar.gz"
+          cp "$bundle/macos/GoogleManager.app.tar.gz.sig" "$out/GoogleManager_${v}_universal.app.tar.gz.sig"
+          ls -la "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist-release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: 生成在线更新清单 latest.json
+        run: |
+          node scripts/make-latest-json.mjs \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.notes }}" \
+            dist-release
+          cat dist-release/latest.json
+
+      - name: 创建 Release
+        run: |
+          v="${{ needs.prepare.outputs.version }}"
+          ls -la dist-release
           gh release create "v${v}" dist-release/* \
             --target "${{ github.sha }}" \
             --title "v${v}" \
-            --notes-file "${{ steps.version.outputs.notes }}" \
+            --notes-file "${{ needs.prepare.outputs.notes }}" \
             --latest

@@ -91,9 +91,9 @@ export interface BrowserSettings {
   defaultProfilesRoot: string;
   effectiveProfilesRoot: string;
   configured: boolean;
+  /** 运行平台：'windows' | 'macos' | 'linux'（Rust `std::env::consts::OS`） */
+  platform?: string;
 }
-
-export interface BrowserSettingsInput {
   browserPath: string | null;
   profilesRoot: string | null;
 }
@@ -173,6 +173,12 @@ export interface ExportConfig {
   categoryLabelTemplate: string;
 }
 
+/** 导出到文件的结果 */
+export interface ExportFileResult {
+  path: string;
+  count: number;
+}
+
 export interface ApiAdapter {
   getAccounts(search?: string): Promise<Account[]>;
   getDeletedAccounts(): Promise<Account[]>;
@@ -196,6 +202,12 @@ export interface ApiAdapter {
     search: string | null,
     config: ExportConfig,
   ): Promise<string>;
+  exportAccountsToFile(
+    accountIds: number[] | null,
+    search: string | null,
+    config: ExportConfig,
+    path: string,
+  ): Promise<ExportFileResult>;
   openAccountBrowser(accountId: number): Promise<OpenBrowserResult>;
   getBrowserStatuses(emails: string[]): Promise<BrowserStatusMap>;
   clearBrowserCache(accountIds: number[] | null): Promise<ClearBrowserCacheResult>;

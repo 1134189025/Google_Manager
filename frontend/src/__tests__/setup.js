@@ -10,3 +10,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 window.__TAURI_INTERNALS__ = {
   invoke: vi.fn(),
 };
+
+// 在线更新插件：默认「没有新版本」，需要时在用例里覆盖
+vi.mock('@tauri-apps/plugin-updater', () => ({
+  check: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('@tauri-apps/plugin-process', () => ({
+  relaunch: vi.fn().mockResolvedValue(undefined),
+}));

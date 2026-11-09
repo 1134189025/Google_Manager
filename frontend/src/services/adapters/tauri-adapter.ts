@@ -17,6 +17,7 @@ import type {
   ClearBrowserCacheResult,
   DeleteBrowserProfilesResult,
   BrowserUsage,
+  ExportFileResult,
 } from '../types';
 import { snakeToCamel, camelToSnake } from '../utils';
 
@@ -168,6 +169,24 @@ export class TauriAdapter implements ApiAdapter {
       search: search || null,
       config,
     });
+  }
+
+  async exportAccountsToFile(
+    accountIds: number[] | null,
+    search: string | null,
+    config: ExportConfig,
+    path: string,
+  ): Promise<ExportFileResult> {
+    const result = await this.invokeCommand<any>('export_accounts_to_file', {
+      accountIds: accountIds || null,
+      search: search || null,
+      config,
+      path,
+    });
+    return {
+      path: String(result?.path ?? path),
+      count: Number(result?.count ?? 0),
+    };
   }
 
   async deleteAllAccounts(): Promise<number> {

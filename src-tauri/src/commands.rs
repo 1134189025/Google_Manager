@@ -178,9 +178,57 @@ pub fn export_accounts_text(
     config: ExportConfig,
 ) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    render_export(&conn, account_ids.as_deref(), search.as_deref(), &config).map(|(text, _)| text)
+}
 
-    let accounts =
-        database::query_accounts_for_export(&conn, account_ids.as_deref(), search.as_deref())?;
+/// 导出结果：写入的文件路径与账号条数
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ExportFileResult {
+    pub path: String,
+    pub count: usize,
+}
+
+/// 生成导出文本并直接写入用户在保存对话框中选择的文件（不经过前端 fs 插件）
+#[tauri::command]
+pub async fn export_accounts_to_file(
+    db: State<'_, Database>,
+    account_ids: Option<Vec<i64>>,
+    search: Option<String>,
+    config: ExportConfig,
+    path: String,
+) -> Result<ExportFileResult, String> {
+    let (text, count) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        render_export(&conn, account_ids.as_deref(), search.as_deref(), &config)?
+    };
+    let path = std::path::PathBuf::from(path.trim());
+    run_blocking(move || {
+        write_export_file(&path, &text)?;
+        Ok(ExportFileResult {
+            path: path.to_string_lossy().into_owned(),
+            count,
+        })
+    })
+    .await?
+}
+
+/// 写导出文件：路径必须是绝对路径，所在目录必须存在
+pub(crate) fn write_export_file(path: &std::path::Path, text: &str) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err(format!("导出路径必须是绝对路径：{}", path.display()));
+    }
+    std::fs::write(path, text).map_err(|e| format!("写入导出文件失败 {}：{}", path.display(), e))
+}
+
+/// 生成导出文本，返回 (文本, 账号条数)
+fn render_export(
+    conn: &rusqlite::Connection,
+    account_ids: Option<&[i64]>,
+    search: Option<&str>,
+    config: &ExportConfig,
+) -> Result<(String, usize), String> {
+    let accounts = database::query_accounts_for_export(conn, account_ids, search)?;
+    let count = accounts.len();
 
     let mut output = String::new();
 
@@ -265,9 +313,9 @@ pub fn export_accounts_text(
     }
 
     // 导出账号数据（在内存中完成排序/分组，避免动态 SQL 带来的注入风险）
-    output.push_str(&build_export_accounts_output(accounts, &config));
+    output.push_str(&build_export_accounts_output(accounts, config));
 
-    Ok(output)
+    Ok((output, count))
 }
 
 // ─── 账号独立浏览器 ─────────────────────────────────────────────────
@@ -428,7 +476,7 @@ pub fn open_browser_profile_dir(db: State<Database>, account_id: i64) -> Result<
         let account = database::get_account_by_id(&conn, account_id)?;
         (account.email, read_browser_settings(&conn)?)
     };
-    browser::open_in_explorer(&browser::profile_dir(
+    browser::open_in_file_manager(&browser::profile_dir(
         &browser::profiles_root(&settings),
         &email,
     ))
@@ -526,6 +574,35 @@ mod tests {
 
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].email, "matched@example.com");
+    }
+
+    #[test]
+    fn test_render_export_and_write_file_with_chinese_content() {
+        let conn = setup_export_query_test_db();
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params!["cn@example.com", "中文密码", "组A", "pro", "unsold"],
+        )
+        .unwrap();
+        let mut config = build_base_export_config();
+        config.fields = vec!["email".to_string(), "password".to_string()];
+        config.include_stats = true;
+
+        let (text, count) = render_export(&conn, None, None, &config).unwrap();
+        assert_eq!(count, 1);
+        assert!(text.contains("总账号数: 1"));
+        assert!(text.contains("组A: 1 个"));
+        assert!(text.ends_with("cn@example.com----中文密码\n"));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("导出 结果.txt");
+        write_export_file(&path, &text).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+        let err = write_export_file(&tmp.path().join("missing/out.txt"), &text).unwrap_err();
+        assert!(err.contains("写入导出文件失败"));
+        let err = write_export_file(std::path::Path::new("relative.txt"), &text).unwrap_err();
+        assert!(err.contains("绝对路径"));
     }
 
     #[test]

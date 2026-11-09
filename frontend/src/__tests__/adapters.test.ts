@@ -117,6 +117,28 @@ describe('prepareInvokeArgs 参数命名（顶层 camelCase / 嵌套 snake_case�
     expect(args.config.account_order).toEqual({ field: 'created_at', direction: 'desc' });
   });
 
+  it('端到端：exportAccountsToFile 传 path 与 snake_case config，返回条数', async () => {
+    mockedInvoke.mockClear();
+    mockedInvoke.mockResolvedValue({ path: '/Users/me/导出.txt', count: 3 } as never);
+    const adapter = new TauriAdapter();
+    const result = await adapter.exportAccountsToFile(null, 'alice', {
+      separator: '|',
+      fields: ['email'],
+      includeStats: true,
+      accountOrder: { field: 'id', direction: 'desc' },
+      categorySort: { field: '', direction: 'asc' },
+      categoryLabelTemplate: '',
+    }, '/Users/me/导出.txt');
+
+    const [command, args] = mockedInvoke.mock.calls[0] as [string, any];
+    expect(command).toBe('export_accounts_to_file');
+    expect(args.path).toBe('/Users/me/导出.txt');
+    expect(args.accountIds).toBeNull();
+    expect(args.search).toBe('alice');
+    expect(args.config).toHaveProperty('include_stats', true);
+    expect(result).toEqual({ path: '/Users/me/导出.txt', count: 3 });
+  });
+
   it('端到端：restoreBackup 发送 camelCase 的 backupName', async () => {
     mockedInvoke.mockResolvedValue(undefined as never);
     const adapter = new TauriAdapter();

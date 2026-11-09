@@ -1,11 +1,16 @@
 //! 账号独立浏览器：每个账号对应一个 Chrome / Edge 配置目录（--user-data-dir）
 //!
-//! 运行检测（已在本机 Chrome 与 Edge 实测确认）：
+//! 运行检测：
+//! - Windows（已在本机 Chrome 与 Edge 实测确认）：
 //!   Chromium 在 Windows 上用一个隐藏的消息窗口实现单实例，
 //!   类名 `Chrome_MessageWindow`，标题为配置目录的绝对路径。
 //!   标题比较不区分大小写，但必须是反斜杠分隔、无结尾分隔符的形式。
 //!   用 FindWindowExW(HWND_MESSAGE, ...) 按目录查找即可拿到浏览器主进程号，
 //!   不必扫描进程，也不会与浏览器争抢 lockfile；管理器重启后同样有效。
+//! - macOS（已在本机 Chrome 实测确认）：
+//!   Chromium 在配置目录里放一个符号链接 `SingletonLock`，指向 `<主机名>-<主进程号>`。
+//!   读链接拿到进程号，再核对该进程仍存在、且启动时间不晚于链接的创建时间
+//!   （浏览器崩溃后链接会残留，进程号可能已被别的程序复用）。
 //!
 //! 本模块不访问数据库：设置由命令层读出后以 `BrowserSettings` 传入。
 
@@ -90,6 +95,8 @@ pub struct BrowserSettingsView {
     pub effective_profiles_root: String,
     /// 是否已确认过配置根目录（首次打开前需要确认）
     pub configured: bool,
+    /// 运行平台：`windows` / `macos` / `linux`，前端据此决定选择框的文件类型与提示文案
+    pub platform: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -138,9 +145,9 @@ pub fn is_profile_key(name: &str) -> bool {
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
-/// 规范化路径字符串：去首尾空格、统一为反斜杠、去掉结尾分隔符（保留盘符根 `X:\`）。
+/// Windows 路径规范化：去首尾空格、统一为反斜杠、去掉结尾分隔符（保留盘符根 `X:\`）。
 /// 浏览器消息窗口的标题就是这种形式，路径不一致会导致找不到运行中的窗口。
-pub fn normalize_path_str(value: &str) -> String {
+pub fn normalize_windows_path(value: &str) -> String {
     let mut path = value.trim().replace('/', "\\");
     while path.len() > 1 && path.ends_with('\\') {
         if path.len() == 3 && path.as_bytes()[1] == b':' {
@@ -149,6 +156,24 @@ pub fn normalize_path_str(value: &str) -> String {
         path.pop();
     }
     path
+}
+
+/// macOS / Linux 路径规范化：去首尾空格、去掉结尾的 `/`（保留根目录 `/`）
+pub fn normalize_posix_path(value: &str) -> String {
+    let mut path = value.trim().to_string();
+    while path.len() > 1 && path.ends_with('/') {
+        path.pop();
+    }
+    path
+}
+
+/// 按当前平台规范化路径字符串
+pub fn normalize_path_str(value: &str) -> String {
+    if cfg!(windows) {
+        normalize_windows_path(value)
+    } else {
+        normalize_posix_path(value)
+    }
 }
 
 /// 默认配置根目录：设置了数据目录环境变量时放在其下（便于开发隔离），否则放在本地应用数据目录
@@ -174,8 +199,8 @@ pub fn resolve_profiles_root(
     }
 }
 
-/// 候选浏览器路径：Chrome 优先，其次 Edge
-pub fn browser_candidates(
+/// Windows 候选浏览器路径：Chrome 优先，其次 Edge
+pub fn windows_browser_candidates(
     program_files: Option<PathBuf>,
     program_files_x86: Option<PathBuf>,
     local_app_data: Option<PathBuf>,
@@ -197,6 +222,66 @@ pub fn browser_candidates(
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// macOS 候选浏览器（`.app` 应用包）：Chrome 优先，其次 Edge；
+/// 每种先找 `/Applications`，再找用户自己的 `~/Applications`
+pub fn macos_browser_candidates(home: Option<PathBuf>) -> Vec<PathBuf> {
+    let system = PathBuf::from("/Applications");
+    let user = home.map(|home| home.join("Applications"));
+    ["Google Chrome.app", "Microsoft Edge.app"]
+        .iter()
+        .flat_map(|app| {
+            [Some(system.join(app)), user.as_ref().map(|dir| dir.join(app))]
+                .into_iter()
+                .flatten()
+        })
+        .collect()
+}
+
+/// 是否是 macOS 应用包（以 `.app` 结尾的目录）
+pub fn is_app_bundle(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| ext.eq_ignore_ascii_case("app"))
+        .unwrap_or(false)
+        && path.is_dir()
+}
+
+/// 浏览器程序是否存在：可执行文件；macOS 上也可以是 `.app` 应用包
+pub fn browser_program_exists(path: &Path) -> bool {
+    path.is_file() || (cfg!(target_os = "macos") && is_app_bundle(path))
+}
+
+/// macOS 上包含该程序的应用包：本身就是 `.app` 时返回自身，
+/// 是 `.app` 内部的可执行文件时返回外层应用包
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn enclosing_app_bundle(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|candidate| is_app_bundle(candidate))
+        .map(Path::to_path_buf)
+}
+
+/// macOS 上 Chromium 的缓存目录：配置目录在 `~/Library/Application Support` 下时，
+/// 浏览器会把磁盘缓存放到 `~/Library/Caches` 下相同的相对路径（已在本机 Chrome 实测确认）。
+/// 返回值只是推算的路径，可能并不存在。
+pub fn macos_cache_mirror(profile_dir: &Path, home: &Path) -> Option<PathBuf> {
+    let relative = profile_dir
+        .strip_prefix(home.join("Library").join("Application Support"))
+        .ok()?;
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+    Some(home.join("Library").join("Caches").join(relative))
+}
+
+/// 本机上该配置目录对应的额外缓存目录（只有 macOS 有，且需实际存在）
+fn cache_mirror(profile_dir: &Path) -> Option<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    dirs::home_dir()
+        .and_then(|home| macos_cache_mirror(profile_dir, &home))
+        .filter(|mirror| mirror.is_dir())
 }
 
 /// 按顺序返回第一个存在的浏览器程序
@@ -249,12 +334,18 @@ pub fn profiles_root(settings: &BrowserSettings) -> PathBuf {
 
 /// 自动检测本机浏览器
 pub fn detect_system_browser() -> Option<PathBuf> {
-    let candidates = browser_candidates(
-        env_path("ProgramFiles"),
-        env_path("ProgramFiles(x86)"),
-        dirs::data_local_dir(),
-    );
-    detect_browser(&candidates, |path| path.is_file())
+    let candidates = if cfg!(windows) {
+        windows_browser_candidates(
+            env_path("ProgramFiles"),
+            env_path("ProgramFiles(x86)"),
+            dirs::data_local_dir(),
+        )
+    } else if cfg!(target_os = "macos") {
+        macos_browser_candidates(dirs::home_dir())
+    } else {
+        Vec::new()
+    };
+    detect_browser(&candidates, browser_program_exists)
 }
 
 /// 实际使用的浏览器程序：手动指定优先，其次自动检测
@@ -280,7 +371,32 @@ pub fn settings_view(settings: &BrowserSettings) -> BrowserSettingsView {
         default_profiles_root: system_default_profiles_root().to_string_lossy().into_owned(),
         effective_profiles_root: profiles_root(settings).to_string_lossy().into_owned(),
         configured: settings.profiles_root.is_some(),
+        platform: std::env::consts::OS.to_string(),
     }
+}
+
+/// 校验手动指定的浏览器程序（已规范化的绝对路径）
+fn check_browser_program(path: &str) -> Result<(), String> {
+    let candidate = Path::new(path);
+    let ok = if cfg!(windows) {
+        let is_exe = candidate
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("exe"))
+            .unwrap_or(false);
+        candidate.is_absolute() && is_exe && candidate.is_file()
+    } else {
+        candidate.is_absolute() && browser_program_exists(candidate)
+    };
+    if ok {
+        return Ok(());
+    }
+    Err(if cfg!(windows) {
+        format!("浏览器程序不存在或不是 .exe 文件：{}", path)
+    } else if cfg!(target_os = "macos") {
+        format!("浏览器程序不存在：{}（请选择 .app 应用，例如 /Applications/Google Chrome.app）", path)
+    } else {
+        format!("浏览器程序不存在：{}", path)
+    })
 }
 
 /// 校验并规范化前端提交的设置；配置根目录留空时写入默认值（视为已确认）
@@ -290,14 +406,7 @@ pub fn validate_settings(
 ) -> Result<BrowserSettings, String> {
     let browser_path = match input.browser_path.as_deref().map(normalize_path_str) {
         Some(path) if !path.is_empty() => {
-            let candidate = Path::new(&path);
-            let is_exe = candidate
-                .extension()
-                .map(|ext| ext.eq_ignore_ascii_case("exe"))
-                .unwrap_or(false);
-            if !candidate.is_absolute() || !is_exe || !candidate.is_file() {
-                return Err(format!("浏览器程序不存在或不是 .exe 文件：{}", path));
-            }
+            check_browser_program(&path)?;
             Some(path)
         }
         _ => None,
@@ -338,26 +447,42 @@ pub fn dir_size(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// 某个配置目录中实际存在的缓存目录
+/// 某个配置目录中实际存在的缓存目录（macOS 上包括 `~/Library/Caches` 下对应目录里的缓存）
 pub fn cache_targets(profile_dir: &Path) -> Vec<PathBuf> {
-    let mut targets: Vec<PathBuf> = ROOT_CACHE_DIRS
-        .iter()
-        .map(|name| profile_dir.join(name))
-        .collect();
+    let mut bases = vec![profile_dir.to_path_buf()];
+    bases.extend(cache_mirror(profile_dir));
 
-    if let Ok(entries) = fs::read_dir(profile_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let is_user_dir = name == "Default" || name.starts_with("Profile ");
-            if is_user_dir && entry.path().is_dir() {
-                for sub in PROFILE_CACHE_DIRS {
-                    targets.push(entry.path().join(sub));
+    let mut targets = Vec::new();
+    for base in &bases {
+        targets.extend(ROOT_CACHE_DIRS.iter().map(|name| base.join(name)));
+        if let Ok(entries) = fs::read_dir(base) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let is_user_dir = name == "Default" || name.starts_with("Profile ");
+                if is_user_dir && entry.path().is_dir() {
+                    for sub in PROFILE_CACHE_DIRS {
+                        targets.push(entry.path().join(sub));
+                    }
                 }
             }
         }
     }
 
     targets.into_iter().filter(|path| path.is_dir()).collect()
+}
+
+/// 删除配置目录对应的额外缓存目录（只有 macOS 有；目录里只有缓存，失败只记日志）
+fn remove_cache_mirror(profile_dir: &Path) {
+    if let Some(mirror) = cache_mirror(profile_dir) {
+        if let Err(e) = fs::remove_dir_all(&mirror) {
+            log::warn!("删除浏览器缓存目录失败 {}: {}", mirror.display(), e);
+        }
+    }
+}
+
+/// 配置目录占用（含 macOS 上 `~/Library/Caches` 下的对应缓存）
+pub fn profile_size(profile_dir: &Path) -> u64 {
+    dir_size(profile_dir) + cache_mirror(profile_dir).map(|m| dir_size(&m)).unwrap_or(0)
 }
 
 /// 删除一个配置目录中的缓存，返回释放的字节数（调用方需确保浏览器未运行）
@@ -420,7 +545,10 @@ pub fn delete_profiles(
             continue;
         }
         match fs::remove_dir_all(&dir) {
-            Ok(()) => result.deleted += 1,
+            Ok(()) => {
+                remove_cache_mirror(&dir);
+                result.deleted += 1
+            }
             Err(e) => {
                 log::warn!("删除浏览器配置目录失败 {}: {}", dir.display(), e);
                 result.skipped += 1;
@@ -452,6 +580,8 @@ pub fn rename_for_email_change(
         ));
     }
     fs::rename(&old_dir, &new_dir).map_err(|e| format!("重命名浏览器配置目录失败: {}", e))?;
+    // 旧路径对应的缓存不会再被使用，直接删掉；浏览器会在新路径下重建
+    remove_cache_mirror(&old_dir);
     Ok(Some((old_dir, new_dir)))
 }
 
@@ -472,7 +602,7 @@ pub fn usage(root: &Path) -> BrowserUsage {
     let dirs = list_profile_dirs(root);
     BrowserUsage {
         profiles: dirs.len(),
-        total_bytes: dirs.iter().map(|dir| dir_size(dir)).sum(),
+        total_bytes: dirs.iter().map(|dir| profile_size(dir)).sum(),
     }
 }
 
@@ -506,6 +636,11 @@ pub fn statuses(root: &Path, emails: &[String]) -> HashMap<String, String> {
 
 /// 以独立进程启动浏览器，不等待其退出；关闭管理器不影响已打开的浏览器
 fn spawn_detached(browser: &Path, args: &[OsString]) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = enclosing_app_bundle(browser) {
+        return open_app_bundle(&bundle, args);
+    }
+
     let mut command = Command::new(browser);
     command
         .args(args)
@@ -521,10 +656,41 @@ fn spawn_detached(browser: &Path, args: &[OsString]) -> Result<(), String> {
         command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
 
+    #[cfg(unix)]
+    {
+        // 放进独立的进程组，管理器收到的终端信号不会连带结束浏览器
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     command
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("启动浏览器失败 {}: {}", browser.display(), e))
+}
+
+/// macOS：用 `open -n -a <应用包> --args ...` 启动一个新的浏览器实例。
+/// 由 LaunchServices 启动，浏览器不是管理器的子进程，系统权限弹窗也会算在浏览器自己名下。
+/// 该配置目录已有实例在运行时，新实例会把参数转交给它（由它新开窗口）然后立即退出。
+#[cfg(target_os = "macos")]
+fn open_app_bundle(bundle: &Path, args: &[OsString]) -> Result<(), String> {
+    let output = Command::new("/usr/bin/open")
+        .arg("-n")
+        .arg("-a")
+        .arg(bundle)
+        .arg("--args")
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("启动浏览器失败 {}: {}", bundle.display(), e))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "启动浏览器失败 {}: {}",
+        bundle.display(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 /// 打开账号浏览器：未运行则启动；运行中则把已有窗口切到前台
@@ -534,7 +700,7 @@ pub fn open_profile(
     email: &str,
 ) -> Result<OpenBrowserResult, String> {
     let browser = browser.ok_or("未找到 Chrome 或 Edge，请在设置里指定浏览器程序")?;
-    if !browser.is_file() {
+    if !browser_program_exists(browser) {
         return Err(format!("浏览器程序不存在：{}", browser.display()));
     }
     let dir = profile_dir(root, email);
@@ -563,12 +729,19 @@ pub fn open_profile(
     })
 }
 
-/// 用 explorer 打开配置目录
-pub fn open_in_explorer(dir: &Path) -> Result<(), String> {
+/// 用系统文件管理器（Windows 资源管理器 / macOS 访达）打开配置目录
+pub fn open_in_file_manager(dir: &Path) -> Result<(), String> {
     if !dir.is_dir() {
         return Err("该账号还没有浏览器配置目录".to_string());
     }
-    Command::new("explorer")
+    let program = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    Command::new(program)
         .arg(dir)
         .spawn()
         .map(|_| ())
@@ -578,14 +751,172 @@ pub fn open_in_explorer(dir: &Path) -> Result<(), String> {
 #[cfg(windows)]
 pub use win::{find_running_pid, focus_browser_window};
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub use mac::focus_browser_window;
+
+#[cfg(unix)]
+pub use unix_lock::find_running_pid;
+
+#[cfg(not(any(windows, unix)))]
 pub fn find_running_pid(_profile_dir: &Path) -> Option<u32> {
     None
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn focus_browser_window(_pid: u32) -> bool {
     false
+}
+
+/// 解析 `SingletonLock` 符号链接的目标 `<主机名>-<进程号>`（主机名里也可能有 `-`）
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn parse_singleton_lock(target: &str) -> Option<(&str, u32)> {
+    let (host, pid) = target.rsplit_once('-')?;
+    let pid: u32 = pid.parse().ok()?;
+    (!host.is_empty() && pid != 0).then_some((host, pid))
+}
+
+/// macOS / Linux：按配置目录里的 `SingletonLock` 判断浏览器是否在运行
+#[cfg(unix)]
+mod unix_lock {
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
+
+    /// 进程启动时间与链接创建时间的比较容差
+    const START_TIME_TOLERANCE: Duration = Duration::from_secs(2);
+
+    pub fn find_running_pid(profile_dir: &Path) -> Option<u32> {
+        let lock = profile_dir.join("SingletonLock");
+        let target = std::fs::read_link(&lock).ok()?;
+        let (_host, pid) = super::parse_singleton_lock(&target.to_string_lossy())?;
+        let lock_created = std::fs::symlink_metadata(&lock)
+            .and_then(|meta| meta.modified())
+            .ok();
+        process_is_lock_owner(pid, lock_created).then_some(pid)
+    }
+
+    /// 进程存在，且（能取到时）启动时间不晚于锁链接的创建时间：
+    /// 浏览器崩溃后锁链接会残留，进程号可能已被之后启动的其他程序复用
+    #[cfg(target_os = "macos")]
+    fn process_is_lock_owner(pid: u32, lock_created: Option<SystemTime>) -> bool {
+        let Some(started) = process_start_time(pid) else {
+            return false;
+        };
+        match lock_created {
+            Some(created) => started <= created + START_TIME_TOLERANCE,
+            None => true,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn process_start_time(pid: u32) -> Option<SystemTime> {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: info 是大小为 size 的可写缓冲区
+        let written = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void,
+                size,
+            )
+        };
+        if written != size {
+            return None;
+        }
+        Some(
+            SystemTime::UNIX_EPOCH
+                + Duration::from_secs(info.pbi_start_tvsec)
+                + Duration::from_micros(info.pbi_start_tvusec),
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn process_is_lock_owner(pid: u32, _lock_created: Option<SystemTime>) -> bool {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return false;
+        };
+        // SAFETY: 信号 0 只检查进程是否存在，不会发送任何信号
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+}
+
+/// macOS：把浏览器实例切到前台
+#[cfg(target_os = "macos")]
+mod mac {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType};
+    use objc2_core_graphics::{
+        kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowOwnerPID,
+        CGWindowListCopyWindowInfo, CGWindowListOption,
+    };
+
+    /// 小于这个尺寸的窗口视为辅助窗口，不算浏览器窗口
+    const MIN_WINDOW_SIZE: f64 = 100.0;
+
+    fn number(dict: &CFDictionary<CFString, CFType>, key: &CFString) -> Option<f64> {
+        let value = dict.get(key)?;
+        value.downcast_ref::<CFNumber>()?.as_f64()
+    }
+
+    /// 该进程在当前桌面（Space）上是否有可见的普通窗口。
+    /// 只读取进程号、层级与尺寸，不需要「屏幕录制」权限。
+    pub(super) fn has_visible_window(pid: u32) -> bool {
+        let options =
+            CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+        let Some(list) = CGWindowListCopyWindowInfo(options, kCGNullWindowID) else {
+            return false;
+        };
+        // SAFETY: CGWindowListCopyWindowInfo 返回的是「字符串键 → 任意值」字典的数组
+        let list: CFRetained<CFArray<CFDictionary<CFString, CFType>>> =
+            unsafe { CFRetained::cast_unchecked(list) };
+        // SAFETY: 以下均为 CoreGraphics 导出的常量字符串
+        let (owner_key, layer_key, bounds_key) =
+            unsafe { (kCGWindowOwnerPID, kCGWindowLayer, kCGWindowBounds) };
+        let width_key = CFString::from_static_str("Width");
+        let height_key = CFString::from_static_str("Height");
+
+        (0..list.len()).filter_map(|i| list.get(i)).any(|window| {
+            if number(&window, owner_key) != Some(f64::from(pid)) {
+                return false;
+            }
+            if number(&window, layer_key) != Some(0.0) {
+                return false;
+            }
+            let Some(bounds) = window.get(bounds_key) else {
+                return false;
+            };
+            let Some(bounds) = bounds.downcast_ref::<CFDictionary>() else {
+                return false;
+            };
+            // SAFETY: kCGWindowBounds 的值是「字符串键 → 数字」字典
+            let bounds: &CFDictionary<CFString, CFType> = unsafe { bounds.cast_unchecked() };
+            let width = number(bounds, &width_key).unwrap_or(0.0);
+            let height = number(bounds, &height_key).unwrap_or(0.0);
+            width >= MIN_WINDOW_SIZE && height >= MIN_WINDOW_SIZE
+        })
+    }
+
+    /// 把浏览器实例的窗口切到前台。
+    /// 当前桌面上没有可见窗口时（全部关闭、最小化或在其他桌面）返回 false，
+    /// 由调用方让该实例新开一个窗口。
+    pub fn focus_browser_window(pid: u32) -> bool {
+        let Ok(pid_t) = libc::pid_t::try_from(pid) else {
+            return false;
+        };
+        let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid_t) else {
+            return false;
+        };
+        if app.isHidden() {
+            // 被「隐藏」(⌘H) 的应用窗口不在屏幕上，先取消隐藏
+            app.unhide();
+        } else if !has_visible_window(pid) {
+            return false;
+        }
+        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+        true
+    }
 }
 
 #[cfg(windows)]
@@ -710,13 +1041,27 @@ mod tests {
     }
 
     #[test]
-    fn normalize_path_str_uses_backslashes_without_trailing_separator() {
-        assert_eq!(normalize_path_str(" E:/Profiles/ "), "E:\\Profiles");
-        assert_eq!(normalize_path_str("E:\\Profiles\\\\"), "E:\\Profiles");
-        assert_eq!(normalize_path_str("E:\\"), "E:\\");
-        assert_eq!(normalize_path_str("E:/"), "E:\\");
+    fn normalize_windows_path_uses_backslashes_without_trailing_separator() {
+        assert_eq!(normalize_windows_path(" E:/Profiles/ "), "E:\\Profiles");
+        assert_eq!(normalize_windows_path("E:\\Profiles\\\\"), "E:\\Profiles");
+        assert_eq!(normalize_windows_path("E:\\"), "E:\\");
+        assert_eq!(normalize_windows_path("E:/"), "E:\\");
     }
 
+    #[test]
+    fn normalize_posix_path_trims_trailing_slashes_but_keeps_root() {
+        assert_eq!(
+            normalize_posix_path(" /Users/me/Profiles// "),
+            "/Users/me/Profiles"
+        );
+        assert_eq!(normalize_posix_path("/Users/me/My Profiles"), "/Users/me/My Profiles");
+        assert_eq!(normalize_posix_path("/"), "/");
+        assert_eq!(normalize_posix_path("///"), "/");
+        // 反斜杠在 macOS 上是普通文件名字符，不能改写
+        assert_eq!(normalize_posix_path("/tmp/a\\b"), "/tmp/a\\b");
+    }
+
+    #[cfg(windows)]
     #[test]
     fn resolve_profiles_root_prefers_saved_then_env_then_local() {
         let local = Some(PathBuf::from("C:\\Users\\me\\AppData\\Local"));
@@ -734,9 +1079,27 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn resolve_profiles_root_prefers_saved_then_env_then_local_posix() {
+        let local = Some(PathBuf::from("/Users/me/Library/Application Support"));
+        assert_eq!(
+            resolve_profiles_root(Some("/Volumes/Data/GMProfiles/"), Some("/tmp/data"), local.clone()),
+            PathBuf::from("/Volumes/Data/GMProfiles")
+        );
+        assert_eq!(
+            resolve_profiles_root(Some("  "), Some("/tmp/data/"), local.clone()),
+            PathBuf::from("/tmp/data/profiles")
+        );
+        assert_eq!(
+            resolve_profiles_root(None, Some(" "), local.clone()),
+            local.unwrap().join("googlemanager").join("profiles")
+        );
+    }
+
     #[test]
     fn detect_browser_prefers_chrome_then_falls_back_to_edge() {
-        let candidates = browser_candidates(
+        let candidates = windows_browser_candidates(
             Some(PathBuf::from("C:\\PF")),
             Some(PathBuf::from("C:\\PF86")),
             Some(PathBuf::from("C:\\Local")),
@@ -962,6 +1325,246 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("绝对路径"));
+    }
+
+    #[test]
+    fn macos_browser_candidates_prefer_chrome_and_system_applications() {
+        let candidates = macos_browser_candidates(Some(PathBuf::from("/Users/me")));
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/Applications/Google Chrome.app"),
+                PathBuf::from("/Users/me/Applications/Google Chrome.app"),
+                PathBuf::from("/Applications/Microsoft Edge.app"),
+                PathBuf::from("/Users/me/Applications/Microsoft Edge.app"),
+            ]
+        );
+        assert_eq!(macos_browser_candidates(None).len(), 2);
+    }
+
+    #[test]
+    fn enclosing_app_bundle_accepts_bundle_or_inner_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("Google Chrome.app");
+        let exe = bundle.join("Contents/MacOS/Google Chrome");
+        write_file(&exe, 1);
+        let plain = tmp.path().join("chromium");
+        write_file(&plain, 1);
+
+        assert!(is_app_bundle(&bundle));
+        assert!(!is_app_bundle(&exe));
+        assert_eq!(enclosing_app_bundle(&bundle), Some(bundle.clone()));
+        assert_eq!(enclosing_app_bundle(&exe), Some(bundle.clone()));
+        assert_eq!(enclosing_app_bundle(&plain), None);
+        // 名字以 .app 结尾的普通文件不是应用包
+        let fake = tmp.path().join("fake.app");
+        write_file(&fake, 1);
+        assert!(!is_app_bundle(&fake));
+    }
+
+    #[test]
+    fn macos_cache_mirror_maps_application_support_to_caches() {
+        let home = Path::new("/Users/me");
+        assert_eq!(
+            macos_cache_mirror(
+                Path::new("/Users/me/Library/Application Support/googlemanager/profiles/abcdef123456"),
+                home
+            ),
+            Some(PathBuf::from("/Users/me/Library/Caches/googlemanager/profiles/abcdef123456"))
+        );
+        // 不在 Application Support 下（例如外置磁盘）：缓存就在配置目录里
+        assert_eq!(macos_cache_mirror(Path::new("/Volumes/Data/abcdef123456"), home), None);
+        assert_eq!(
+            macos_cache_mirror(Path::new("/Users/me/Library/Application Support"), home),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_singleton_lock_reads_host_and_pid() {
+        assert_eq!(
+            parse_singleton_lock("macdeMacBook-Air.local-92322"),
+            Some(("macdeMacBook-Air.local", 92322))
+        );
+        assert_eq!(parse_singleton_lock("host-0"), None);
+        assert_eq!(parse_singleton_lock("host-abc"), None);
+        assert_eq!(parse_singleton_lock("-123"), None);
+        assert_eq!(parse_singleton_lock("nohyphen"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_running_pid_ignores_missing_or_stale_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("abcdef123456");
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(find_running_pid(&dir), None);
+
+        // 指向不存在进程的残留锁（进程号取一个几乎不可能存在的值）
+        std::os::unix::fs::symlink("somehost-999999", dir.join("SingletonLock")).unwrap();
+        assert_eq!(find_running_pid(&dir), None);
+        assert_eq!(profile_status(&dir), STATUS_CREATED);
+    }
+
+    /// 锁指向本测试进程：进程存在且早于锁创建，应判为运行中
+    #[cfg(unix)]
+    #[test]
+    fn find_running_pid_accepts_live_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("abcdef123456");
+        fs::create_dir_all(&dir).unwrap();
+        let pid = std::process::id();
+        std::os::unix::fs::symlink(format!("my-host-{}", pid), dir.join("SingletonLock")).unwrap();
+        assert_eq!(find_running_pid(&dir), Some(pid));
+        assert_eq!(profile_status(&dir), STATUS_RUNNING);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn validate_settings_accepts_app_bundle_on_macos() {
+        let tmp = tempfile::tempdir().unwrap();
+        let default_root = tmp.path().join("default-profiles");
+        let bundle = tmp.path().join("Google Chrome.app");
+        write_file(&bundle.join("Contents/MacOS/Google Chrome"), 1);
+
+        let saved = validate_settings(
+            &BrowserSettingsInput {
+                browser_path: Some(format!("{}/", bundle.to_string_lossy())),
+                profiles_root: Some(format!(" {}/ ", tmp.path().join("custom").to_string_lossy())),
+            },
+            &default_root,
+        )
+        .unwrap();
+        assert_eq!(saved.browser_path, Some(bundle.to_string_lossy().into_owned()));
+        assert_eq!(
+            saved.profiles_root,
+            Some(tmp.path().join("custom").to_string_lossy().into_owned())
+        );
+        assert!(tmp.path().join("custom").is_dir());
+
+        let saved = validate_settings(&BrowserSettingsInput::default(), &default_root).unwrap();
+        assert_eq!(saved.browser_path, None);
+        assert!(default_root.is_dir());
+
+        let err = validate_settings(
+            &BrowserSettingsInput {
+                browser_path: Some(tmp.path().join("Missing.app").to_string_lossy().into_owned()),
+                profiles_root: None,
+            },
+            &default_root,
+        )
+        .unwrap_err();
+        assert!(err.contains("浏览器程序不存在"));
+
+        let err = validate_settings(
+            &BrowserSettingsInput {
+                browser_path: None,
+                profiles_root: Some("relative/dir".to_string()),
+            },
+            &default_root,
+        )
+        .unwrap_err();
+        assert!(err.contains("绝对路径"));
+    }
+
+    /// 手动验证：在本机真实启动 Chrome，检查运行检测、聚焦与「无窗口时新开窗口」。
+    /// 运行：`cargo test -- --ignored macos_real_chrome --nocapture`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn macos_real_chrome_detection_and_focus() {
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        let browser = detect_system_browser().expect("本机未安装 Chrome / Edge");
+        let home = dirs::home_dir().unwrap();
+        let root = home.join("Library/Application Support/googlemanager-selftest/profiles");
+        let email = "selftest@example.com";
+        let dir = profile_dir(&root, email);
+        let _ = fs::remove_dir_all(&root);
+
+        let first = open_profile(Some(&browser), &root, email).unwrap();
+        println!("首次打开: {:?}", first);
+        assert_eq!(first.action, ACTION_LAUNCHED);
+        assert!(first.first_launch);
+
+        let pid = (0..40)
+            .find_map(|_| {
+                sleep(Duration::from_millis(250));
+                find_running_pid(&dir)
+            })
+            .expect("浏览器启动后应能检测到运行中");
+        println!("运行中，主进程号 {}", pid);
+        sleep(Duration::from_secs(2));
+
+        let again = open_profile(Some(&browser), &root, email).unwrap();
+        println!("再次打开: {:?}", again);
+        assert_eq!(again.action, ACTION_FOCUSED);
+
+        println!("缓存目录: {:?}", cache_mirror(&dir));
+        println!("缓存清理目标: {:?}", cache_targets(&dir));
+
+        // SAFETY: 结束本测试启动的浏览器进程
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        let stopped = (0..40).any(|_| {
+            sleep(Duration::from_millis(250));
+            find_running_pid(&dir).is_none()
+        });
+        assert!(stopped, "浏览器退出后应检测为未运行");
+        assert_eq!(profile_status(&dir), STATUS_CREATED);
+
+        let result = delete_profiles(&root, &[email.to_string()], |_| false, |_| false);
+        assert_eq!(result.deleted, 1);
+        assert!(macos_cache_mirror(&dir, &home).map_or(true, |m| !m.exists()));
+        let _ = fs::remove_dir_all(home.join("Library/Application Support/googlemanager-selftest"));
+        let _ = fs::remove_dir_all(home.join("Library/Caches/googlemanager-selftest"));
+    }
+
+    /// 手动验证：浏览器在运行但没有窗口（macOS 关掉最后一个窗口时浏览器不退出）时，
+    /// 再次打开应让该实例新开窗口。运行：`cargo test -- --ignored macos_real_chrome --nocapture`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn macos_real_chrome_opens_new_window_when_none_visible() {
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        let browser = detect_system_browser().expect("本机未安装 Chrome / Edge");
+        let home = dirs::home_dir().unwrap();
+        let base = home.join("Library/Application Support/googlemanager-selftest2");
+        let root = base.join("profiles");
+        let email = "nowindow@example.com";
+        let dir = profile_dir(&root, email);
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut args = build_launch_args(&dir, email, false);
+        args.push(OsString::from("--no-startup-window"));
+        spawn_detached(&browser, &args).unwrap();
+        let pid = (0..40)
+            .find_map(|_| {
+                sleep(Duration::from_millis(250));
+                find_running_pid(&dir)
+            })
+            .expect("浏览器启动后应能检测到运行中");
+        sleep(Duration::from_secs(2));
+        assert!(!mac::has_visible_window(pid), "--no-startup-window 不应有窗口");
+
+        let result = open_profile(Some(&browser), &root, email).unwrap();
+        println!("无窗口时打开: {:?}", result);
+        assert_eq!(result.action, ACTION_NEW_WINDOW);
+        let shown = (0..40).any(|_| {
+            sleep(Duration::from_millis(250));
+            mac::has_visible_window(pid)
+        });
+        assert!(shown, "已运行的实例应新开一个窗口");
+        assert_eq!(find_running_pid(&dir), Some(pid), "不应启动第二个实例");
+
+        // SAFETY: 结束本测试启动的浏览器进程
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        sleep(Duration::from_secs(2));
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_dir_all(home.join("Library/Caches/googlemanager-selftest2"));
     }
 
     #[test]

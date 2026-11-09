@@ -1,6 +1,9 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import useInlineEdit, { CLICK_COPY_DELAY_MS } from '../hooks/useInlineEdit';
+import { ask, message } from '@tauri-apps/plugin-dialog';
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: vi.fn(), message: vi.fn() }));
 
 describe('useInlineEdit Hook', () => {
   let onInlineEdit;
@@ -266,34 +269,62 @@ describe('useInlineEdit Hook', () => {
       };
 
       it('没有接码地址时直接清除，不再提示「手机号无效」', () => {
-        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+        const alertSpy = vi.mocked(message);
         const result = startClearing({ getAccount: () => ({ id: 1, smsUrl: null }) });
 
         expect(alertSpy).not.toHaveBeenCalled();
         expect(onInlineEdit).toHaveBeenCalledWith(1, 'phone', '');
         expect(result.current.editingCell).toBeNull();
-        alertSpy.mockRestore();
+        alertSpy.mockClear();
       });
 
-      it('有接码地址时确认后一并清除', () => {
-        const onInlineEditMany = vi.fn();
-        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-        startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
+      // 确认框是异步的；本组用了假计时器，用 act 冲刷微任务而不是 waitFor
+      const flush = () => act(async () => {});
 
-        expect(confirmSpy).toHaveBeenCalled();
+      it('有接码地址时确认后一并清除', async () => {
+        const onInlineEditMany = vi.fn();
+        vi.mocked(ask).mockReset().mockResolvedValue(true);
+        const result = startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
+        await flush();
+
+        expect(ask).toHaveBeenCalledTimes(1);
         expect(onInlineEditMany).toHaveBeenCalledWith(1, { phone: '', smsUrl: '' });
-        confirmSpy.mockRestore();
+        expect(result.current.editingCell).toBeNull();
       });
 
-      it('取消确认则放弃保存', () => {
+      it('确认框是异步的（Tauri 对话框插件）时也要等用户选择', async () => {
         const onInlineEditMany = vi.fn();
-        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        let answer;
+        vi.mocked(ask).mockReset().mockImplementation(
+          () => new Promise((resolve) => { answer = resolve; }),
+        );
         const result = startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
 
+        // 用户尚未选择：不能提交，确认期间失焦触发的再次保存也要忽略
+        act(() => {
+          result.current.handleEditableInputBlur();
+        });
+        expect(ask).toHaveBeenCalledTimes(1);
+        expect(onInlineEditMany).not.toHaveBeenCalled();
+        expect(result.current.editingCell).not.toBeNull();
+
+        await act(async () => {
+          answer(false);
+        });
         expect(onInlineEditMany).not.toHaveBeenCalled();
         expect(onInlineEdit).not.toHaveBeenCalled();
         expect(result.current.editingCell).toBeNull();
-        confirmSpy.mockRestore();
+      });
+
+      it('取消确认则放弃保存', async () => {
+        const onInlineEditMany = vi.fn();
+        vi.mocked(ask).mockReset().mockResolvedValue(false);
+        const result = startClearing({ onInlineEditMany, getAccount: () => ({ id: 1, smsUrl: SMS_URL }) });
+        await flush();
+
+        expect(result.current.editingCell).toBeNull();
+        expect(onInlineEditMany).not.toHaveBeenCalled();
+        expect(onInlineEdit).not.toHaveBeenCalled();
       });
     });
 

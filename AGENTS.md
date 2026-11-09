@@ -1,6 +1,6 @@
 # AGENTS.md — Google Manager 代码库文档（自用桌面版）
 
-> 自用精简版 · 最后更新 2026-09-23
+> 自用精简版 · 最后更新 2026-11-10
 
 ## 项目定位
 
@@ -28,14 +28,18 @@
                          ▼
 ┌────────────────────────────────────────────────────────┐
 │                  Tauri/Rust (src-tauri/)               │
-│      lib.rs (Builder + 27 个命令注册)                   │
+│      lib.rs (Builder + 28 个命令注册)                   │
 │              commands.rs（薄包装层）                     │
 │   database.rs（仓储/迁移/备份/导出）+ browser.rs / sms.rs │
 │                      ↓                                 │
 │                  SQLite (WAL)                          │
-│         %APPDATA%\googlemanager\data.db                │
+│  Windows: %APPDATA%\googlemanager\data.db              │
+│  macOS:   ~/Library/Application Support/googlemanager/ │
 └────────────────────────────────────────────────────────┘
 ```
+
+支持平台：Windows 10/11、macOS 10.15+。平台差异集中在 `browser.rs`（浏览器检测 / 运行检测 / 聚焦 / 启动），
+其余模块与前端没有平台分支（设置对话框按 `BrowserSettingsView.platform` 切换选择框文件类型与提示文案）。
 
 ## 目录结构
 
@@ -45,9 +49,10 @@
 │   ├── App.jsx               # 根组件：全局状态、视图路由、搜索防抖、2FA
 │   ├── components/           # AccountListView / AccountTable / BatchToolbar /
 │   │                         # ImportView / ExportDialog / HistoryDrawer /
-│   │                         # EditModal / Pagination / SmsCodeCell / BrowserSettingsDialog
+│   │                         # EditModal / Pagination / SmsCodeCell / BrowserSettingsDialog /
+│   │                         # PromptDialog / UpdateDialog
 │   ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination /
-│   │                         # useSmsCodes / useBrowserStatus
+│   │                         # useSmsCodes / useBrowserStatus / useAppUpdater
 │   ├── services/
 │   │   ├── api.js            # 统一 API 门面（Facade）
 │   │   ├── types.ts          # ApiAdapter 接口 + 类型定义
@@ -56,7 +61,7 @@
 │   │       ├── index.ts          # 工厂（只有 TauriAdapter）
 │   │       └── tauri-adapter.ts  # invoke 封装 + 参数命名转换
 │   ├── utils/                # importParser / phoneUtils / multiValueField / buildInfo /
-│   │                         # smsUtils / browserUtils / timeUtils / tauriRuntime
+│   │                         # smsUtils / browserUtils / timeUtils / tauriRuntime / dialogs
 │   └── __tests__/            # Vitest 单元测试
 │
 ├── src-tauri/
@@ -79,7 +84,7 @@
 └── package.json              # 根脚本：dev / build / test
 ```
 
-## 命令清单（`commands.rs`，27 个）
+## 命令清单（`commands.rs`，28 个）
 
 | 命令 | 功能 |
 |------|------|
@@ -100,16 +105,17 @@
 | `get_account_by_id` | 按 ID 查询 |
 | `generate_totp` | 生成 2FA（SHA1/6位/30秒） |
 | `batch_import` | 批量导入（单事务） |
-| `export_accounts_text` | 导出文本（自定义字段/分隔符/排序/分组） |
+| `export_accounts_text` | 生成导出文本（非桌面环境下载用） |
+| `export_accounts_to_file` | 生成导出文本并直接写入保存对话框选中的文件，返回 `{ path, count }` |
 | `fetch_sms_code` | 按账号的 `sms_url` 实时获取手机短信验证码（网络等待期间不持有数据库锁） |
 | `open_account_browser` | 打开账号浏览器：未运行则启动，运行中则切到已有窗口 |
 | `get_browser_statuses` | 按邮箱批量查询配置目录状态（none / created / running） |
 | `clear_browser_cache` | 清理缓存（`accountIds` 为空表示全部），运行中的跳过 |
 | `delete_browser_profiles` | 按邮箱删除配置目录；仍被账号记录使用或运行中的跳过 |
-| `get_browser_settings` | 读取浏览器程序、配置根目录（含自动检测结果与默认值） |
+| `get_browser_settings` | 读取浏览器程序、配置根目录（含自动检测结果、默认值与运行平台 `platform`） |
 | `save_browser_settings` | 校验并保存浏览器设置 |
 | `get_browser_usage` | 统计配置目录数量与总占用 |
-| `open_browser_profile_dir` | 用资源管理器打开账号的配置目录 |
+| `open_browser_profile_dir` | 用系统文件管理器（资源管理器 / 访达）打开账号的配置目录 |
 
 ## 数据库 Schema
 
@@ -161,16 +167,45 @@ idx_accounts_deleted_at
 3. **包管理**：pnpm（前端）、cargo（Rust）
 4. **命名**：前端 camelCase ↔ 后端 snake_case。**Tauri 顶层参数用 camelCase，嵌套载荷用 snake_case** —— 由 `tauri-adapter.ts::prepareInvokeArgs()` 转换
 5. **构建**：Vite 输出到根 `static/`
-6. **数据目录**：`%APPDATA%\googlemanager\`，可用 `GOOGLE_MANAGER_DATA_DIR` 覆盖；
+6. **数据目录**：Windows `%APPDATA%\googlemanager\`，macOS `~/Library/Application Support/googlemanager/`
+   （均为 `dirs::data_dir()/googlemanager`），可用 `GOOGLE_MANAGER_DATA_DIR` 覆盖；
    浏览器配置目录另见「账号独立浏览器」
 7. **状态值**：`status` = `"pro"` | `"inactive"`。`sold_status` 为遗留列，界面与命令均不再暴露
 8. **历史追踪**：`database.rs::TRACKED_FIELDS` 只含 `email`/`recovery`/`phone`/`reg_year`/`country`/`group_name`/`remark`（不含 `password`/`secret`）
+9. **确认框 / 输入框**：用 `utils/dialogs.js` 的 `confirmDialog` / `messageDialog`（`await`），输入用 `components/PromptDialog.jsx`；
+   **不要**直接用 `window.confirm` / `window.prompt`——对话框插件把 `window.confirm` 换成了异步版本，
+   `if (!window.confirm(...))` 拿到的 Promise 恒为真，用户还没选就执行了；macOS 的 WKWebView 不实现 `window.prompt`。
+   普通的成功 / 失败提示用 `onNotify`（右上角提示条）
+10. **导出**：桌面环境先 `save()` 选位置，再调 `export_accounts_to_file` 由后端写文件（已移除 `tauri-plugin-fs`）；
+   默认文件名用本机日期（`toISOString()` 是 UTC，东八区凌晨会差一天）
+
+## 在线更新
+
+- 插件：`tauri-plugin-updater` + `tauri-plugin-process`（`lib.rs` 注册；权限 `updater:default`、`process:allow-restart`）
+- `tauri.conf.json`：`bundle.createUpdaterArtifacts: true`；`plugins.updater.pubkey` 为签名公钥，
+  `endpoints` 指向 `https://github.com/1134189025/Google_Manager/releases/latest/download/latest.json`，
+  Windows `installMode: passive`
+- 前端：`hooks/useAppUpdater.js`（启动 3 秒后自动检查一次，失败静默；「跳过此版本」存 `localStorage`
+  键 `gm.updater.skippedVersion`；安装前调用 `create_backup('before_update')`，备份失败则不安装；
+  安装后 `relaunch()`）+ `components/UpdateDialog.jsx`；侧栏「检查更新」按钮，有新版本时显示红点
+- **签名私钥**：本机 `~/.tauri/googlemanager.key`（密码在同目录 `.password`），CI 用仓库 Secrets
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。**私钥丢失后已安装的版本收不到更新**，务必另行备份
+- 本机打包 `pnpm run build` 走 `scripts/build.mjs`：有私钥就签名并生成更新包；没有就跳过更新包，只打普通安装包；
+  CI 中缺私钥直接报错
+- `latest.json` 由 `scripts/make-latest-json.mjs <版本> <说明.md> <目录> [下载前缀]` 生成：
+  `windows-x86_64(-nsis)` 指向 `*_x64-setup.exe`，`darwin-aarch64` / `darwin-x86_64` 共用 `*_universal.app.tar.gz`
+- 更新包所在路径不能经过符号链接（macOS 的 `/tmp` 就是），否则报 `StartingBinary found current_exe() that contains a symlink`
+- 本机端到端模拟：用 `--config` 把 `endpoints` 改成 `http://127.0.0.1:<端口>/latest.json` 并加
+  `dangerousInsecureTransportProtocol: true`，分别打旧 / 新版本，再用 `make-latest-json.mjs` 与 `python3 -m http.server` 提供文件
 
 ## 发布
 
-`.github/workflows/release.yml`：推送 `.github/release-notes/v<版本号>.md`（或在 Actions 页面手动运行）即触发，
-在 `windows-latest` 上依次跑前端测试、`cargo test`、`pnpm run build`，
-再以 `v<版本号>` 创建 tag 与 Release，上传 `*_x64-setup.exe` / `*_x64_en-US.msi` / `*_x64_portable.exe`。
+`.github/workflows/release.yml`：推送 `.github/release-notes/v<版本号>.md`（或在 Actions 页面手动运行）即触发。
+`prepare` 读版本号并检查 Release 是否已存在；`windows`（`windows-latest`）与 `macos`（`macos-latest`）并行跑前端测试、
+`cargo test` 与构建（用 Secrets 里的私钥给更新包签名）；两边都成功后 `publish` 生成 `latest.json`，
+以 `v<版本号>` 创建 tag 与 Release，上传 `*_x64-setup.exe(.sig)` / `*_x64_en-US.msi` / `*_x64_portable.exe` /
+`*_universal.dmg` / `*_universal.app.tar.gz(.sig)` / `latest.json`。
+macOS 构建 `universal-apple-darwin` 通用二进制，ad-hoc 签名（`bundle.macOS.signingIdentity = "-"`），未公证。
 版本号取自 `tauri.conf.json`；同名 Release 已存在时跳过。
 
 ## 测试
@@ -215,21 +250,42 @@ idx_accounts_deleted_at
 - **目录名**：`sha256(小写(去首尾空格(email)))` 前 12 位十六进制（`browser::profile_key`，有固定值单测守住）。
   不用 id：「删除全部 → 重新导入」会换 id；不用邮箱原文：Chrome 内部路径很深，易超 260 字符
 - **配置根目录**：设置 `browser.profiles_root` 优先；否则设置了 `GOOGLE_MANAGER_DATA_DIR` 时为
-  `<数据目录>\profiles`；否则 `%LOCALAPPDATA%\googlemanager\profiles`。首次点「打开」前会弹设置确认
-- **运行检测**：Chromium 单实例消息窗口（类名 `Chrome_MessageWindow`，标题为配置目录路径）。
+  `<数据目录>/profiles`；否则 `dirs::data_local_dir()/googlemanager/profiles`
+  （Windows `%LOCALAPPDATA%\googlemanager\profiles`，macOS `~/Library/Application Support/googlemanager/profiles`）。
+  首次点「打开」前会弹设置确认
+- **浏览器检测**：Windows 依次找 Program Files / Program Files (x86) / LocalAppData 下的 `chrome.exe`，再找 `msedge.exe`；
+  macOS 依次找 `/Applications`、`~/Applications` 下的 `Google Chrome.app`，再找 `Microsoft Edge.app`。
+  macOS 手动指定时可选 `.app` 应用包或其中的可执行文件（`browser_program_exists`）
+- **路径规范化**：`normalize_path_str` 按平台分派——Windows 统一为反斜杠（`normalize_windows_path`），
+  macOS 只去结尾 `/`（`normalize_posix_path`）。两个纯函数在所有平台都有单测
+- **运行检测（Windows）**：Chromium 单实例消息窗口（类名 `Chrome_MessageWindow`，标题为配置目录路径）。
   `FindWindowExW(HWND_MESSAGE, …)` 即可拿到主进程号；标题须反斜杠、无结尾分隔符（`normalize_path_str`），
   比较不区分大小写。无内存状态，管理器重启后照样有效。已实测 Chrome 与 Edge
-- **聚焦**：取该进程最上层、**无所有者**的可见 `Chrome_WidgetWin_1`（跳过「要恢复页面吗？」等气泡），
+- **运行检测（macOS）**：配置目录里的符号链接 `SingletonLock` → `<主机名>-<主进程号>`（`parse_singleton_lock`）。
+  用 `proc_pidinfo` 确认进程存在，且启动时间不晚于链接创建时间 + 2 秒——浏览器崩溃后链接会残留，进程号可能被复用。
+  不比对主机名（macOS 主机名会随网络变化）。已实测 Chrome
+- **聚焦（Windows）**：取该进程最上层、**无所有者**的可见 `Chrome_WidgetWin_1`（跳过「要恢复页面吗？」等气泡），
   最小化则还原；`SetForegroundWindow` 被拒时最小化再还原
+- **聚焦（macOS）**：`NSRunningApplication` 按进程号取应用；被隐藏（⌘H）则取消隐藏后激活；
+  否则用 `CGWindowListCopyWindowInfo` 查当前桌面上该进程是否有 ≥100×100 的 0 层窗口（不需要屏幕录制权限），有则激活。
+  没有可见窗口（macOS 关掉最后一个窗口浏览器不退出；或窗口全部最小化 / 在其他桌面）时返回 `new_window`：
+  再启动一次，新实例把参数转交给已运行的实例，由它新开窗口
 - **启动参数**：`--user-data-dir --no-first-run --no-default-browser-check --window-name=<邮箱>`；
-  首次打开附带 Google 登录页。以 `DETACHED_PROCESS` 启动，正常关闭管理器不影响浏览器
-  （但「结束进程树」会连带结束浏览器，`tauri dev` 重新编译时即如此）
+  首次打开附带 Google 登录页。Windows 以 `DETACHED_PROCESS` 启动，正常关闭管理器不影响浏览器
+  （但「结束进程树」会连带结束浏览器，`tauri dev` 重新编译时即如此）。
+  macOS 用 `open -n -a <应用包> --args …` 经 LaunchServices 启动（浏览器不是管理器的子进程，权限弹窗也归浏览器自己）；
+  指定的程序不在 `.app` 内时直接启动并放入独立进程组
 - **缓存清理**白名单：根层 `GrShaderCache` / `ShaderCache` / `GraphiteDawnCache` / `*Metrics`；
   `Default` 与 `Profile *` 下 `Cache` / `Code Cache` / `GPUCache` / `Dawn*Cache` / `Service Worker` 缓存。
   不碰 `Network`（cookie）、`Local Storage`、`IndexedDB`、`optimization_guide_model_store`
+- **macOS 缓存镜像**：配置目录在 `~/Library/Application Support` 下时，Chromium 把 `Cache` / `Code Cache`
+  放到 `~/Library/Caches/<相同相对路径>`（`macos_cache_mirror`，已实测）。清理缓存对镜像同样按白名单处理；
+  计算占用会计入镜像；彻底删除与改邮箱时整个镜像目录直接删除（只有缓存）
 - **删除**：进回收站保留目录；彻底删除时前端询问，后端跳过仍被任意账号记录（含回收站）使用或运行中的目录
 - **改邮箱**：运行中拒绝；目标目录已存在拒绝（不自动合并）；数据库失败则回滚目录名
-- 配置目录**不在备份范围**；cookie 由 Windows 加密并绑定当前系统用户，换机或重装需重新登录
+- 配置目录**不在备份范围**；cookie 由系统加密（Windows DPAPI / macOS 钥匙串）并绑定当前系统用户，换机或重装需重新登录
+- macOS 真机自测（会短暂打开 Chrome 窗口，结束后自动关闭并删除测试目录）：
+  `cd src-tauri && cargo test -- --ignored macos_real_chrome --nocapture`
 - 状态轮询 `useBrowserStatus`：只查当前页，3 秒一轮，页面隐藏时暂停；状态表以**原始邮箱**为键，
   适配器不能对它做 `snakeToCamel`（邮箱里可能有下划线）
 - 首次打开某账号时，前端在**启动前**复制邮箱：浏览器窗口出现会抢走焦点，之后写剪贴板会失败
