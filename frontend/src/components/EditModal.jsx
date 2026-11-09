@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
+import { renderInBody } from '../utils/portal';
 
 // 表单输入 / 文本域统一使用 cockpit 主题输入样式
 const textareaClassName = 'gm-input resize-y min-h-[108px] leading-6';
@@ -62,7 +63,7 @@ const EditModal = ({ account, onClose, onSubmit }) => {
         onSubmit(event);
     };
 
-    return (
+    return renderInBody(
         <div className="gm-overlay">
             <div className="gm-modal w-full max-w-2xl animate-in zoom-in-95 duration-200">
                 <div className="gm-modal-header">

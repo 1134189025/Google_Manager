@@ -178,6 +178,9 @@ idx_accounts_deleted_at
    普通的成功 / 失败提示用 `onNotify`（右上角提示条）
 10. **导出**：桌面环境先 `save()` 选位置，再调 `export_accounts_to_file` 由后端写文件（已移除 `tauri-plugin-fs`）；
    默认文件名用本机日期（`toISOString()` 是 UTC，东八区凌晨会差一天）
+11. **弹窗 / 抽屉**：用 `utils/portal.js` 的 `renderInBody()` 渲染到 `document.body` 下；页面级入场动画只用
+   `animation-fill-mode: backwards`。祖先元素一旦保留 `transform`，`.gm-overlay` 的 `position: fixed` 会改为相对它定位，
+   账号多时弹窗会跑到页面下方（v0.3.0 在 Windows 上出现过）
 
 ## 在线更新
 

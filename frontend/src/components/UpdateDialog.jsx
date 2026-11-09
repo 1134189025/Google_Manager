@@ -1,5 +1,6 @@
 import { X, Download, RefreshCw } from 'lucide-react';
 import { RELEASES_URL } from '../hooks/useAppUpdater';
+import { renderInBody } from '../utils/portal';
 
 const formatPercent = (progress) => `${Math.round((progress || 0) * 100)}%`;
 
@@ -26,7 +27,7 @@ const UpdateDialog = ({ updater }) => {
         error: version ? `更新到 v${version}` : '检查更新',
     }[status] || '检查更新';
 
-    return (
+    return renderInBody(
         <div className="gm-overlay">
             <div className="gm-modal w-full max-w-lg animate-in zoom-in-95 duration-200" role="dialog" aria-label={title}>
                 <div className="gm-modal-header">

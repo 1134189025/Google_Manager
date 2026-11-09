@@ -45,7 +45,8 @@
 
 .animate-in {
   animation-duration: 0.3s;
-  animation-fill-mode: both;
+  /* 只用 backwards：动画结束后不保留 transform（见 styles/layout.css 的 .main-wrapper） */
+  animation-fill-mode: backwards;
 }
 
 .zoom-in-95 {

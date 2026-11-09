@@ -3,6 +3,7 @@ import { UserPlus, FileText, Plus, Activity, Loader2 } from 'lucide-react';
 import { parseImportText } from '../utils/importParser';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
 import { describeSmsUrl, extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
+import { renderInBody } from '../utils/portal';
 
 /**
  * 防抖 Hook - 延迟执行函数，避免频繁调用
@@ -416,7 +417,7 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
             )}
 
             {/* 格式确认对话框 */}
-            {showFormatConfirm && (
+            {showFormatConfirm && renderInBody(
                 <div className="gm-overlay">
                     <div className="gm-modal max-w-md mx-4 animate-in zoom-in-95 duration-200">
                         <div className="gm-modal-body">

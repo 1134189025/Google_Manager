@@ -75,7 +75,7 @@ describe('布局回归', () => {
   });
 
   it('HistoryDrawer 保持全宽并限制最大宽度 420px', async () => {
-    const { container } = render(
+    render(
       <HistoryDrawer
         isOpen={true}
         onClose={vi.fn()}
@@ -87,8 +87,10 @@ describe('布局回归', () => {
       expect(mockApi.getAccountHistory).toHaveBeenCalledWith(1);
     });
 
-    const drawerPanel = container.querySelector('div.fixed.right-0.top-0.h-full');
+    // 抽屉渲染在 body 下（避免祖先 transform 影响 fixed 定位），从整个文档查找
+    const drawerPanel = document.body.querySelector('div.fixed.right-0.top-0.h-full');
     expect(drawerPanel).not.toBeNull();
+    expect(drawerPanel.parentElement).toBe(document.body);
     expect(drawerPanel).toHaveClass('w-full');
     expect(drawerPanel).toHaveClass('max-w-[420px]');
     expect(drawerPanel.className).toContain('sm:w-[420px]');

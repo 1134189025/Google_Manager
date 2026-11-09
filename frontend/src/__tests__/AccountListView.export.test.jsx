@@ -75,6 +75,18 @@ describe('AccountListView 导出弹窗与参数', () => {
     save.mockResolvedValue('/tmp/out.txt');
   });
 
+  it('导出弹窗渲染在 body 下，不受页面入场动画（transform）影响而错位', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<AccountListView {...createDefaultProps()} />);
+
+    await user.click(screen.getByRole('button', { name: '导出账号' }));
+
+    const overlay = screen.getByText('导出账号配置').closest('.gm-overlay');
+    expect(overlay).not.toBeNull();
+    expect(overlay.parentElement).toBe(document.body);
+    expect(container.contains(overlay)).toBe(false);
+  });
+
   it('筛选模式显示数量并传递 search 参数', async () => {
     const user = userEvent.setup();
     const props = createDefaultProps({ search: 'first' });

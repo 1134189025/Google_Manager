@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, ChevronUp, ChevronDown, FileText } from 'lucide-react';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import { messageDialog } from '../utils/dialogs';
+import { renderInBody } from '../utils/portal';
 
 const DEFAULT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
 
@@ -273,10 +274,10 @@ const ExportDialog = ({
 
         onExport(exportConfig);
     };
-    return (
+    return renderInBody(
         <div className="gm-overlay">
-            <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto gm-modal animate-in zoom-in-95 duration-200">
-                <div className="sticky top-0 z-10 gm-modal-header" style={{ background: 'var(--bg-secondary)' }}>
+            <div className="w-full max-w-2xl gm-modal animate-in zoom-in-95 duration-200" role="dialog" aria-label="导出账号配置">
+                <div className="gm-modal-header">
                     <div>
                         <h2 className="gm-title">导出账号配置</h2>
                         <p className="text-sm mt-1 gm-text-2">
@@ -293,7 +294,8 @@ const ExportDialog = ({
                     </button>
                 </div>
 
-                <div className="p-4 sm:p-6 space-y-6">
+                {/* 头部与底部按钮固定，只有中间内容滚动（.gm-modal-body） */}
+                <div className="gm-modal-body space-y-6">
                     <div>
                         <label className="block text-sm font-semibold gm-text-1 mb-3">分隔符</label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -492,7 +494,7 @@ const ExportDialog = ({
                     </div>
                 </div>
 
-                <div className="sticky bottom-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 gm-modal-footer">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 gm-modal-footer">
                     <button
                         onClick={onClose}
                         className="gm-btn gm-btn-secondary w-full sm:w-auto"

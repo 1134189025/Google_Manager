@@ -94,9 +94,12 @@ pnpm run check:rust
 
 11. **导出**由后端 `export_accounts_to_file` 直接写文件；前端只负责 `save()` 选位置。
 
-12. **时间戳是 UTC**：数据库里的时间由 SQLite `CURRENT_TIMESTAMP` 写入，显示前用 `formatDbTimestamp` 换算本机时间。
+12. **弹窗渲染到 body**：新弹窗用 `utils/portal.js::renderInBody()`；入场动画别用 `animation-fill-mode: both`
+    （保留的 `transform` 会让内部 `position: fixed` 的弹窗相对长列表定位，跑到页面下方）。
 
-13. **取码失败不抛异常**：`api.fetchSmsCode` 出错时返回 `status: 'error'`，`useSmsCodes` 据此退避并把旧码标为「上次」。
+13. **时间戳是 UTC**：数据库里的时间由 SQLite `CURRENT_TIMESTAMP` 写入，显示前用 `formatDbTimestamp` 换算本机时间。
+
+14. **取码失败不抛异常**：`api.fetchSmsCode` 出错时返回 `status: 'error'`，`useSmsCodes` 据此退避并把旧码标为「上次」。
 
 ## 已知取舍（刻意未修）
 

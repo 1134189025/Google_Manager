@@ -43,18 +43,22 @@ describe('ExportDialog 窄屏交互', () => {
     setViewport(1024);
   });
 
-  it('窄屏下保留滚动容器、单列分隔符布局和底部操作区', () => {
+  it('窄屏下保留滚动区、单列分隔符布局和底部操作区', () => {
     setViewport(375);
     render(<ExportDialog {...createProps()} />);
 
-    const heading = screen.getByRole('heading', { name: '导出账号配置' });
-    const panel = heading.parentElement?.parentElement?.parentElement;
+    const panel = screen.getByRole('dialog', { name: '导出账号配置' });
     const separatorGrid = screen.getByText('四横线 (----)').closest('button')?.parentElement;
     const footer = screen.getByRole('button', { name: '导出' }).parentElement;
+    const scrollBody = separatorGrid?.closest('.gm-modal-body');
 
-    expect(panel).toHaveClass('w-full', 'max-w-2xl', 'max-h-[90vh]', 'overflow-y-auto');
+    // 头部、底部固定，只有中间内容滚动：底部按钮不会被滚动内容透出或遮挡
+    expect(panel).toHaveClass('w-full', 'max-w-2xl', 'gm-modal');
+    expect(scrollBody).not.toBeNull();
+    expect(panel.contains(scrollBody)).toBe(true);
+    expect(footer).toHaveClass('gm-modal-footer', 'flex-col-reverse', 'sm:flex-row');
+    expect(scrollBody.contains(footer)).toBe(false);
     expect(separatorGrid).toHaveClass('grid-cols-1', 'sm:grid-cols-2');
-    expect(footer).toHaveClass('flex-col-reverse', 'sm:flex-row');
     expect(screen.getByRole('button', { name: '取消' })).toHaveClass('w-full', 'sm:w-auto');
     expect(screen.getByRole('button', { name: '导出' })).toHaveClass('w-full', 'sm:w-auto');
   });

@@ -132,7 +132,8 @@
   min-width: 0;
   padding: 36px 32px 48px;
   margin-inline-start: 132px;
-  animation: gmFadeUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  /* 只用 backwards：动画结束后不保留 transform，否则内部 position: fixed 的元素会改为相对本元素定位 */
+  animation: gmFadeUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 
 @keyframes gmFadeUp {

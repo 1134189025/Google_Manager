@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import api from '../services/api';
 import { formatBytes, describeClearCacheResult } from '../utils/browserUtils';
 import { confirmDialog } from '../utils/dialogs';
+import { renderInBody } from '../utils/portal';
 
 const EMPTY_FORM = { browserPath: '', profilesRoot: '' };
 
@@ -140,7 +141,7 @@ const BrowserSettingsDialog = ({ isOpen, firstRun = false, onClose, onNotify }) 
         ? `自动检测到：${settings.detectedBrowserPath}`
         : '未检测到 Chrome 或 Edge，请手动指定浏览器程序';
 
-    return (
+    return renderInBody(
         <div className="gm-overlay">
             <div className="gm-modal w-full max-w-2xl animate-in zoom-in-95 duration-200">
                 <div className="gm-modal-header">

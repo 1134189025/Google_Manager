@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { renderInBody } from '../utils/portal';
 
 /**
  * 应用内输入框（替代 `window.prompt`：macOS 的 WebView 没有实现它，调用直接返回 null）
@@ -53,7 +54,7 @@ const PromptDialog = ({
         }
     };
 
-    return (
+    return renderInBody(
         <div className="gm-overlay" onKeyDown={handleKeyDown}>
             <div className="gm-modal w-full max-w-md animate-in zoom-in-95 duration-200" role="dialog" aria-label={title}>
                 <div className="gm-modal-header">

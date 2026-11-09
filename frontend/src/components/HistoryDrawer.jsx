@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { renderInBody } from '../utils/portal';
 
 // 旧数据库可能残留已下线字段的历史记录，渲染时静默跳过
 const LEGACY_HIDDEN_FIELDS = ['sold_status'];
@@ -100,7 +101,7 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
 
     if (!isOpen) return null;
 
-    return (
+    return renderInBody(
         <>
             {/* 遮罩层（z-index 保持在抽屉之下） */}
             <div

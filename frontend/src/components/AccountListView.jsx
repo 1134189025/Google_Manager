@@ -26,6 +26,7 @@ import { describeClearCacheResult } from '../utils/browserUtils';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import { confirmDialog, messageDialog } from '../utils/dialogs';
+import { renderInBody } from '../utils/portal';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -905,7 +906,7 @@ const AccountListView = ({
                 onCancel={() => setBatchEditPrompt(null)}
             />
 
-            {recycleDrawer.isOpen && (
+            {recycleDrawer.isOpen && renderInBody(
                 <div className="gm-overlay">
                     <div className="gm-modal max-w-3xl">
                         <div className="gm-modal-header">
