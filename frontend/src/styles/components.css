@@ -478,7 +478,7 @@
   color: var(--text-primary);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  animation: gmFadeUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: gmFadeUp 0.12s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 /* 左侧色条表示语义，正文保持高对比度 */

@@ -2,7 +2,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import AccountListView from '../components/AccountListView';
-import { CLICK_COPY_DELAY_MS } from '../hooks/useInlineEdit';
 import { formatDbTimestamp } from '../utils/timeUtils';
 
 // Mock HistoryDrawer to avoid API calls and state issues
@@ -43,8 +42,6 @@ const mockAccounts = [
     createdAt: '2024-01-02',
   },
 ];
-
-const DOUBLE_CLICK_SETTLE_MS = CLICK_COPY_DELAY_MS + 120;
 
 const buildMockAccount = (id) => ({
   id,
@@ -491,7 +488,7 @@ describe('AccountListView 组件', () => {
       });
     });
 
-    it('双击标签进入编辑时不触发复制', async () => {
+    it('双击标签直接进入编辑', async () => {
       const user = userEvent.setup();
       const accountsWithTag = [{
         ...mockAccounts[0],
@@ -501,9 +498,7 @@ describe('AccountListView 组件', () => {
       render(<AccountListView {...defaultProps} accounts={accountsWithTag} />);
 
       await user.dblClick(screen.getByText('工作'));
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
 
-      expect(defaultProps.copyToClipboard).not.toHaveBeenCalled();
       expect(screen.getByPlaceholderText('每行一个标签，支持逗号或换行粘贴')).toBeInTheDocument();
     });
     it('双击备注进入多行编辑器，并显示添加一行操作', async () => {
@@ -516,14 +511,13 @@ describe('AccountListView 组件', () => {
       render(<AccountListView {...defaultProps} accounts={accountsWithRemark} />);
 
       await user.dblClick(screen.getByText('第一条备注'));
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
 
       expect(screen.getByPlaceholderText('每行一条备注，便于逐条查看和编辑')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '+ 添加一行' })).toBeInTheDocument();
     });
 
 
-    it('双击2FA验证码进入编辑时不触发复制', async () => {
+    it('双击2FA验证码直接进入编辑', async () => {
       const user = userEvent.setup();
       const propsWithCode = {
         ...defaultProps,
@@ -534,9 +528,7 @@ describe('AccountListView 组件', () => {
 
       const codeElements = screen.getAllByText('123456');
       await user.dblClick(codeElements[0]);
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
 
-      expect(defaultProps.copyToClipboard).not.toHaveBeenCalled();
       expect(screen.getByPlaceholderText('输入 2FA 密钥')).toBeInTheDocument();
     });
 
@@ -555,7 +547,6 @@ describe('AccountListView 组件', () => {
       const emptySecretTrigger = screen.getByTitle('双击编辑2FA密钥');
       expect(emptySecretTrigger.tagName).toBe('BUTTON');
       await user.dblClick(emptySecretTrigger);
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
       expect(screen.getByPlaceholderText('输入 2FA 密钥')).toBeInTheDocument();
 
       fireEvent.keyDown(screen.getByPlaceholderText('输入 2FA 密钥'), { key: 'Escape' });
@@ -563,7 +554,6 @@ describe('AccountListView 组件', () => {
       const emptyPhoneTrigger = screen.getByTitle('双击编辑手机号');
       expect(emptyPhoneTrigger.tagName).toBe('BUTTON');
       await user.dblClick(emptyPhoneTrigger);
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
       expect(screen.getByPlaceholderText('支持格式：+86 138 1234 5678 / 13812345678 / 0086...')).toBeInTheDocument();
 
       fireEvent.keyDown(screen.getByPlaceholderText('支持格式：+86 138 1234 5678 / 13812345678 / 0086...'), { key: 'Escape' });
@@ -571,7 +561,6 @@ describe('AccountListView 组件', () => {
       const emptyTagTrigger = screen.getByTitle('双击添加标签');
       expect(emptyTagTrigger.tagName).toBe('BUTTON');
       await user.dblClick(emptyTagTrigger);
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
       expect(screen.getByPlaceholderText('每行一个标签，支持逗号或换行粘贴')).toBeInTheDocument();
 
       fireEvent.keyDown(screen.getByPlaceholderText('每行一个标签，支持逗号或换行粘贴'), { key: 'Escape' });
@@ -579,7 +568,6 @@ describe('AccountListView 组件', () => {
       const emptyRemarkTrigger = screen.getByTitle('双击添加备注');
       expect(emptyRemarkTrigger.tagName).toBe('BUTTON');
       await user.dblClick(emptyRemarkTrigger);
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
       expect(screen.getByPlaceholderText('每行一条备注，便于逐条查看和编辑')).toBeInTheDocument();
     });
 
@@ -594,7 +582,6 @@ describe('AccountListView 组件', () => {
       render(<AccountListView {...defaultProps} accounts={longRecoveryAccounts} />);
 
       await user.dblClick(screen.getByText(longRecovery));
-      await new Promise(resolve => setTimeout(resolve, DOUBLE_CLICK_SETTLE_MS));
 
       await waitFor(() => {
         const editorPopover = document.querySelector('[data-inline-editor-field="recovery"]');

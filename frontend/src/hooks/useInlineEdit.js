@@ -8,8 +8,6 @@ import {
 } from '../utils/multiValueField';
 import { confirmDialog, messageDialog } from '../utils/dialogs';
 
-export const CLICK_COPY_DELAY_MS = 320;
-
 const focusEditableField = (element, multiline = false) => {
     // 编辑框可能已卸载（例如微任务执行前编辑被取消），此时无需聚焦
     if (!element) return;
@@ -38,7 +36,6 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
     const [showSuggestions, setShowSuggestions] = useState(false);
     const isSelectingSuggestionRef = useRef(false);
     const confirmingRef = useRef(false);
-    const clickTimerRef = useRef(null);
 
     const getSuggestionsForField = (field) => {
         if (!field) return [];
@@ -74,24 +71,9 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
         element.style.height = `${Math.min(Math.max(element.scrollHeight, 96), 260)}px`;
     }, [editingCell, editValue]);
 
-    useEffect(() => {
-        return () => {
-            if (clickTimerRef.current) {
-                clearTimeout(clickTimerRef.current);
-                clickTimerRef.current = null;
-            }
-        };
-    }, []);
-
     const handleCellClick = (value, label, copyToClipboard) => {
-        if (value && !editingCell) {
-            if (clickTimerRef.current) {
-                clearTimeout(clickTimerRef.current);
-            }
-            clickTimerRef.current = setTimeout(() => {
-                copyToClipboard(value, label);
-                clickTimerRef.current = null;
-            }, CLICK_COPY_DELAY_MS);
+        if (value && !editingCell && typeof copyToClipboard === 'function') {
+            copyToClipboard(value, label);
         }
     };
 
@@ -99,10 +81,6 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
         e.stopPropagation();
         if (typeof e.preventDefault === 'function') {
             e.preventDefault();
-        }
-        if (clickTimerRef.current) {
-            clearTimeout(clickTimerRef.current);
-            clickTimerRef.current = null;
         }
         const safeValue = currentValue || '';
         setEditingCell({ accountId, field, originalValue: safeValue });

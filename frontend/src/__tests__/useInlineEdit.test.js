@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import useInlineEdit, { CLICK_COPY_DELAY_MS } from '../hooks/useInlineEdit';
+import useInlineEdit from '../hooks/useInlineEdit';
 import { ask, message } from '@tauri-apps/plugin-dialog';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: vi.fn(), message: vi.fn() }));
@@ -51,7 +51,7 @@ describe('useInlineEdit Hook', () => {
   });
 
   describe('handleCellClick - 单击复制', () => {
-    it('延迟触发复制', () => {
+    it('单击立即触发复制', () => {
       const { result } = renderHook(() => useInlineEdit({ onInlineEdit, allGroups }));
       const copyToClipboard = vi.fn();
 
@@ -59,12 +59,7 @@ describe('useInlineEdit Hook', () => {
         result.current.handleCellClick('test@gmail.com', '邮箱', copyToClipboard);
       });
 
-      expect(copyToClipboard).not.toHaveBeenCalled();
-
-      act(() => {
-        vi.advanceTimersByTime(CLICK_COPY_DELAY_MS);
-      });
-
+      expect(copyToClipboard).toHaveBeenCalledTimes(1);
       expect(copyToClipboard).toHaveBeenCalledWith('test@gmail.com', '邮箱');
     });
 
@@ -74,10 +69,6 @@ describe('useInlineEdit Hook', () => {
 
       act(() => {
         result.current.handleCellClick('', '邮箱', copyToClipboard);
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(CLICK_COPY_DELAY_MS);
       });
 
       expect(copyToClipboard).not.toHaveBeenCalled();
@@ -95,10 +86,6 @@ describe('useInlineEdit Hook', () => {
 
       act(() => {
         result.current.handleCellClick('test@gmail.com', '邮箱', copyToClipboard);
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(CLICK_COPY_DELAY_MS);
       });
 
       expect(copyToClipboard).not.toHaveBeenCalled();
@@ -141,30 +128,6 @@ describe('useInlineEdit Hook', () => {
       });
 
       expect(result.current.showSuggestions).toBe(true);
-    });
-
-    it('双击取消单击复制的定时器', () => {
-      const { result } = renderHook(() => useInlineEdit({ onInlineEdit, allGroups }));
-      const copyToClipboard = vi.fn();
-      const mockEvent = { stopPropagation: vi.fn() };
-
-      // 先触发单击
-      act(() => {
-        result.current.handleCellClick('test@gmail.com', '邮箱', copyToClipboard);
-      });
-
-      // 立即双击
-      act(() => {
-        result.current.handleCellDoubleClick(mockEvent, 1, 'email', 'test@gmail.com');
-      });
-
-      // 等待单击延迟时间
-      act(() => {
-        vi.advanceTimersByTime(CLICK_COPY_DELAY_MS);
-      });
-
-      // 单击的复制不应被触发
-      expect(copyToClipboard).not.toHaveBeenCalled();
     });
   });
 
@@ -557,24 +520,6 @@ describe('useInlineEdit Hook', () => {
           result.current.handleKeyDown({ key: 'Enter', preventDefault: vi.fn() });
         });
       }).not.toThrow();
-    });
-
-    it('unmount 时清理单击定时器', () => {
-      const { result, unmount } = renderHook(() => useInlineEdit({ onInlineEdit, allGroups }));
-      const copyToClipboard = vi.fn();
-
-      act(() => {
-        result.current.handleCellClick('test@gmail.com', '邮箱', copyToClipboard);
-      });
-
-      unmount();
-
-      act(() => {
-        vi.advanceTimersByTime(CLICK_COPY_DELAY_MS);
-      });
-
-      // 定时器已清理，不应触发复制
-      expect(copyToClipboard).not.toHaveBeenCalled();
     });
   });
 });
