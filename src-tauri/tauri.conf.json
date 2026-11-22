@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "GoogleManager",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "identifier": "com.googlemanager.app",
   "build": {
     "frontendDist": "../static",
@@ -18,7 +18,7 @@
         "minWidth": 1024,
         "minHeight": 640,
         "decorations": false,
-        "backgroundColor": "#0b0c0e",
+        "backgroundColor": "#161922",
         "resizable": true,
         "fullscreen": false
       }

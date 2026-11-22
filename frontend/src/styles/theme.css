@@ -17,63 +17,72 @@
   --sidebar-w: 212px;
   --titlebar-h: 36px;
 
-  /* 表面色板（深炭黑画布 + 浮层卡片） */
-  --bg-canvas: #0b0c0e;
-  --bg-panel: #131418;
-  --bg-elevated: #181a20;
-  --bg-hover: rgba(255, 255, 255, 0.045);
-  --bg-active: rgba(255, 255, 255, 0.075);
+  /* 表面色板（柔和石墨深灰 + 层次环境光） */
+  --bg-canvas: #161922;
+  --bg-panel: #1d212c;
+  --bg-panel-glass: rgba(28, 32, 43, 0.78);
+  --bg-elevated: #252a37;
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(255, 255, 255, 0.095);
+
+  /* 非纯色多层空间氛围背景：右上冷蓝天光 + 左下雾蓝托底 + 微距像素点阵 + 深石板渐变 */
+  --bg-body:
+    radial-gradient(ellipse 68% 58% at 84% 6%, rgba(107, 155, 247, 0.14) 0%, rgba(107, 155, 247, 0.04) 46%, transparent 74%),
+    radial-gradient(ellipse 58% 52% at 10% 94%, rgba(92, 132, 194, 0.11) 0%, rgba(74, 114, 168, 0.03) 48%, transparent 72%),
+    radial-gradient(ellipse 46% 42% at 52% 48%, rgba(148, 163, 184, 0.04) 0%, transparent 70%),
+    radial-gradient(rgba(228, 231, 238, 0.038) 1px, transparent 1px),
+    linear-gradient(158deg, #1d2230 0%, #171b25 48%, #13161f 100%);
+  --bg-body-size: 100% 100%, 100% 100%, 100% 100%, 24px 24px, 100% 100%;
 
   /* 兼容旧别名 */
   --bg-primary: var(--bg-canvas);
   --bg-secondary: var(--bg-panel);
   --bg-tertiary: var(--bg-elevated);
   --bg-card: var(--bg-panel);
-  --bg-body: var(--bg-canvas);
 
   /* 极细发丝边框 */
-  --border: rgba(255, 255, 255, 0.07);
-  --border-light: rgba(255, 255, 255, 0.045);
-  --border-strong: rgba(255, 255, 255, 0.13);
+  --border: rgba(255, 255, 255, 0.085);
+  --border-light: rgba(255, 255, 255, 0.055);
+  --border-strong: rgba(255, 255, 255, 0.15);
 
-  /* 文本层级 */
-  --text-primary: #f1f3f5;
-  --text-secondary: #8e95a2;
-  --text-muted: #5a616e;
+  /* 文本层级（柔和暖灰白，避免高反差白字刺眼，同时拉升次级与弱文字可读性） */
+  --text-primary: #e4e7ee;
+  --text-secondary: #a2aab8;
+  --text-muted: #727b8c;
 
-  /* 强调与语义色（克制冷钢蓝 + 验证码绿） */
-  --primary: #5b8ef4;
-  --primary-hover: #73a0f7;
-  --primary-light: rgba(91, 142, 244, 0.14);
-  --accent: #5b8ef4;
+  /* 强调与语义色（柔和钢蓝 + 柔翠验证码绿） */
+  --primary: #6b9bf7;
+  --primary-hover: #82acf9;
+  --primary-light: rgba(107, 155, 247, 0.15);
+  --accent: #6b9bf7;
 
-  --success: #34d399;
-  --success-soft: rgba(52, 211, 153, 0.12);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245, 158, 11, 0.14);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.13);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.14);
 
   /* 渐变令牌（用于兼容旧语义引用，保持低饱和极简） */
-  --gradient-primary: #5b8ef4;
-  --gradient-success: #34d399;
+  --gradient-primary: #6b9bf7;
+  --gradient-success: #4ade80;
   --gradient-danger: #f87171;
 
-  /* 极简阴影 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.62);
+  /* 柔和层次阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.42);
 
   /* 像素点阵氛围参数 */
-  --dither-ink: #ffffff;
-  --dither-opacity: 0.095;
+  --dither-ink: #e4e7ee;
+  --dither-opacity: 0.07;
 
   /* 键帽与反色徽标 */
-  --kbd-bg: #181a20;
-  --kbd-border: rgba(255, 255, 255, 0.12);
-  --kbd-text: #c2c8d2;
-  --brand-badge-bg: #f1f3f5;
-  --brand-badge-fg: #0b0c0e;
+  --kbd-bg: #232731;
+  --kbd-border: rgba(255, 255, 255, 0.14);
+  --kbd-text: #ced4df;
+  --brand-badge-bg: #e4e7ee;
+  --brand-badge-fg: #16181d;
 
   /* 圆角 */
   --radius-sm: 6px;
@@ -86,17 +95,24 @@
 }
 
 :root[data-theme="light"] {
-  --bg-canvas: #f4f5f7;
+  --bg-canvas: #f1f3f8;
   --bg-panel: #ffffff;
-  --bg-elevated: #f8f9fb;
+  --bg-panel-glass: rgba(255, 255, 255, 0.82);
+  --bg-elevated: #f6f7fb;
   --bg-hover: rgba(17, 24, 39, 0.045);
   --bg-active: rgba(17, 24, 39, 0.08);
+
+  --bg-body:
+    radial-gradient(ellipse 68% 58% at 84% 6%, rgba(37, 99, 235, 0.08) 0%, transparent 72%),
+    radial-gradient(ellipse 56% 52% at 10% 94%, rgba(148, 163, 184, 0.14) 0%, transparent 70%),
+    radial-gradient(rgba(17, 24, 39, 0.045) 1px, transparent 1px),
+    linear-gradient(158deg, #f8f9fc 0%, #f1f4f9 52%, #eaedf5 100%);
+  --bg-body-size: 100% 100%, 100% 100%, 24px 24px, 100% 100%;
 
   --bg-primary: var(--bg-canvas);
   --bg-secondary: var(--bg-panel);
   --bg-tertiary: var(--bg-elevated);
   --bg-card: var(--bg-panel);
-  --bg-body: var(--bg-canvas);
 
   --border: rgba(17, 24, 39, 0.09);
   --border-light: rgba(17, 24, 39, 0.055);
@@ -155,6 +171,9 @@ body {
   font-size: 13px;
   line-height: 1.55;
   background-color: var(--bg-canvas);
+  background-image: var(--bg-body);
+  background-size: var(--bg-body-size);
+  background-attachment: fixed;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

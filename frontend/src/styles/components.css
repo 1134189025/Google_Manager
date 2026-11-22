@@ -74,7 +74,7 @@
   padding: 2px 9px;
   border-radius: 6px;
   font-size: 12px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 1px 0 rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 1px 0 rgba(0, 0, 0, 0.28);
   transition: border-color var(--dur-fast) var(--ease-damp),
     color var(--dur-fast) var(--ease-damp),
     transform var(--dur-fast) var(--ease-damp),
@@ -1230,7 +1230,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(5, 6, 8, 0.68);
+  background: rgba(12, 14, 19, 0.54);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   animation: gmFadeIn 160ms var(--ease-damp) both;
