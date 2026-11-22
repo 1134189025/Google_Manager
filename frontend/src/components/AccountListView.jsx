@@ -1,10 +1,8 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import {
     Search,
-    Tag,
+    X,
     FileDown,
-    RotateCcw,
-    Trash2,
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import Pagination from './Pagination';
@@ -21,12 +19,9 @@ import BatchToolbar from './BatchToolbar';
 import AccountTable from './AccountTable';
 import api from '../services/api';
 import { splitMultiValueLines } from '../utils/multiValueField';
-import { extractPhoneAndSmsUrl } from '../utils/smsUtils';
 import { describeClearCacheResult } from '../utils/browserUtils';
 import { isTauriRuntime } from '../utils/tauriRuntime';
-import { formatDbTimestamp } from '../utils/timeUtils';
-import { confirmDialog, messageDialog } from '../utils/dialogs';
-import { renderInBody } from '../utils/portal';
+import { messageDialog } from '../utils/dialogs';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -137,9 +132,13 @@ const AccountListView = ({
     onSearchChange,
     onNotify,
     openBrowserSettings,
+    pendingAction = null,
+    onConsumePendingAction,
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
     const [inlineRecentValuesByField, setInlineRecentValuesByField] = useState(() => buildEmptyRecentValues());
+    const searchInputRef = useRef(null);
+    const handledActionIdRef = useRef(0);
 
     // 错误提示：优先用右上角提示条，没有时退回系统提示框
     const notifyError = useCallback((msg) => {
@@ -224,7 +223,7 @@ const AccountListView = ({
     const twoFACodes = externalTwoFACodes ?? visibleTwoFACodes;
 
     // 手机短信验证码：只轮询当前页、且已配置接码地址的账号（默认 5 秒一轮）
-    const { smsCodes, refresh: refreshSmsCode, reset: resetSmsCode } = useSmsCodes({
+    const { smsCodes, refresh: refreshSmsCode } = useSmsCodes({
         accounts: pagination.paginatedData,
         fetchSmsCode: api.fetchSmsCode,
     });
@@ -243,10 +242,6 @@ const AccountListView = ({
         setOpeningBrowserIds(new Set(openingBrowserIdsRef.current));
     }, []);
 
-    /**
-     * 打开账号浏览器：未运行则启动，运行中则切到已有窗口。
-     * 第一次使用时先确认浏览器与配置目录；首次打开某账号时复制邮箱方便登录。
-     */
     const handleOpenBrowser = useCallback(async (acc) => {
         if (openingBrowserIdsRef.current.has(acc.id)) return;
         setBrowserOpening(acc.id, true);
@@ -257,7 +252,6 @@ const AccountListView = ({
                 if (!saved) return;
             }
 
-            // 复制失败不能影响打开浏览器
             const copyEmail = async () => {
                 try {
                     await copyToClipboard(acc.email, '邮箱');
@@ -266,8 +260,6 @@ const AccountListView = ({
                 }
             };
 
-            // 预计是首次打开（还没有配置目录）时，先复制邮箱再启动：
-            // 浏览器窗口一出现就会抢走焦点，之后写剪贴板会失败
             const expectFirstLaunch = (browserStatuses[acc.email] || 'none') === 'none';
             if (expectFirstLaunch) await copyEmail();
 
@@ -282,7 +274,6 @@ const AccountListView = ({
                 onNotify?.('已打开 Google 登录页并复制邮箱；密码、2FA 码和短信码可在表格里点击复制');
             }
 
-            // 浏览器建立单实例窗口需要片刻，稍后再查一次
             refreshBrowserStatus();
             setTimeout(refreshBrowserStatus, 1500);
         } finally {
@@ -295,7 +286,6 @@ const AccountListView = ({
         const byField = Object.fromEntries(REUSABLE_INLINE_FIELDS.map(field => [field, []]));
         const seenByField = Object.fromEntries(REUSABLE_INLINE_FIELDS.map(field => [field, new Set()]));
 
-        // accounts 默认后端按 id DESC 返回，直接线性扫描可避免每次 n log n 排序
         for (const account of accounts) {
             for (const field of REUSABLE_INLINE_FIELDS) {
                 if (byField[field].length >= 5) continue;
@@ -377,10 +367,6 @@ const AccountListView = ({
         return Promise.resolve(false);
     }, [onInlineEdit, trackRecentInlineValue]);
 
-    /**
-     * 一次提交多个字段（例如手机号 + 接码地址这种绑定关系）
-     * 逐字段合并为一个补丁，任何一项失败都不部分保存，避免只存一半
-     */
     const handleInlineEditManyWithRecent = useCallback((id, patch) => {
         if (!patch || typeof onInlineEditMany !== 'function') return Promise.resolve(false);
         for (const [field, value] of Object.entries(patch)) {
@@ -388,6 +374,7 @@ const AccountListView = ({
         }
         return onInlineEditMany(id, patch);
     }, [onInlineEditMany, trackRecentInlineValue]);
+
     const inlineEdit = useInlineEdit({
         onInlineEdit: handleInlineEditWithRecent,
         onInlineEditMany: handleInlineEditManyWithRecent,
@@ -395,14 +382,11 @@ const AccountListView = ({
         allGroups,
         recentValuesByField,
     });
+
     const handleSmsRefresh = useCallback((accountId) => {
         return refreshSmsCode(accountId);
     }, [refreshSmsCode]);
 
-    /**
-     * 点击手机验证码：只复制验证码本身；
-     * 失败时保留的旧验证码会明确提示为「上次获取」，避免误用
-     */
     const handleSmsCopy = useCallback((code, label, meta) => {
         if (!code) return;
         if (meta?.stale) {
@@ -412,10 +396,6 @@ const AccountListView = ({
         copyToClipboard(code, label || '手机验证码');
     }, [copyToClipboard]);
 
-    /**
-     * 复制号码 + 完整接码地址（结果形如 +12025550123|https://...）
-     * 单独成操作，不并入「复制全部信息」，避免无意间带出 token
-     */
     const copyPhoneWithSmsUrl = useCallback((acc) => {
         const smsUrl = String(acc?.smsUrl || '').trim();
         const phone = String(acc?.phone || '').trim();
@@ -431,7 +411,6 @@ const AccountListView = ({
 
     // 导出对话框状态
     const [exportDialog, setExportDialog] = useState({ isOpen: false, mode: 'all' });
-    const [recycleDrawer, setRecycleDrawer] = useState({ isOpen: false, loading: false, accounts: [] });
 
     // 多选 Hook
     const selection = useAccountSelection();
@@ -445,11 +424,11 @@ const AccountListView = ({
     const selectedAccountIds = Array.from(selection.selectedIds);
     const selectedAccountsForExport = accounts.filter(account => selection.selectedIds.has(account.id));
 
-    const getCurrentExportMode = () => {
+    const getCurrentExportMode = useCallback(() => {
         if (selectedAccountIds.length > 0) return 'selected';
         if (normalizedSearchKeyword || hasGroupNameFilter) return 'filtered';
         return 'all';
-    };
+    }, [selectedAccountIds.length, normalizedSearchKeyword, hasGroupNameFilter]);
 
     const buildExportRequestParams = (mode) => {
         if (mode === 'selected') {
@@ -477,7 +456,6 @@ const AccountListView = ({
         ? selectedAccountsForExport
         : accounts;
 
-    // 筛选切换或结果集变更时，清理不在当前结果中的残留选中 ID
     useEffect(() => {
         selection.keepOnlyCurrentResultIds(currentResultAccountIds);
     }, [selection.keepOnlyCurrentResultIds, currentResultAccountIds]);
@@ -501,27 +479,22 @@ const AccountListView = ({
         pagination.resetPage();
     };
 
-    // 搜索时重置到第一页
     const handleSearchChange = (e) => {
         setSearch(e.target.value);
         pagination.resetPage();
         if (onSearchChange) onSearchChange(e.target.value);
     };
 
-    // 历史抽屉
     const openHistoryDrawer = (account) => setHistoryDrawer({ isOpen: true, account });
     const closeHistoryDrawer = () => setHistoryDrawer({ isOpen: false, account: null });
 
-    // 复制全部信息
     const copyAllInfo = (acc) => {
         const cleanSecret = acc.secret ? acc.secret.replace(/\s/g, '') : '';
-        // 没有 2FA 密钥时不输出空链接
         const twoFALink = cleanSecret ? `https://2fa.run/2fa/${cleanSecret}` : '无';
         const fullInfo = `邮箱账号：${acc.email}\n密码：${acc.password}\n恢复邮箱：${acc.recovery || '无'}\n手机号：${acc.phone || '无'}\n注册年份：${acc.regYear || '无'}\n国家：${acc.country || '无'}\n谷歌验证码获取：${twoFALink}\n【账号到手后必备工作】：https://qcn4p837qb99.feishu.cn/wiki/S2bFwQ5vBifHgCkrmgrcAUzlnJd?from=from_copylink`;
         copyToClipboard(fullInfo, '全部信息');
     };
 
-    // 批量删除
     const handleBatchDelete = async () => {
         if (selection.selectedIds.size === 0 || isBatchProcessing) return;
         setIsBatchProcessing(true);
@@ -535,7 +508,6 @@ const AccountListView = ({
         }
     };
 
-    // 批量编辑：先弹应用内输入框（macOS 的 WebView 不支持 window.prompt），提交后逐个更新
     const [batchEditPrompt, setBatchEditPrompt] = useState(null);
 
     const handleBatchEdit = useCallback((field, fieldLabel) => {
@@ -584,10 +556,9 @@ const AccountListView = ({
         return undefined;
     }, [selection, handleInlineEditWithRecent, notifyError, onNotify]);
 
-    // 导出账号
-    const handleOpenExportDialog = () => {
+    const handleOpenExportDialog = useCallback(() => {
         setExportDialog({ isOpen: true, mode: getCurrentExportMode() });
-    };
+    }, [getCurrentExportMode]);
 
     const handleExportAccounts = async (config) => {
         try {
@@ -596,7 +567,6 @@ const AccountListView = ({
             const fileName = `accounts_export_${formatLocalDate(new Date())}.txt`;
 
             if (isTauriRuntime()) {
-                // 先选保存位置，再由后端生成并直接写入文件（不经过前端 fs 插件的路径权限）
                 const filePath = await save({
                     defaultPath: fileName,
                     filters: [{ name: '文本文件', extensions: ['txt'] }]
@@ -613,7 +583,6 @@ const AccountListView = ({
                 return;
             }
 
-            // 非桌面环境（例如直接用浏览器打开前端）：用浏览器原生 Blob 下载
             const result = await api.exportAccountsText(accountIds, searchParam, normalizedConfig);
             const textContent = typeof result === 'string' ? result : (result?.data ?? '');
             if (typeof result === 'object' && result !== null && !result.success) {
@@ -636,103 +605,20 @@ const AccountListView = ({
         }
     };
 
-    const loadDeletedAccounts = async () => {
-        setRecycleDrawer(prev => ({ ...prev, loading: true }));
-        try {
-            const result = await api.getDeletedAccounts();
-            if (result.success) {
-                setRecycleDrawer(prev => ({ ...prev, accounts: result.data || [], loading: false }));
-            } else {
-                setRecycleDrawer(prev => ({ ...prev, loading: false }));
-                notifyError(result.message || '加载回收站失败');
-            }
-        } catch (error) {
-            setRecycleDrawer(prev => ({ ...prev, loading: false }));
-            notifyError(error.message || '加载回收站失败');
+    // 响应来自 App 的一次性跨视图指令，执行后立即通知父组件清除，避免切回时重放旧动作
+    useEffect(() => {
+        if (!pendingAction?.id || pendingAction.id === handledActionIdRef.current) return;
+        handledActionIdRef.current = pendingAction.id;
+        onConsumePendingAction?.(pendingAction.id);
+
+        if (pendingAction.type === 'search') {
+            searchInputRef.current?.focus();
+            searchInputRef.current?.select?.();
+        } else if (pendingAction.type === 'export') {
+            handleOpenExportDialog();
         }
-    };
+    }, [pendingAction, onConsumePendingAction, handleOpenExportDialog]);
 
-    const openRecycleDrawer = async () => {
-        setRecycleDrawer(prev => ({ ...prev, isOpen: true }));
-        await loadDeletedAccounts();
-    };
-
-    const closeRecycleDrawer = () => {
-        setRecycleDrawer({ isOpen: false, loading: false, accounts: [] });
-    };
-
-    const handleRestoreDeleted = async (id) => {
-        const result = await api.restoreAccount(id);
-        if (!result.success) {
-            notifyError(result.message || '恢复失败');
-            return;
-        }
-        await loadDeletedAccounts();
-        if (onRefreshAccounts) {
-            await onRefreshAccounts();
-        }
-    };
-
-    /**
-     * 彻底删除前询问是否一起删除浏览器配置；只在确有配置目录时询问。
-     * 返回确认要删除配置的邮箱列表。
-     */
-    const askDeleteBrowserProfiles = async (emails) => {
-        const uniqueEmails = [...new Set(emails.filter(Boolean))];
-        if (uniqueEmails.length === 0) return [];
-
-        const statusResult = await api.getBrowserStatuses(uniqueEmails);
-        const withProfile = uniqueEmails.filter(email => (statusResult.data?.[email] || 'none') !== 'none');
-        if (withProfile.length === 0) return [];
-
-        const subject = withProfile.length === 1 && uniqueEmails.length === 1
-            ? '该账号'
-            : `其中 ${withProfile.length} 个账号`;
-        const confirmed = await confirmDialog(
-            `${subject}有浏览器配置（保存着登录状态），是否一起删除？\n选「取消」则保留配置目录。`,
-            { okLabel: '一起删除', cancelLabel: '保留配置' }
-        );
-        return confirmed ? withProfile : [];
-    };
-
-    const deleteBrowserProfilesAfterPurge = async (emails) => {
-        if (emails.length === 0) return;
-        const result = await api.deleteBrowserProfiles(emails);
-        if (!result.success) {
-            notifyError(result.message || '删除浏览器配置失败');
-            return;
-        }
-        const { deleted = 0, skipped = 0 } = result.data || {};
-        onNotify?.(skipped > 0
-            ? `已删除 ${deleted} 个浏览器配置，${skipped} 个因正在运行或仍被其他账号使用而保留`
-            : `已删除 ${deleted} 个浏览器配置`);
-    };
-
-    const handlePurgeDeleted = async (acc) => {
-        if (!await confirmDialog('确定永久删除该账号吗？此操作不可撤销。', { okLabel: '永久删除' })) return;
-        const profileEmails = await askDeleteBrowserProfiles([acc.email]);
-        const result = await api.purgeAccount(acc.id);
-        if (!result.success) {
-            notifyError(result.message || '永久删除失败');
-            return;
-        }
-        await deleteBrowserProfilesAfterPurge(profileEmails);
-        await loadDeletedAccounts();
-    };
-
-    const handlePurgeAllDeleted = async () => {
-        if (!await confirmDialog('确定清空回收站吗？此操作不可撤销。', { okLabel: '清空' })) return;
-        const profileEmails = await askDeleteBrowserProfiles(recycleDrawer.accounts.map(acc => acc.email));
-        const result = await api.purgeAllDeleted();
-        if (!result.success) {
-            notifyError(result.message || '清空回收站失败');
-            return;
-        }
-        await deleteBrowserProfilesAfterPurge(profileEmails);
-        await loadDeletedAccounts();
-    };
-
-    // 批量清理选中账号的浏览器缓存（不影响登录状态，运行中的跳过）
     const handleBatchClearBrowserCache = async () => {
         if (selection.selectedIds.size === 0 || isBatchProcessing) return;
         setIsBatchProcessing(true);
@@ -750,67 +636,89 @@ const AccountListView = ({
 
     return (
         <>
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h1 className="gm-title">账号库</h1>
+            <div className="space-y-3.5 gm-view-enter">
+                {/* 精简页头：标题与实时计数在左，命令式搜索框与轻量动作在右 */}
+                <div className="gm-list-header">
+                    <div className="gm-list-title-group">
+                        <div className="flex items-baseline gap-2.5">
+                            <h1 className="gm-title">账号库</h1>
+                            <span className="font-mono text-[11.5px] gm-text-3 tabular-nums">
+                                {accounts.length} 条
+                            </span>
+                        </div>
                         <p className="gm-subtitle">管理您的所有谷歌账号资产</p>
                     </div>
-                    <div className="relative w-full md:w-80">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 gm-text-3" size={18} />
-                        <input
-                            type="text"
-                            placeholder="搜索邮箱或备注内容..."
-                            value={search}
-                            onChange={handleSearchChange}
-                            className="gm-input w-full"
-                            style={{ paddingLeft: 38 }}
-                        />
-                    </div>
-                </div>
 
-                {/* 筛选与操作按钮 */}
-                <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                    {/* 标签筛选 */}
-                    {allGroups && allGroups.length > 0 && (
-                        <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1">
-                                <Tag size={16} className="gm-text-3" />
-                                <span className="text-sm font-medium gm-text-2">标签：</span>
-                            </div>
-                            <select
-                                value={groupFilter || ''}
-                                onChange={(e) => { setGroupFilter(e.target.value || null); pagination.resetPage(); }}
-                                className="gm-select"
-                            >
-                                <option value="">全部标签</option>
-                                {allGroups.map(group => (
-                                    <option key={group} value={group}>{group}</option>
-                                ))}
-                            </select>
+                    <div className="gm-list-actions">
+                        <div className="gm-search-box">
+                            <Search className="gm-search-icon" size={14} />
+                            <input
+                                ref={searchInputRef}
+                                type="text"
+                                placeholder="搜索邮箱或备注内容..."
+                                value={search}
+                                onChange={handleSearchChange}
+                                className="gm-input"
+                            />
+                            {search ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSearch('');
+                                        pagination.resetPage();
+                                        onSearchChange?.('');
+                                        searchInputRef.current?.focus();
+                                    }}
+                                    className="gm-search-clear"
+                                    aria-label="清空搜索"
+                                    title="清空搜索"
+                                >
+                                    <X size={13} />
+                                </button>
+                            ) : (
+                                <span className="gm-search-kbd inline-flex items-center gap-0.5">
+                                    <kbd className="gm-kbd">Ctrl</kbd>
+                                    <kbd className="gm-kbd">K</kbd>
+                                </span>
+                            )}
                         </div>
-                    )}
 
-                    {/* 导出 / 回收站按钮 */}
-                    <div className="flex items-center gap-2 ml-auto">
                         <button
                             onClick={handleOpenExportDialog}
-                            className="gm-btn gm-btn-success"
+                            className="gm-btn gm-btn-secondary"
                             title="导出账号为文本文件"
                         >
-                            <FileDown size={18} />
+                            <FileDown size={15} />
                             <span>导出账号</span>
-                        </button>
-                        <button
-                            onClick={openRecycleDrawer}
-                            className="gm-btn gm-btn-secondary"
-                            title="查看回收站账号"
-                        >
-                            <Trash2 size={18} />
-                            <span>回收站</span>
                         </button>
                     </div>
                 </div>
+
+                {/* 横向像素胶囊标签筛选条（替代呆板的原生下拉框） */}
+                {allGroups && allGroups.length > 0 && (
+                    <div className="gm-filter-strip" role="group" aria-label="按标签筛选">
+                        <button
+                            type="button"
+                            onClick={() => { setGroupFilter(null); pagination.resetPage(); }}
+                            className={`gm-filter-pill ${!groupFilter ? 'is-active' : ''}`}
+                        >
+                            全部
+                        </button>
+                        {allGroups.map(group => (
+                            <button
+                                key={group}
+                                type="button"
+                                onClick={() => {
+                                    setGroupFilter(groupFilter === group ? null : group);
+                                    pagination.resetPage();
+                                }}
+                                className={`gm-filter-pill ${groupFilter === group ? 'is-active' : ''}`}
+                            >
+                                {group}
+                            </button>
+                        ))}
+                    </div>
+                )}
 
                 {/* 批量操作工具栏 */}
                 <BatchToolbar
@@ -905,76 +813,6 @@ const AccountListView = ({
                 onSubmit={(value) => applyBatchEdit(batchEditPrompt.field, value)}
                 onCancel={() => setBatchEditPrompt(null)}
             />
-
-            {recycleDrawer.isOpen && renderInBody(
-                <div className="gm-overlay">
-                    <div className="gm-modal max-w-3xl">
-                        <div className="gm-modal-header">
-                            <div className="flex items-center gap-2">
-                                <Trash2 size={18} />
-                                <h3 className="text-lg font-semibold gm-text-1">回收站</h3>
-                                <span className="gm-chip">
-                                    {recycleDrawer.accounts.length} 条
-                                </span>
-                            </div>
-                            <button
-                                onClick={closeRecycleDrawer}
-                                className="gm-btn gm-btn-ghost gm-btn-sm"
-                            >
-                                关闭
-                            </button>
-                        </div>
-                        <div className="gm-modal-body max-h-[60vh] overflow-y-auto space-y-2">
-                            {recycleDrawer.loading ? (
-                                <div className="gm-empty">加载中...</div>
-                            ) : recycleDrawer.accounts.length === 0 ? (
-                                <div className="gm-empty">回收站为空</div>
-                            ) : recycleDrawer.accounts.map(acc => (
-                                <div
-                                    key={acc.id}
-                                    className="gm-solid px-4 py-3 flex items-center justify-between gap-3"
-                                >
-                                    <div className="min-w-0">
-                                        <p className="font-medium truncate gm-text-1">{acc.email}</p>
-                                        <p className="text-xs truncate gm-text-3">
-                                            删除时间：{formatDbTimestamp(acc.deletedAt) || '-'}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <button
-                                            onClick={() => handleRestoreDeleted(acc.id)}
-                                            className="gm-btn gm-btn-success gm-btn-sm"
-                                        >
-                                            <RotateCcw size={14} />
-                                            恢复
-                                        </button>
-                                        <button
-                                            onClick={() => handlePurgeDeleted(acc)}
-                                            className="gm-btn gm-btn-danger gm-btn-sm"
-                                        >
-                                            永久删除
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="gm-modal-footer">
-                            <button
-                                onClick={loadDeletedAccounts}
-                                className="gm-btn gm-btn-secondary gm-btn-sm"
-                            >
-                                刷新
-                            </button>
-                            <button
-                                onClick={handlePurgeAllDeleted}
-                                className="gm-btn gm-btn-danger"
-                            >
-                                清空回收站
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </>
     );
 };

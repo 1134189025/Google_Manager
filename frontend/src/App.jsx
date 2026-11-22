@@ -1,31 +1,33 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import {
-    Users,
-    UserPlus,
-    ShieldCheck,
-    CheckCircle2,
-    Moon,
-    Sun,
-    Settings,
-    RefreshCw
-} from 'lucide-react';
+import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 // 导入服务和组件
 import api from './services/api';
+import TitleBar from './components/TitleBar';
+import SideNav from './components/SideNav';
+import HomeView from './components/HomeView';
 import AccountListView from './components/AccountListView';
 import ImportView from './components/ImportView';
+import RecycleView from './components/RecycleView';
 import EditModal from './components/EditModal';
 import BrowserSettingsDialog from './components/BrowserSettingsDialog';
 import UpdateDialog from './components/UpdateDialog';
+import { PixelDitherBackdrop } from './components/PixelArt';
 import useAppUpdater from './hooks/useAppUpdater';
+import useBrowserStatus from './hooks/useBrowserStatus';
 import { normalizePhoneNumber } from './utils/phoneUtils';
 import { normalizeSmsUrlInput } from './utils/smsUtils';
 import { normalizeMultiValueValue, splitGroupNameValues } from './utils/multiValueField';
-import { APP_BUILD_TIME, buildVersionLabel, formatBuildTime } from './utils/buildInfo';
+
+const isTypingTarget = (target) => {
+    if (!target || typeof target.tagName !== 'string') return false;
+    const tag = target.tagName.toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+};
 
 const App = () => {
     const updater = useAppUpdater();
-    const [view, setView] = useState('list');
+    const [view, setView] = useState('home');
     const [accounts, setAccounts] = useState([]);
     const [search, setSearch] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -36,13 +38,17 @@ const App = () => {
     const notificationTimerRef = useRef(null);
     const latestLoadRequestIdRef = useRef(0);
 
+    // 跨视图待消费的一次性动作（搜索聚焦 / 导出弹窗 / 回收站抽屉）
+    const [pendingListAction, setPendingListAction] = useState(null);
+    const listActionSeqRef = useRef(0);
+
     // Modals state
     const [editingAccount, setEditingAccount] = useState(null);
 
     // Undo state
     const [deletedAccounts, setDeletedAccounts] = useState([]);
 
-    // 账号浏览器设置弹窗；首次打开浏览器时由列表页等待其结果（是否已保存）
+    // 账号浏览器设置弹窗；首次打开浏览器时由列表页/首页等待其结果（是否已保存）
     const [browserSettingsDialog, setBrowserSettingsDialog] = useState({ isOpen: false, firstRun: false });
     const browserSettingsResolveRef = useRef(null);
 
@@ -58,18 +64,16 @@ const App = () => {
         browserSettingsResolveRef.current = null;
     }, []);
 
-
-    // 暗色模式状态
+    // 暗黑优先：无 localStorage 记录时默认开启暗色模式
     const [darkMode, setDarkMode] = useState(() => {
-        // 从 localStorage 读取用户偏好（容忍非法值，避免整体渲染失败）
         try {
             const saved = localStorage.getItem('darkMode');
-            return saved === null ? false : JSON.parse(saved) === true;
+            return saved === null ? true : JSON.parse(saved) === true;
         } catch {
-            return false;
+            return true;
         }
     });
-    // 保存暗色模式设置到 localStorage，并同步到 <html data-theme>
+
     useEffect(() => {
         localStorage.setItem('darkMode', JSON.stringify(darkMode));
         document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
@@ -114,16 +118,22 @@ const App = () => {
         }
     };
 
+    // 首页轮询运行中的浏览器，支撑「活跃浏览器」卡片与统计
+    const { browserStatuses: homeBrowserStatuses, refresh: refreshHomeBrowserStatus } = useBrowserStatus({
+        accounts,
+        getBrowserStatuses: api?.getBrowserStatuses,
+        enabled: view === 'home',
+    });
+
     // 获取所有唯一的标签
     const allGroups = useMemo(() => {
         const groups = accounts.flatMap(acc => splitGroupNameValues(acc.groupName));
         return [...new Set(groups)].sort((left, right) => left.localeCompare(right, 'zh-CN', { sensitivity: 'base' }));
     }, [accounts]);
 
-
     // --- Helpers ---
-    const showNotification = (msg, type = 'success') => {
-        setNotification({ msg, type });
+    const showNotification = useCallback((msg, type = 'success') => {
+        setNotification({ msg, type, id: Date.now() });
 
         if (notificationTimerRef.current) {
             clearTimeout(notificationTimerRef.current);
@@ -133,9 +143,9 @@ const App = () => {
             setNotification(null);
             notificationTimerRef.current = null;
         }, 5000);
-    };
+    }, []);
 
-    const copyToClipboard = async (text, label) => {
+    const copyToClipboard = useCallback(async (text, label) => {
         try {
             await navigator.clipboard.writeText(text);
         } catch {
@@ -149,7 +159,76 @@ const App = () => {
             document.body.removeChild(el);
         }
         showNotification(`已复制 ${label} 到剪切板`);
-    };
+    }, [showNotification]);
+
+    // 跨视图动作分发：写入一次性动作并在 AccountListView 消费后清除，避免重新挂载时重放旧动作
+    const navigateToView = useCallback((nextView) => {
+        setPendingListAction(null);
+        setView(nextView);
+    }, []);
+
+    const dispatchListAction = useCallback((type) => {
+        listActionSeqRef.current += 1;
+        setPendingListAction({ type, id: listActionSeqRef.current });
+        setView('list');
+    }, []);
+
+    const consumePendingListAction = useCallback((actionId) => {
+        setPendingListAction(prev => (prev && prev.id === actionId ? null : prev));
+    }, []);
+
+    const triggerSearchAction = useCallback(() => {
+        dispatchListAction('search');
+    }, [dispatchListAction]);
+
+    const triggerImportAction = useCallback(() => {
+        navigateToView('import');
+    }, [navigateToView]);
+
+    const triggerExportAction = useCallback(() => {
+        dispatchListAction('export');
+    }, [dispatchListAction]);
+
+    // 全局快捷键：Ctrl/Cmd+K 搜索、Alt+N 导入、Alt+E 导出
+    useEffect(() => {
+        const handleGlobalKeyDown = (event) => {
+            const key = String(event.key || '').toLowerCase();
+            if ((event.ctrlKey || event.metaKey) && key === 'k') {
+                event.preventDefault();
+                triggerSearchAction();
+                return;
+            }
+            if (isTypingTarget(event.target)) return;
+            if (event.altKey && !event.ctrlKey && !event.metaKey && key === 'n') {
+                event.preventDefault();
+                triggerImportAction();
+            } else if (event.altKey && !event.ctrlKey && !event.metaKey && key === 'e') {
+                event.preventDefault();
+                triggerExportAction();
+            }
+        };
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [triggerSearchAction, triggerImportAction, triggerExportAction]);
+
+    // 首页点击活跃浏览器条目切回/打开浏览器
+    const handleHomeOpenBrowser = useCallback(async (acc) => {
+        try {
+            const settingsResult = await api.getBrowserSettings();
+            if (settingsResult.success && !settingsResult.data?.configured) {
+                const saved = await openBrowserSettings({ firstRun: true });
+                if (!saved) return;
+            }
+            const result = await api.openAccountBrowser(acc.id);
+            if (!result.success) {
+                showNotification(result.message || '打开浏览器失败', 'error');
+                return;
+            }
+            refreshHomeBrowserStatus();
+        } catch {
+            showNotification('打开浏览器失败', 'error');
+        }
+    }, [openBrowserSettings, refreshHomeBrowserStatus, showNotification]);
 
     // 撤回删除
     const undoDelete = async () => {
@@ -194,17 +273,14 @@ const App = () => {
     // --- Handlers ---
     const handleDelete = async (id) => {
         try {
-            // 保存要删除的账号用于撤回
             const accountToDelete = accounts.find(acc => acc.id === id);
 
             const result = await api.deleteAccount(id);
             if (result.success) {
-                // 先设置 deletedAccounts，再更新 accounts
                 if (accountToDelete) {
                     setDeletedAccounts([accountToDelete]);
                 }
                 setAccounts(prevAccounts => prevAccounts.filter(acc => acc.id !== id));
-                // 使用 setTimeout 确保状态更新后再显示通知
                 setTimeout(() => showNotification('账号已删除'), 0);
             } else {
                 showNotification(result.message || '删除失败', 'error');
@@ -254,17 +330,14 @@ const App = () => {
         try {
             const result = await api.batchImport(importedList);
             if (result.success) {
-                // 导入完成后重置筛选，避免“导入后看不到数据”
                 setView('list');
                 setSearch('');
                 setGroupFilter(null);
                 await loadAccounts('');
 
-                // 显示导入结果 - 使用API返回的属性名
                 const successCount = result.successCount || 0;
                 const failCount = result.failCount || 0;
                 if (failCount > 0) {
-                    // 失败可能来自重复账号、格式问题或字段校验失败
                     showNotification(
                         `成功导入 ${successCount} 个账号，${failCount} 个账号导入失败（可能重复或格式不合法）`,
                         successCount > 0 ? 'success' : 'error'
@@ -311,8 +384,6 @@ const App = () => {
                     prevAccounts.map(acc => (acc.id === id ? updatedAccount : acc))
                 );
                 showNotification(field + ' 已更新');
-
-                // 当 secret 字段更新时，2FA 验证码会由 AccountListView 内部自动更新
                 return true;
             } else {
                 showNotification(result.message || '更新失败', 'error');
@@ -325,10 +396,6 @@ const App = () => {
         }
     };
 
-    /**
-     * 多字段原子更新（手机号 + 接码地址这种绑定关系必须一起提交）
-     * 后端 update_account 接收完整账号补丁，任何一项失败都不会部分保存
-     */
     const handleInlineEditMany = async (id, patch) => {
         try {
             const account = accounts.find(acc => acc.id === id);
@@ -367,11 +434,8 @@ const App = () => {
         }
     };
 
-    // 批量删除处理
     const handleBatchDelete = async (ids) => {
         const idsArray = Array.from(ids);
-
-        // 先保存要删除的账号用于撤回
         const accountsToDelete = accounts.filter(acc => idsArray.includes(acc.id));
 
         const deletePromises = idsArray.map(id =>
@@ -384,21 +448,16 @@ const App = () => {
         );
 
         const results = await Promise.allSettled(deletePromises);
-
-        // 收集成功删除的 ID
         const successfulIds = results
             .filter(r => r.status === 'fulfilled' && r.value.success)
             .map(r => r.value.id);
 
-        // 更新 accounts 状态，移除已删除的账号
         if (successfulIds.length > 0) {
-            // 保存成功删除的账号用于撤回
             const deletedItems = accountsToDelete.filter(acc => successfulIds.includes(acc.id));
             setDeletedAccounts(deletedItems);
             setAccounts(prevAccounts =>
                 prevAccounts.filter(acc => !successfulIds.includes(acc.id))
             );
-            // 使用 setTimeout 确保状态更新后再显示通知
             setTimeout(() => showNotification(`已删除 ${successfulIds.length} 个账号`), 0);
         }
 
@@ -413,10 +472,7 @@ const App = () => {
     // 账号已由后端筛选搜索，前端额外过滤标签
     const filteredAccounts = useMemo(() => {
         if (!groupFilter) return accounts;
-
-        // 使用 Set 替代 array.includes() 以提高性能
         const filterSet = new Set([groupFilter]);
-
         return accounts.filter(acc => {
             const tags = splitGroupNameValues(acc.groupName);
             return tags.some(tag => filterSet.has(tag));
@@ -425,67 +481,33 @@ const App = () => {
 
     return (
         <div className="app-container">
-            <aside className="side-nav">
-                <div className="side-nav-brand" title="GoogleManager">
-                    <ShieldCheck size={22} />
-                </div>
+            <TitleBar />
+            <PixelDitherBackdrop />
 
-                <div className="nav-items">
-                    <button
-                        onClick={() => setView('list')}
-                        className={`nav-item ${view === 'list' ? 'active' : ''}`}
-                        title="账号列表"
-                    >
-                        <Users className="nav-item-icon" size={20} />
-                        <span className="nav-item-text">账号列表</span>
-                    </button>
-                    <button
-                        onClick={() => setView('import')}
-                        className={`nav-item ${view === 'import' ? 'active' : ''}`}
-                        title="导入账号"
-                    >
-                        <UserPlus className="nav-item-icon" size={20} />
-                        <span className="nav-item-text">导入账号</span>
-                    </button>
-                </div>
-
-                <div className="side-nav-footer">
-                    <button
-                        onClick={() => openBrowserSettings()}
-                        className="gm-icon-btn"
-                        title="账号浏览器设置"
-                    >
-                        <Settings size={18} />
-                    </button>
-                    <button
-                        onClick={() => setDarkMode(!darkMode)}
-                        className="gm-icon-btn"
-                        title={darkMode ? '切换亮色模式' : '切换暗色模式'}
-                    >
-                        {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-                    </button>
-                    <button
-                        onClick={updater.checkNow}
-                        className="gm-icon-btn gm-update-btn"
-                        title={updater.hasUpdate ? `发现新版本 v${updater.version}，点击查看` : '检查更新'}
-                        aria-label="检查更新"
-                    >
-                        <RefreshCw size={18} />
-                        {updater.hasUpdate && <span className="gm-update-dot" aria-hidden="true" />}
-                    </button>
-                    <div
-                        className="side-nav-version"
-                        title={`版本 ${buildVersionLabel} · 编译 ${APP_BUILD_TIME || '未知'}`}
-                    >
-                        版本 {buildVersionLabel}
-                        <br />
-                        编译 {formatBuildTime(APP_BUILD_TIME)}
-                    </div>
-                </div>
-            </aside>
+            <SideNav
+                view={view}
+                accountsCount={accounts.length}
+                darkMode={darkMode}
+                updater={updater}
+                onNavigate={navigateToView}
+                onOpenBrowserSettings={() => openBrowserSettings()}
+                onToggleDarkMode={() => setDarkMode(prev => !prev)}
+            />
 
             <main className="main-wrapper">
-                {view === 'list' ? (
+                {view === 'home' ? (
+                    <HomeView
+                        accounts={accounts}
+                        browserStatuses={homeBrowserStatuses}
+                        loading={loading}
+                        onTriggerSearch={triggerSearchAction}
+                        onTriggerImport={triggerImportAction}
+                        onTriggerExport={triggerExportAction}
+                        onNavigateList={() => navigateToView('list')}
+                        onOpenBrowser={handleHomeOpenBrowser}
+                        onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
+                    />
+                ) : view === 'list' ? (
                     <AccountListView
                         accounts={filteredAccounts}
                         search={search}
@@ -504,22 +526,34 @@ const App = () => {
                         loading={loading}
                         onNotify={showNotification}
                         openBrowserSettings={openBrowserSettings}
+                        pendingAction={pendingListAction}
+                        onConsumePendingAction={consumePendingListAction}
+                    />
+                ) : view === 'recycle' ? (
+                    <RecycleView
+                        onRefreshAccounts={() => loadAccounts()}
+                        onNotify={showNotification}
+                        onNavigateList={() => navigateToView('list')}
                     />
                 ) : (
-                    <ImportView onImport={handleImport} onCancel={() => setView('list')} importing={importing} />
+                    <ImportView onImport={handleImport} onCancel={() => navigateToView('list')} importing={importing} />
                 )}
             </main>
 
             {/* Notification Toast */}
             {notification && (
-                <div className={`gm-toast ${notification.type === 'success' ? 'gm-toast-success' : 'gm-toast-error'}`}>
-                    <CheckCircle2 size={20} />
-                    <span style={{ fontWeight: 500 }}>{notification.msg}</span>
+                <div
+                    key={notification.id}
+                    className={`gm-toast ${notification.type === 'success' ? 'gm-toast-success' : 'gm-toast-error'}`}
+                >
+                    {notification.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                    <span className="text-[13px] font-medium">{notification.msg}</span>
                     {deletedAccounts.length > 0 && notification.type === 'success' && (
                         <button onClick={undoDelete} className="gm-toast-action">
                             撤回
                         </button>
                     )}
+                    <span className="gm-toast-bar" aria-hidden="true" />
                 </div>
             )}
 
@@ -538,7 +572,6 @@ const App = () => {
                 onClose={closeBrowserSettings}
                 onNotify={showNotification}
             />
-
         </div>
     );
 };

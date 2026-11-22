@@ -3,9 +3,7 @@ import { X } from 'lucide-react';
 import { renderInBody } from '../utils/portal';
 
 /**
- * 应用内输入框（替代 `window.prompt`：macOS 的 WebView 没有实现它，调用直接返回 null）
- *
- * onSubmit(value) 返回字符串时作为错误提示显示并保持打开；返回其他值则由调用方负责关闭。
+ * 应用内输入框（替代 `window.prompt`）
  */
 const PromptDialog = ({
     isOpen,
@@ -28,7 +26,6 @@ const PromptDialog = ({
         setValue(defaultValue);
         setError('');
         setSubmitting(false);
-        // 等弹窗渲染后再聚焦
         const timer = setTimeout(() => inputRef.current?.focus(), 0);
         return () => clearTimeout(timer);
     }, [isOpen, defaultValue]);
@@ -56,19 +53,19 @@ const PromptDialog = ({
 
     return renderInBody(
         <div className="gm-overlay" onKeyDown={handleKeyDown}>
-            <div className="gm-modal w-full max-w-md animate-in zoom-in-95 duration-200" role="dialog" aria-label={title}>
+            <div className="gm-modal w-full max-w-md" role="dialog" aria-label={title}>
                 <div className="gm-modal-header">
-                    <h3 className="gm-title">{title}</h3>
-                    <button type="button" onClick={onCancel} className="gm-icon-btn" aria-label="关闭">
-                        <X size={20} />
+                    <h3 className="gm-title text-base">{title}</h3>
+                    <button type="button" onClick={onCancel} className="gm-icon-btn" style={{ width: 30, height: 30 }} aria-label="关闭">
+                        <X size={16} />
                     </button>
                 </div>
                 <form onSubmit={handleSubmit}>
                     <div className="gm-modal-body space-y-3">
-                        {description && <p className="text-sm gm-text-2">{description}</p>}
+                        {description && <p className="text-xs gm-text-2">{description}</p>}
                         <div>
                             {label && (
-                                <label htmlFor="gm-prompt-input" className="block text-sm font-medium gm-text-2 mb-1">{label}</label>
+                                <label htmlFor="gm-prompt-input" className="block text-xs font-medium gm-text-2 mb-1">{label}</label>
                             )}
                             <input
                                 id="gm-prompt-input"
@@ -80,7 +77,7 @@ const PromptDialog = ({
                                 className="gm-input w-full"
                             />
                         </div>
-                        {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
+                        {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
                     </div>
                     <div className="gm-modal-footer">
                         <button type="button" onClick={onCancel} className="gm-btn gm-btn-secondary flex-1">取消</button>

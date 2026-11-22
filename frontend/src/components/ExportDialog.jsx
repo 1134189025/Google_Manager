@@ -274,13 +274,14 @@ const ExportDialog = ({
 
         onExport(exportConfig);
     };
+
     return renderInBody(
         <div className="gm-overlay">
-            <div className="w-full max-w-2xl gm-modal animate-in zoom-in-95 duration-200" role="dialog" aria-label="导出账号配置">
+            <div className="w-full max-w-2xl gm-modal" role="dialog" aria-label="导出账号配置">
                 <div className="gm-modal-header">
                     <div>
-                        <h2 className="gm-title">导出账号配置</h2>
-                        <p className="text-sm mt-1 gm-text-2">
+                        <h2 className="gm-title text-base">导出账号配置</h2>
+                        <p className="text-xs mt-0.5 gm-text-2">
                             {getExportModeDescription()}
                         </p>
                     </div>
@@ -289,29 +290,25 @@ const ExportDialog = ({
                         aria-label="关闭导出配置"
                         title="关闭导出配置"
                         className="gm-icon-btn"
+                        style={{ width: 30, height: 30 }}
                     >
-                        <X size={24} />
+                        <X size={16} />
                     </button>
                 </div>
 
-                {/* 头部与底部按钮固定，只有中间内容滚动（.gm-modal-body） */}
-                <div className="gm-modal-body space-y-6">
+                <div className="gm-modal-body space-y-5">
                     <div>
-                        <label className="block text-sm font-semibold gm-text-1 mb-3">分隔符</label>
+                        <label className="block text-xs font-semibold gm-text-1 mb-2.5">分隔符</label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {separatorOptions.map((option) => (
                                 <button
                                     key={option.value}
                                     onClick={() => setSeparator(option.value)}
-                                    className={`p-3 text-left transition-all gm-solid ${
-                                        separator === option.value
-                                            ? 'text-[color:var(--text-primary)]'
-                                            : 'hover:bg-[color:var(--bg-hover)]'
-                                    }`}
+                                    className="p-2.5 text-left transition-all gm-solid hover:bg-[color:var(--bg-hover)]"
                                     style={separator === option.value ? { borderColor: 'var(--primary)', background: 'var(--primary-light)' } : undefined}
                                 >
-                                    <div className="font-medium">{option.label}</div>
-                                    <div className="text-xs mt-1 gm-text-3">
+                                    <div className="text-xs font-medium gm-text-1">{option.label}</div>
+                                    <div className="text-[11px] mt-0.5 gm-text-3">
                                         {option.description}
                                     </div>
                                 </button>
@@ -323,35 +320,38 @@ const ExportDialog = ({
                                 value={customSeparator}
                                 onChange={(event) => setCustomSeparator(event.target.value)}
                                 placeholder="输入自定义分隔符"
-                                className="gm-input mt-3"
+                                className="gm-input mt-2.5"
                             />
                         )}
                     </div>
 
                     <div className="flex items-center justify-between">
                         <div>
-                            <label className="text-sm font-semibold gm-text-1">包含统计汇总</label>
-                            <p className="text-xs mt-1 gm-text-2">
+                            <label className="text-xs font-semibold gm-text-1">包含统计汇总</label>
+                            <p className="text-[11px] mt-0.5 gm-text-3">
                                 在文件开头显示账号统计信息
                             </p>
                         </div>
                         <button
                             onClick={() => setIncludeStats(!includeStats)}
                             aria-label="包含统计汇总"
-                            className="relative w-12 h-6 rounded-full transition-colors"
-                            style={{ background: includeStats ? 'var(--primary)' : 'var(--border)' }}
+                            className="relative w-11 h-6 rounded-full transition-colors"
+                            style={{ background: includeStats ? 'var(--primary)' : 'var(--border-strong)' }}
                         >
-                            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${
-                                includeStats ? 'translate-x-6' : ''
-                            }`} style={{ background: '#ffffff' }} />
+                            <div
+                                className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${
+                                    includeStats ? 'translate-x-5' : ''
+                                }`}
+                                style={{ background: '#ffffff' }}
+                            />
                         </button>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold gm-text-1 mb-3">账号顺序</label>
+                        <label className="block text-xs font-semibold gm-text-1 mb-2.5">账号顺序</label>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
-                                <label htmlFor="account-order-field" className="block text-xs gm-text-2 mb-1">账号顺序字段</label>
+                                <label htmlFor="account-order-field" className="block text-[11px] gm-text-2 mb-1">账号顺序字段</label>
                                 <select
                                     id="account-order-field"
                                     value={accountOrderField}
@@ -364,7 +364,7 @@ const ExportDialog = ({
                                 </select>
                             </div>
                             <div>
-                                <label htmlFor="account-order-direction" className="block text-xs gm-text-2 mb-1">账号顺序方向</label>
+                                <label htmlFor="account-order-direction" className="block text-[11px] gm-text-2 mb-1">账号顺序方向</label>
                                 <select
                                     id="account-order-direction"
                                     value={accountOrderDirection}
@@ -380,10 +380,10 @@ const ExportDialog = ({
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold gm-text-1 mb-3">分类排序与标签格式</label>
+                        <label className="block text-xs font-semibold gm-text-1 mb-2.5">分类排序与标签格式</label>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
-                                <label htmlFor="category-sort-field" className="block text-xs gm-text-2 mb-1">分类字段</label>
+                                <label htmlFor="category-sort-field" className="block text-[11px] gm-text-2 mb-1">分类字段</label>
                                 <select
                                     id="category-sort-field"
                                     value={categorySortField}
@@ -396,7 +396,7 @@ const ExportDialog = ({
                                 </select>
                             </div>
                             <div>
-                                <label htmlFor="category-sort-direction" className="block text-xs gm-text-2 mb-1">分类顺序</label>
+                                <label htmlFor="category-sort-direction" className="block text-[11px] gm-text-2 mb-1">分类顺序</label>
                                 <select
                                     id="category-sort-direction"
                                     value={categorySortDirection}
@@ -411,7 +411,7 @@ const ExportDialog = ({
                         </div>
 
                         <div className="mt-3">
-                            <label htmlFor="category-label-template" className="block text-xs gm-text-2 mb-1">分类标签模板</label>
+                            <label htmlFor="category-label-template" className="block text-[11px] gm-text-2 mb-1">分类标签模板</label>
                             <input
                                 id="category-label-template"
                                 type="text"
@@ -420,7 +420,7 @@ const ExportDialog = ({
                                 placeholder={DEFAULT_CATEGORY_LABEL_TEMPLATE}
                                 className="gm-input"
                             />
-                            <p className="text-xs mt-2 gm-text-2">
+                            <p className="text-[11px] mt-1.5 gm-text-3">
                                 支持变量：{'{index}'} {'{groupField}'} {'{groupValue}'} {'{count}'}
                             </p>
                             <p className="text-xs mt-1 gm-text-1">
@@ -430,8 +430,8 @@ const ExportDialog = ({
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold gm-text-1 mb-3">选择导出字段（可调整顺序）</label>
-                        <div className="space-y-2">
+                        <label className="block text-xs font-semibold gm-text-1 mb-2.5">选择导出字段（可调整顺序）</label>
+                        <div className="space-y-1.5">
                             {availableFields.map((field) => {
                                 const isSelected = selectedFields.includes(field.value);
                                 const selectedIndex = selectedFields.indexOf(field.value);
@@ -439,7 +439,7 @@ const ExportDialog = ({
                                 return (
                                     <div
                                         key={field.value}
-                                        className="flex items-center gap-3 p-3 transition-all gm-solid"
+                                        className="flex items-center gap-3 px-3 py-2 transition-all gm-solid"
                                         style={isSelected
                                             ? { borderColor: 'var(--primary)', background: 'var(--primary-light)' }
                                             : { borderColor: 'var(--border)' }}
@@ -448,12 +448,13 @@ const ExportDialog = ({
                                             type="checkbox"
                                             checked={isSelected}
                                             onChange={() => toggleField(field.value)}
-                                            className="w-4 h-4"
+                                            className="w-3.5 h-3.5"
+                                            style={{ accentColor: 'var(--primary)' }}
                                         />
-                                        <span className="flex-1 gm-text-1">{field.label}</span>
+                                        <span className="flex-1 text-xs font-medium gm-text-1">{field.label}</span>
                                         {isSelected && (
-                                            <div className="flex items-center gap-2">
-                                                <span className="gm-chip font-bold">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="gm-chip font-mono font-semibold">
                                                     #{selectedIndex + 1}
                                                 </span>
                                                 <button
@@ -465,7 +466,7 @@ const ExportDialog = ({
                                                             : 'hover:bg-[color:var(--bg-hover)]'
                                                     }`}
                                                 >
-                                                    <ChevronUp size={16} />
+                                                    <ChevronUp size={14} />
                                                 </button>
                                                 <button
                                                     onClick={() => moveFieldDown(field.value)}
@@ -476,7 +477,7 @@ const ExportDialog = ({
                                                             : 'hover:bg-[color:var(--bg-hover)]'
                                                     }`}
                                                 >
-                                                    <ChevronDown size={16} />
+                                                    <ChevronDown size={14} />
                                                 </button>
                                             </div>
                                         )}
@@ -487,14 +488,14 @@ const ExportDialog = ({
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold gm-text-1 mb-3">预览（示例前1到2行）</label>
-                        <div className="gm-solid p-4 font-mono text-sm whitespace-pre-wrap break-all gm-text-1">
+                        <label className="block text-xs font-semibold gm-text-1 mb-2">预览（示例前1到2行）</label>
+                        <div className="gm-solid p-3.5 font-mono text-xs whitespace-pre-wrap break-all gm-text-1">
                             {generatePreview()}
                         </div>
                     </div>
                 </div>
 
-                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 gm-modal-footer">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 gm-modal-footer">
                     <button
                         onClick={onClose}
                         className="gm-btn gm-btn-secondary w-full sm:w-auto"
@@ -505,7 +506,7 @@ const ExportDialog = ({
                         onClick={handleExport}
                         className="gm-btn gm-btn-success w-full sm:w-auto"
                     >
-                        <FileText size={18} />
+                        <FileText size={15} />
                         导出
                     </button>
                 </div>

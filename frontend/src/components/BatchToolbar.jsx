@@ -29,16 +29,16 @@ const BatchToolbar = ({
     const btnBase = `gm-btn gm-btn-secondary gm-btn-sm ${isBatchProcessing ? 'opacity-50 cursor-not-allowed' : ''}`;
 
     return (
-        <div className="gm-card p-4 animate-in slide-in-from-top-2">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <CheckSquare size={20} style={{ color: 'var(--primary)' }} />
-                    <span className="text-sm font-semibold gm-text-1">
+        <div className="gm-card px-4 py-3 gm-view-enter">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                    <CheckSquare size={17} style={{ color: 'var(--primary)' }} />
+                    <span className="text-[13px] font-semibold gm-text-1">
                         已选中 {selectedCount} 个账号
                     </span>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                     {canSelectAllCurrentResult && (
                         <button
                             onClick={onSelectAllCurrentResult}
@@ -46,7 +46,7 @@ const BatchToolbar = ({
                             className={`gm-btn gm-btn-ghost gm-btn-sm ${isBatchProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                             title={`一键选中当前结果全部 ${totalResultCount} 个账号`}
                         >
-                            <ListChecks size={16} />
+                            <ListChecks size={14} />
                             <span>全选当前结果（{totalResultCount}）</span>
                         </button>
                     )}
@@ -57,7 +57,7 @@ const BatchToolbar = ({
                         className={btnBase}
                         title="为选中账号设置标签"
                     >
-                        <Tag size={16} />
+                        <Tag size={14} />
                         <span>批量设置标签</span>
                     </button>
 
@@ -67,7 +67,7 @@ const BatchToolbar = ({
                         className={btnBase}
                         title="为选中账号设置手机号"
                     >
-                        <Phone size={16} />
+                        <Phone size={14} />
                         <span>批量设置手机号</span>
                     </button>
 
@@ -77,7 +77,7 @@ const BatchToolbar = ({
                         className={btnBase}
                         title="为选中账号设置国家"
                     >
-                        <Globe size={16} />
+                        <Globe size={14} />
                         <span>批量设置国家</span>
                     </button>
 
@@ -87,7 +87,7 @@ const BatchToolbar = ({
                         className={btnBase}
                         title="为选中账号设置注册年份"
                     >
-                        <Calendar size={16} />
+                        <Calendar size={14} />
                         <span>批量设置年份</span>
                     </button>
 
@@ -98,12 +98,12 @@ const BatchToolbar = ({
                             className={btnBase}
                             title="清理选中账号的浏览器缓存（不影响登录状态，运行中的会跳过）"
                         >
-                            <Eraser size={16} />
+                            <Eraser size={14} />
                             <span>清理浏览器缓存</span>
                         </button>
                     )}
 
-                    <div className="h-8 w-[1px]" style={{ background: 'var(--border)' }}></div>
+                    <div className="h-6 w-[1px] mx-1" style={{ background: 'var(--border)' }} />
 
                     <button
                         onClick={onBatchDelete}
@@ -111,16 +111,16 @@ const BatchToolbar = ({
                         className={`gm-btn gm-btn-danger gm-btn-sm ${isBatchProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                         title="删除选中的账号"
                     >
-                        <Trash2 size={16} />
+                        <Trash2 size={14} />
                         <span>批量删除</span>
                     </button>
 
                     <button
                         onClick={onClearSelection}
-                        className="gm-btn gm-btn-secondary gm-btn-sm"
+                        className="gm-btn gm-btn-ghost gm-btn-sm"
                         title="取消选择"
                     >
-                        <X size={16} />
+                        <X size={14} />
                         <span>取消选择</span>
                     </button>
                 </div>

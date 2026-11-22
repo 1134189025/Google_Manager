@@ -1,18 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { UserPlus, FileText, Plus, Activity, Loader2 } from 'lucide-react';
+import { UserPlus, FileText, Plus, Loader2 } from 'lucide-react';
 import { parseImportText } from '../utils/importParser';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
 import { describeSmsUrl, extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
 import { renderInBody } from '../utils/portal';
+import { PixelMascot, PixelLoader } from './PixelArt';
 
 /**
  * 防抖 Hook - 延迟执行函数，避免频繁调用
- * 包含 cleanup 逻辑以防止内存泄漏
  */
 const useDebounce = (callback, delay = 300) => {
     const timeoutRef = useRef(null);
 
-    // 组件卸载时清理定时器
     useEffect(() => {
         return () => {
             if (timeoutRef.current) {
@@ -47,7 +46,7 @@ demo@gmail.com----Pass@123----+8613812345678----2022----China----https://2fa.liv
 卡号：test@gmail.com密码：Pass@123----3TKXUZWOGOZRBFES`;
 
 /**
- * 导入视图组件
+ * 导入视图组件（分组双列工作台 + 实体感通行证预览卡）
  */
 const ImportView = ({ onImport, onCancel, importing = false }) => {
     const [importMode, setImportMode] = useState('single');
@@ -57,7 +56,6 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
     const [showFormatConfirm, setShowFormatConfirm] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
 
-    // 单个账号导入的表单状态
     const [singleForm, setSingleForm] = useState({
         email: '',
         password: '',
@@ -70,7 +68,6 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
         group_name: '',
     });
 
-    // 实际解析函数
     const parseAndSetPreview = useCallback((val) => {
         const { parsed, detectedFormats: formats } = parseImportText(val);
         setPreview(parsed);
@@ -85,12 +82,10 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
         setIsParsing(false);
     }, []);
 
-    // 防抖版本的解析函数（300ms 延迟）
     const debouncedParse = useDebounce(parseAndSetPreview, 300);
 
     const handleParse = (val) => {
         setText(val);
-        // 仅在有内容时才显示解析状态，避免空输入时也显示 PARSING
         if (val.trim()) {
             setIsParsing(true);
             debouncedParse(val);
@@ -102,10 +97,6 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
         }
     };
 
-    /**
-     * 手机号 / 接码地址输入支持整串粘贴 `手机号|接码地址`
-     * 粘贴这类内容时自动拆到两个字段，避免 URL 里的数字混进手机号
-     */
     const handleSingleFormChange = (field, value) => {
         if (field === 'phone' || field === 'sms_url') {
             const combined = extractPhoneAndSmsUrl(value);
@@ -125,7 +116,6 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
         if (importing) return;
         if (!singleForm.email.trim() || !singleForm.password.trim()) return;
 
-        // 提交前再解析一次，保证整串粘贴的内容一定被拆开
         const combined = extractPhoneAndSmsUrl(singleForm.sms_url);
         const phoneFromSmsField = combined.phone;
         const smsUrl = combined.smsUrl || normalizeSmsUrlInput(singleForm.sms_url);
@@ -144,14 +134,28 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
         }]);
     };
 
-    const isSingleFormValid = singleForm.email.trim() && singleForm.password.trim();
+    const isSingleFormValid = Boolean(singleForm.email.trim() && singleForm.password.trim());
+
+    const filledSingleFields = [
+        singleForm.email,
+        singleForm.password,
+        singleForm.recovery,
+        singleForm.phone,
+        singleForm.sms_url,
+        singleForm.secret,
+        singleForm.reg_year,
+        singleForm.country,
+    ].filter(v => String(v || '').trim().length > 0).length;
 
     const renderSingleFormField = (label, field, type, placeholder, required, hint) => (
-        <div>
-            <label className="block text-sm font-medium gm-text-2 mb-2">
-                {label} {required
-                    ? <span style={{ color: 'var(--danger)' }}>*</span>
-                    : <span className="gm-text-3 text-xs">(可选)</span>}
+        <div className="gm-field-cell">
+            <label className="gm-field-label">
+                <span>{label}</span>
+                {required ? (
+                    <span className="gm-field-req">*</span>
+                ) : (
+                    <span className="gm-field-opt">(可选)</span>
+                )}
             </label>
             <input
                 type={type}
@@ -161,98 +165,143 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                 placeholder={placeholder}
                 className={`gm-input ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
             />
-            {hint && <p className="mt-1 text-xs gm-text-3">{hint}</p>}
+            {hint && <p className="mt-1 text-[11px] gm-text-3 leading-snug">{hint}</p>}
         </div>
     );
 
-    const renderPreviewItem = (item, idx, isSingle) => (
-        <div key={idx} className={`gm-solid ${isSingle ? 'p-4' : 'p-3'} ${isSingle ? '' : 'text-xs'}`}>
-            <div className={`flex justify-between ${isSingle ? 'mb-3' : 'mb-1'}`}>
-                <span className={`font-bold ${isSingle ? 'text-lg' : ''}`} style={{ color: 'var(--primary)' }}>{item.email || '未知账号'}</span>
-                <span className="gm-text-3">#{idx + 1}</span>
-            </div>
-            {isSingle ? (
-                <div className="grid grid-cols-1 gap-2 text-sm">
-                    {[
-                        ['密码', '•'.repeat(item.password?.length || 0), !!item.password],
-                        ['恢复邮箱', item.recovery || '未设置', !!item.recovery],
-                        ['手机号', item.phone || '未设置', !!item.phone],
-                        ['手机验证码', describeSmsUrl(item.sms_url || item.smsUrl) ? `已配置（${describeSmsUrl(item.sms_url || item.smsUrl)}）` : '未设置', !!(item.sms_url || item.smsUrl)],
-                        ['2FA密钥', item.secret ? '已设置' : '未设置', !!item.secret],
-                        ['注册年份', item.reg_year || '未设置', !!item.reg_year],
-                        ['国家', item.country || '未设置', !!item.country],
-                    ].map(([label, value, hasValue], i, arr) => (
-                        <div key={label} className={`flex justify-between ${i < arr.length - 1 ? 'border-b' : ''} pb-2 pt-1`} style={i < arr.length - 1 ? { borderColor: 'var(--border-light)' } : undefined}>
-                            <span className="gm-text-3">{label}:</span>
-                            <span className={hasValue
-                                ? (label === '2FA密钥' ? 'gm-text-1' : (label === '密码' ? 'gm-text-2 font-mono' : 'gm-text-1'))
-                                : 'gm-text-3 italic'}
-                                style={hasValue && label === '2FA密钥' ? { color: 'var(--success)' } : undefined}>{value}</span>
+    const renderPreviewItem = (item, idx, isSingle) => {
+        const smsHost = describeSmsUrl(item.sms_url || item.smsUrl);
+        if (isSingle) {
+            return (
+                <div key={idx} className="gm-pass-body">
+                    <div className="gm-pass-identity">
+                        <div className="gm-pass-avatar" aria-hidden="true">
+                            {(item.email || '?').slice(0, 1).toUpperCase()}
                         </div>
-                    ))}
-                    <div className="flex justify-between pt-1">
-                        <span className="gm-text-3">状态:</span>
-                        <span style={{ color: 'var(--warning)' }}>未开启 (默认)</span>
+                        <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-[14.5px] truncate gm-text-1">
+                                {item.email || '未知账号'}
+                            </p>
+                            <p className="font-mono text-[11px] gm-text-3 mt-0.5">
+                                #{idx + 1} · 未开启 (默认)
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="gm-pass-rows">
+                        {[
+                            ['密码', '•'.repeat(item.password?.length || 0), !!item.password],
+                            ['恢复邮箱', item.recovery || '未设置', !!item.recovery],
+                            ['手机号', item.phone || '未设置', !!item.phone],
+                            ['手机验证码', smsHost ? `已配置（${smsHost}）` : '未设置', !!smsHost],
+                            ['2FA密钥', item.secret ? '已设置' : '未设置', !!item.secret],
+                            ['注册年份', item.reg_year || '未设置', !!item.reg_year],
+                            ['国家', item.country || '未设置', !!item.country],
+                        ].map(([label, value, hasValue]) => (
+                            <div key={label} className="gm-pass-row">
+                                <span className="gm-text-3">{label}:</span>
+                                <span
+                                    className={`truncate max-w-[68%] text-right ${hasValue
+                                        ? (label === '密码' ? 'gm-text-2 font-mono' : 'gm-text-1')
+                                        : 'gm-text-3 italic'}`}
+                                    style={hasValue && label === '2FA密钥' ? { color: 'var(--success)' } : undefined}
+                                >
+                                    {value}
+                                </span>
+                            </div>
+                        ))}
                     </div>
                 </div>
-            ) : (
-                <div className="grid grid-cols-1 gap-1 gm-text-2 mt-2">
-                    <div className="flex justify-between border-b pb-1 pt-1" style={{ borderColor: 'var(--border-light)' }}>
+            );
+        }
+
+        return (
+            <div key={idx} className="gm-batch-item">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="font-medium text-[13px] truncate gm-text-1">
+                        {item.email || '未知账号'}
+                    </span>
+                    <span className="font-mono text-[10.5px] gm-text-3 shrink-0">#{idx + 1}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    {item.secret && <span className="gm-chip gm-chip-success">2FA</span>}
+                    {smsHost && <span className="gm-chip gm-chip-accent">{smsHost}</span>}
+                    {item.country && <span className="gm-chip">{item.country}</span>}
+                    {item.reg_year && <span className="gm-chip font-mono">{item.reg_year}</span>}
+                    <span className="gm-chip">未开启 (默认)</span>
+                </div>
+                <div className="grid grid-cols-1 gap-1 text-[11.5px] gm-text-2">
+                    <div className="flex justify-between gap-2">
                         <span className="gm-text-3">手机验证码:</span>
-                        <span className={describeSmsUrl(item.sms_url || item.smsUrl) ? '' : 'gm-text-3'}>
-                            {describeSmsUrl(item.sms_url || item.smsUrl) ? `已配置（${describeSmsUrl(item.sms_url || item.smsUrl)}）` : '未设置'}
+                        <span className={smsHost ? 'gm-text-1 truncate' : 'gm-text-3'}>
+                            {smsHost ? `已配置（${smsHost}）` : '未设置'}
                         </span>
                     </div>
-                    <div className="flex justify-between border-b pb-1 pt-1" style={{ borderColor: 'var(--border-light)' }}>
-                        <span className="gm-text-3">状态:</span> <span className="gm-text-2">未开启 (默认)</span>
+                    <div className="flex justify-between gap-2">
+                        <span className="gm-text-3">状态:</span>
+                        <span className="gm-text-2">未开启 (默认)</span>
                     </div>
-                    <div className="flex justify-between border-b pb-1 pt-1" style={{ borderColor: 'var(--border-light)' }}>
-                        <span className="gm-text-3">备注:</span> <span style={{ color: 'var(--success)' }}>{item.remark || '无'}</span>
+                    <div className="flex justify-between gap-2">
+                        <span className="gm-text-3">备注:</span>
+                        <span className="truncate" style={{ color: item.remark ? 'var(--success)' : 'var(--text-muted)' }}>
+                            {item.remark || '无'}
+                        </span>
                     </div>
                 </div>
-            )}
-        </div>
-    );
+            </div>
+        );
+    };
 
     return (
-        <div className="max-w-4xl mx-auto animate-in fade-in zoom-in-95 duration-500">
-            <div className="mb-8">
-                <h1 className="gm-title">导入账号</h1>
-                <p className="gm-subtitle">导入后状态默认设为"未开启"</p>
-            </div>
+        <div className="gm-import-shell gm-view-enter">
+            {/* 顶部一体化标题与模式切换 */}
+            <div className="gm-import-header">
+                <div>
+                    <h1 className="gm-title">导入账号</h1>
+                    <p className="gm-subtitle mt-0.5">导入后状态默认设为"未开启"</p>
+                </div>
 
-            {/* 切换标签 */}
-            <div className="gm-seg mb-6 w-fit">
-                {[
-                    { key: 'single', icon: <UserPlus size={18} />, label: '单个导入' },
-                    { key: 'batch', icon: <FileText size={18} />, label: '批量导入' },
-                ].map(({ key, icon, label }) => (
-                    <button
-                        key={key}
-                        disabled={importing}
-                        onClick={() => setImportMode(key)}
-                        className={`gm-seg-item flex items-center gap-2 ${importMode === key ? 'active' : ''} ${importMode === key
-                            ? 'shadow-sm text-[color:var(--primary)]'
-                            : 'gm-text-2 hover:text-[color:var(--text-primary)]'} ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    >
-                        {icon}
-                        {label}
-                    </button>
-                ))}
+                <div className="gm-seg">
+                    {[
+                        { key: 'single', icon: <UserPlus size={14} />, label: '单个导入' },
+                        { key: 'batch', icon: <FileText size={14} />, label: '批量导入' },
+                    ].map(({ key, icon, label }) => (
+                        <button
+                            key={key}
+                            disabled={importing}
+                            onClick={() => setImportMode(key)}
+                            className={`gm-seg-item flex items-center gap-1.5 ${importMode === key ? 'active' : ''} ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                            {icon}
+                            {label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {importMode === 'single' ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="space-y-4">
-                        <div className="gm-card p-6">
-                            <div className="flex items-center gap-2 mb-6" style={{ color: 'var(--primary)' }}>
-                                <UserPlus size={20} />
-                                <h2 className="font-bold">单个账号信息</h2>
+                <div className="gm-import-grid">
+                    {/* 左侧：无厚重外框的分组双列录入区 */}
+                    <div className="gm-import-form-col">
+                        <div className="gm-form-section">
+                            <div className="gm-form-section-head">
+                                <span className="gm-section-index">01</span>
+                                <h2 className="gm-form-section-title">单个账号信息</h2>
                             </div>
-                            <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                                 {renderSingleFormField('邮箱账号', 'email', 'email', 'example@gmail.com', true)}
                                 {renderSingleFormField('登录密码', 'password', 'text', '输入密码', true)}
+                            </div>
+                        </div>
+
+                        <div className="gm-form-section">
+                            <div className="gm-form-section-head">
+                                <span className="gm-section-index">02</span>
+                                <h3 className="gm-form-section-title">安全验证与接码</h3>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                                 {renderSingleFormField('恢复邮箱', 'recovery', 'email', 'recovery@example.com', false)}
+                                {renderSingleFormField('2FA 密钥', 'secret', 'text', 'TOTP密钥', false)}
                                 {renderSingleFormField('手机号', 'phone', 'text', '默认+86，可填 +12192731268', false)}
                                 {renderSingleFormField(
                                     '手机接码地址',
@@ -262,43 +311,52 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                                     false,
                                     '粘贴「手机号|接码地址」会自动拆分到手机号与这里，用于实时获取短信验证码'
                                 )}
-                                {renderSingleFormField('2FA 密钥', 'secret', 'text', 'TOTP密钥', false)}
-                                <div className="grid grid-cols-2 gap-4">
-                                    {renderSingleFormField('注册年份', 'reg_year', 'text', '2021', false)}
-                                    {renderSingleFormField('国家', 'country', 'text', 'China / Japan / USA', false)}
-                                </div>
                             </div>
                         </div>
-                        <div className="gm-solid p-4">
-                            <p className="text-xs font-semibold gm-text-1 mb-2">行格式参考（与批量解析一致）</p>
-                            <div className="text-xs gm-text-2 space-y-1">
+
+                        <div className="gm-form-section">
+                            <div className="gm-form-section-head">
+                                <span className="gm-section-index">03</span>
+                                <h3 className="gm-form-section-title">归档属性</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3.5">
+                                {renderSingleFormField('注册年份', 'reg_year', 'text', '2021', false)}
+                                {renderSingleFormField('国家', 'country', 'text', 'China / Japan / USA', false)}
+                            </div>
+                        </div>
+
+                        {/* 精简行格式参考条 */}
+                        <div className="gm-format-strip">
+                            <p className="text-[11.5px] font-medium gm-text-2 mb-1.5">行格式参考（与批量解析一致）</p>
+                            <div className="flex flex-wrap gap-1.5 mb-1.5">
                                 {IMPORT_FORMAT_LINES.map((line) => (
-                                    <p key={line}>• {line}</p>
+                                    <span key={line} className="gm-format-code">• {line}</span>
                                 ))}
-                                <p>{IMPORT_EXTRA_RULE}</p>
                             </div>
+                            <p className="text-[11px] gm-text-3">{IMPORT_EXTRA_RULE}</p>
                         </div>
-                        <div className="flex gap-4">
+
+                        <div className="flex items-center gap-3 pt-1">
                             <button
                                 onClick={onCancel}
                                 disabled={importing}
-                                className="gm-btn gm-btn-secondary flex-1 py-4 font-bold"
+                                className="gm-btn gm-btn-secondary px-5"
                             >
                                 返回列表
                             </button>
                             <button
                                 disabled={!isSingleFormValid || importing}
                                 onClick={handleSingleImport}
-                                className="gm-btn gm-btn-primary flex-1 py-4 px-8 font-bold"
+                                className="gm-btn gm-btn-primary flex-1 font-semibold"
                             >
                                 {importing ? (
                                     <>
-                                        <Loader2 size={20} className="animate-spin" />
+                                        <Loader2 size={16} className="animate-spin" />
                                         导入中...
                                     </>
                                 ) : (
                                     <>
-                                        <Plus size={20} />
+                                        <Plus size={16} />
                                         立即导入
                                     </>
                                 )}
@@ -309,24 +367,40 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                         )}
                     </div>
 
-                    <div className="space-y-4">
-                        <div className="gm-panel p-6 h-[516px] flex flex-col">
-                            <div className="flex items-center gap-2 mb-6 border-b pb-4" style={{ borderColor: 'var(--border-light)' }}>
-                                <div className={`w-2 h-2 rounded-full ${isSingleFormValid ? 'animate-pulse' : 'gm-text-3'}`} style={isSingleFormValid ? { background: 'var(--success)' } : { background: 'var(--text-muted)' }}></div>
-                                <h2 className="font-bold gm-text-1">实时预览 (Real-time Preview)</h2>
+                    {/* 右侧：实体感账号通行证预览卡 */}
+                    <div className="gm-import-preview-col">
+                        <div className={`gm-pass-card ${isSingleFormValid ? 'is-ready' : ''}`}>
+                            <div className="gm-pass-head">
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`w-2 h-2 rounded-[1px] ${isSingleFormValid ? 'gm-pixel-status-pulse' : ''}`}
+                                        style={{ background: isSingleFormValid ? 'var(--success)' : 'var(--text-muted)' }}
+                                    />
+                                    <h2 className="font-semibold text-[13px] gm-text-1">实时预览</h2>
+                                </div>
+                                <div className="gm-pass-meter" aria-hidden="true">
+                                    {Array.from({ length: 8 }).map((_, idx) => (
+                                        <span
+                                            key={idx}
+                                            className={`gm-pass-meter-dot ${idx < filledSingleFields ? 'is-on' : ''}`}
+                                        />
+                                    ))}
+                                </div>
                             </div>
+
                             {isSingleFormValid ? (
-                                <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+                                <div className="flex-1 overflow-y-auto pr-0.5 scrollbar-thin">
                                     {renderPreviewItem(singleForm, 0, true)}
                                 </div>
                             ) : (
-                                <div className="gm-empty flex-1 flex flex-col items-center justify-center">
-                                    <UserPlus size={48} className="mb-4 opacity-10" />
-                                    <p>请填写账号信息</p>
-                                    <p className="text-xs mt-2 italic gm-text-3">邮箱和密码为必填项</p>
+                                <div className="gm-pass-empty">
+                                    <PixelMascot size={56} variant="sleep" className="gm-text-3" />
+                                    <p className="text-[13.5px] font-medium gm-text-2 mt-2">请填写账号信息</p>
+                                    <p className="text-[12px] gm-text-3 mt-1">邮箱和密码为必填项</p>
                                 </div>
                             )}
-                            <div className="mt-4 pt-4 border-t text-[10px] gm-text-3 flex justify-between uppercase tracking-widest" style={{ borderColor: 'var(--border-light)' }}>
+
+                            <div className="gm-pass-foot">
                                 <span>Status: {isSingleFormValid ? 'READY' : 'WAITING'}</span>
                                 <span>Count: {isSingleFormValid ? 1 : 0}</span>
                             </div>
@@ -334,52 +408,62 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                     </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="space-y-4">
-                        <div className="gm-card p-6">
-                            <div className="flex items-center gap-2 mb-4" style={{ color: 'var(--primary)' }}>
-                                <FileText size={20} />
-                                <h2 className="font-bold">粘贴数据区域</h2>
+                <div className="gm-import-grid">
+                    {/* 左侧：终端输入台 */}
+                    <div className="gm-import-form-col">
+                        <div className="gm-terminal-deck">
+                            <div className="gm-terminal-head">
+                                <div className="flex items-center gap-2">
+                                    <span className="gm-terminal-dots" aria-hidden="true">
+                                        <i /><i /><i />
+                                    </span>
+                                    <h2 className="font-semibold text-[13px] gm-text-1">粘贴数据区域</h2>
+                                </div>
+                                <span className="font-mono text-[11px] gm-text-3">
+                                    支持分隔符：| ---- —— --- --
+                                </span>
                             </div>
-                            <p className="text-xs gm-text-3 mb-3 p-3 rounded-lg border border-dashed" style={{ borderColor: 'var(--border)' }}>
-                                支持多种格式：<br/>
-                                • {IMPORT_FORMAT_LINES[0]}<br/>
-                                • {IMPORT_FORMAT_LINES[1]}<br/>
-                                • {IMPORT_FORMAT_LINES[2]}<br/>
-                                支持分隔符：| ---- —— --- --<br/>
-                                {IMPORT_EXTRA_RULE}
+
+                            <p className="gm-terminal-hint">
+                                支持多种格式：
+                                {' '}• {IMPORT_FORMAT_LINES[0]}
+                                {' '}• {IMPORT_FORMAT_LINES[1]}
+                                {' '}• {IMPORT_FORMAT_LINES[2]}
+                                <span className="block mt-1 gm-text-3">{IMPORT_EXTRA_RULE}</span>
                             </p>
+
                             <textarea
-                                className="gm-input h-80 text-sm resize-none"
+                                className="gm-terminal-textarea"
                                 placeholder={IMPORT_PLACEHOLDER}
                                 disabled={importing}
-                                value={text} onChange={(e) => handleParse(e.target.value)}
+                                value={text}
+                                onChange={(e) => handleParse(e.target.value)}
                             />
                         </div>
-                        <div className="flex gap-4">
+
+                        <div className="flex items-center gap-3 pt-1">
                             <button
                                 onClick={onCancel}
                                 disabled={importing}
-                                className="gm-btn gm-btn-secondary flex-1 py-4 font-bold"
+                                className="gm-btn gm-btn-secondary px-5"
                             >
                                 返回列表
                             </button>
-                            {/* 解析防抖期间预览还是旧文本的结果，此时禁止导入，保证导入的就是看到的 */}
                             <button
                                 disabled={preview.length === 0 || importing || isParsing}
                                 onClick={() => {
                                     if (!importing && !isParsing) onImport(preview);
                                 }}
-                                className="gm-btn gm-btn-primary flex-2 py-4 px-8 font-bold"
+                                className="gm-btn gm-btn-primary flex-1 font-semibold"
                             >
                                 {importing ? (
                                     <>
-                                        <Loader2 size={20} className="animate-spin" />
+                                        <Loader2 size={16} className="animate-spin" />
                                         导入中...
                                     </>
                                 ) : (
                                     <>
-                                        <Plus size={20} />
+                                        <Plus size={16} />
                                         {`立即导入 ${preview.length > 0 ? `(${preview.length}条)` : ''}`}
                                     </>
                                 )}
@@ -390,24 +474,39 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                         )}
                     </div>
 
-                    <div className="space-y-4">
-                        <div className="gm-panel p-6 h-[516px] flex flex-col">
-                            <div className="flex items-center gap-2 mb-6 border-b pb-4" style={{ borderColor: 'var(--border-light)' }}>
-                                <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--success)' }}></div>
-                                <h2 className="font-bold gm-text-1">实时预览 (Real-time Preview)</h2>
+                    {/* 右侧：解析结果流 */}
+                    <div className="gm-import-preview-col">
+                        <div className={`gm-pass-card ${preview.length > 0 ? 'is-ready' : ''}`}>
+                            <div className="gm-pass-head">
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`w-2 h-2 rounded-[1px] ${preview.length > 0 ? 'gm-pixel-status-pulse' : ''}`}
+                                        style={{ background: preview.length > 0 ? 'var(--success)' : 'var(--text-muted)' }}
+                                    />
+                                    <h2 className="font-semibold text-[13px] gm-text-1">实时预览</h2>
+                                </div>
+                                <span className="font-mono text-[11px] gm-text-3 tabular-nums">
+                                    {preview.length} 条待导入
+                                </span>
                             </div>
-                            {preview.length > 0 ? (
-                                <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
+
+                            {isParsing && preview.length === 0 ? (
+                                <div className="gm-pass-empty">
+                                    <PixelLoader label="解析数据中..." />
+                                </div>
+                            ) : preview.length > 0 ? (
+                                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin">
                                     {preview.map((item, idx) => renderPreviewItem(item, idx, false))}
                                 </div>
                             ) : (
-                                <div className="gm-empty flex-1 flex flex-col items-center justify-center">
-                                    <Activity size={48} className="mb-4 opacity-10" />
-                                    <p>等待解析数据...</p>
-                                    <p className="text-xs mt-2 italic gm-text-3">所有导入项初始状态均为"未开启"</p>
+                                <div className="gm-pass-empty">
+                                    <PixelMascot size={56} variant="sleep" className="gm-text-3" />
+                                    <p className="text-[13.5px] font-medium gm-text-2 mt-2">等待解析数据...</p>
+                                    <p className="text-[12px] gm-text-3 mt-1">所有导入项初始状态均为"未开启"</p>
                                 </div>
                             )}
-                            <div className="mt-4 pt-4 border-t text-[10px] gm-text-3 flex justify-between uppercase tracking-widest" style={{ borderColor: 'var(--border-light)' }}>
+
+                            <div className="gm-pass-foot">
                                 <span>Status: {isParsing ? 'PARSING...' : 'OK'}</span>
                                 <span>Count: {preview.length}</span>
                             </div>
@@ -419,30 +518,32 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
             {/* 格式确认对话框 */}
             {showFormatConfirm && renderInBody(
                 <div className="gm-overlay">
-                    <div className="gm-modal max-w-md mx-4 animate-in zoom-in-95 duration-200">
-                        <div className="gm-modal-body">
-                            <h3 className="text-lg font-bold gm-text-1 mb-4">检测到多种导入格式</h3>
-                            <p className="gm-text-2 mb-4">系统检测到您的导入文本包含多种不同的格式规则：</p>
-                            <ul className="list-disc list-inside text-sm gm-text-2 mb-4 space-y-1 gm-solid p-4">
+                    <div className="gm-modal max-w-md mx-4" role="dialog" aria-label="检测到多种导入格式">
+                        <div className="gm-modal-header">
+                            <h3 className="gm-title text-base">检测到多种导入格式</h3>
+                        </div>
+                        <div className="gm-modal-body space-y-3">
+                            <p className="text-sm gm-text-2">系统检测到您的导入文本包含多种不同的格式规则：</p>
+                            <ul className="list-disc list-inside text-xs gm-text-2 space-y-1 gm-solid p-3.5">
                                 {detectedFormats.map((format, i) => (
                                     <li key={i} className="gm-text-1">{format}</li>
                                 ))}
                             </ul>
-                            <p className="gm-text-2 mb-6 text-sm">请确认解析结果是否正确，或返回修改导入文本使用统一格式。</p>
-                            <div className="flex gap-3 justify-end">
-                                <button
-                                    onClick={() => { setShowFormatConfirm(false); setText(''); setPreview([]); setDetectedFormats([]); }}
-                                    className="gm-btn gm-btn-secondary"
-                                >
-                                    返回修改
-                                </button>
-                                <button
-                                    onClick={() => setShowFormatConfirm(false)}
-                                    className="gm-btn gm-btn-primary"
-                                >
-                                    确认导入
-                                </button>
-                            </div>
+                            <p className="text-xs gm-text-3">请确认解析结果是否正确，或返回修改导入文本使用统一格式。</p>
+                        </div>
+                        <div className="gm-modal-footer">
+                            <button
+                                onClick={() => { setShowFormatConfirm(false); setText(''); setPreview([]); setDetectedFormats([]); }}
+                                className="gm-btn gm-btn-secondary"
+                            >
+                                返回修改
+                            </button>
+                            <button
+                                onClick={() => setShowFormatConfirm(false)}
+                                className="gm-btn gm-btn-primary"
+                            >
+                                确认导入
+                            </button>
                         </div>
                     </div>
                 </div>

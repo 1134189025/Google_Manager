@@ -1,92 +1,141 @@
 /* ============================================
-   GoogleManager 主题变量（移植 cockpit-tools 设计系统）
-   - 全部使用系统字体，不加载任何网络字体
+   GoogleManager 设计令牌（MosMos 暗黑极简 + 克制像素风）
+   - 暗黑优先（Dark-First）：:root 与 :root[data-theme="dark"] 保持一致
+   - 全部使用系统字体与等宽字体，不加载网络字体
    ============================================ */
 
-:root {
-  /* 字体：系统字体栈（Windows 优先 Segoe UI / 微软雅黑） */
+:root,
+:root[data-theme="dark"] {
+  /* 字体栈 */
   --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
     "Microsoft YaHei", "PingFang SC", "Noto Sans SC", Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", Menlo,
     monospace;
 
-  /* 主色 */
-  --primary: #1d4ed8;
-  --primary-hover: #1e40af;
-  --primary-light: rgba(29, 78, 216, 0.12);
-  --accent: #0ea5a5;
+  /* 尺寸令牌 */
+  --control-h: 34px;
+  --sidebar-w: 212px;
+  --titlebar-h: 36px;
 
-  /* 状态色 */
-  --success: #22c55e;
+  /* 表面色板（深炭黑画布 + 浮层卡片） */
+  --bg-canvas: #0b0c0e;
+  --bg-panel: #131418;
+  --bg-elevated: #181a20;
+  --bg-hover: rgba(255, 255, 255, 0.045);
+  --bg-active: rgba(255, 255, 255, 0.075);
+
+  /* 兼容旧别名 */
+  --bg-primary: var(--bg-canvas);
+  --bg-secondary: var(--bg-panel);
+  --bg-tertiary: var(--bg-elevated);
+  --bg-card: var(--bg-panel);
+  --bg-body: var(--bg-canvas);
+
+  /* 极细发丝边框 */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-light: rgba(255, 255, 255, 0.045);
+  --border-strong: rgba(255, 255, 255, 0.13);
+
+  /* 文本层级 */
+  --text-primary: #f1f3f5;
+  --text-secondary: #8e95a2;
+  --text-muted: #5a616e;
+
+  /* 强调与语义色（克制冷钢蓝 + 验证码绿） */
+  --primary: #5b8ef4;
+  --primary-hover: #73a0f7;
+  --primary-light: rgba(91, 142, 244, 0.14);
+  --accent: #5b8ef4;
+
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.12);
   --warning: #f59e0b;
-  --danger: #ef4444;
+  --warning-soft: rgba(245, 158, 11, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
 
-  /* 背景 */
-  --bg-primary: #f6f5f2;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #eef2f7;
-  --bg-card: rgba(255, 255, 255, 0.78);
-  --bg-hover: rgba(15, 23, 42, 0.06);
-  --bg-body: radial-gradient(circle at 12% 10%, rgba(29, 78, 216, 0.12), transparent 45%),
-    radial-gradient(circle at 90% 5%, rgba(14, 165, 165, 0.12), transparent 40%),
-    linear-gradient(180deg, #f8f7f4 0%, #eef1f6 100%);
+  /* 渐变令牌（用于兼容旧语义引用，保持低饱和极简） */
+  --gradient-primary: #5b8ef4;
+  --gradient-success: #34d399;
+  --gradient-danger: #f87171;
 
-  /* 文本 */
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  /* 极简阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.62);
 
-  /* 边框 */
-  --border: rgba(15, 23, 42, 0.12);
-  --border-light: rgba(15, 23, 42, 0.08);
+  /* 像素点阵氛围参数 */
+  --dither-ink: #ffffff;
+  --dither-opacity: 0.095;
 
-  /* 阴影 */
-  --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 12px 24px rgba(15, 23, 42, 0.12);
-  --shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.18);
-
-  /* 渐变 */
-  --gradient-primary: linear-gradient(135deg, #1d4ed8 0%, #0ea5a5 100%);
-  --gradient-success: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-  --gradient-danger: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
+  /* 键帽与反色徽标 */
+  --kbd-bg: #181a20;
+  --kbd-border: rgba(255, 255, 255, 0.12);
+  --kbd-text: #c2c8d2;
+  --brand-badge-bg: #f1f3f5;
+  --brand-badge-fg: #0b0c0e;
 
   /* 圆角 */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
   --radius-full: 9999px;
 
-  color-scheme: light;
+  color-scheme: dark;
 }
 
-:root[data-theme="dark"] {
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-light: rgba(59, 130, 246, 0.15);
-  --accent: #14b8a6;
+:root[data-theme="light"] {
+  --bg-canvas: #f4f5f7;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f8f9fb;
+  --bg-hover: rgba(17, 24, 39, 0.045);
+  --bg-active: rgba(17, 24, 39, 0.08);
 
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --bg-card: rgba(30, 41, 59, 0.85);
-  --bg-hover: rgba(255, 255, 255, 0.08);
-  --bg-body: radial-gradient(circle at 12% 10%, rgba(59, 130, 246, 0.15), transparent 45%),
-    radial-gradient(circle at 90% 5%, rgba(20, 184, 166, 0.12), transparent 40%),
-    linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  --bg-primary: var(--bg-canvas);
+  --bg-secondary: var(--bg-panel);
+  --bg-tertiary: var(--bg-elevated);
+  --bg-card: var(--bg-panel);
+  --bg-body: var(--bg-canvas);
 
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --border: rgba(17, 24, 39, 0.09);
+  --border-light: rgba(17, 24, 39, 0.055);
+  --border-strong: rgba(17, 24, 39, 0.16);
 
-  --border: rgba(255, 255, 255, 0.12);
-  --border-light: rgba(255, 255, 255, 0.06);
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
 
-  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 12px 24px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.45);
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: rgba(37, 99, 235, 0.1);
+  --accent: #2563eb;
 
-  color-scheme: dark;
+  --success: #15803d;
+  --success-soft: rgba(21, 128, 61, 0.1);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+
+  --gradient-primary: #2563eb;
+  --gradient-success: #15803d;
+  --gradient-danger: #dc2626;
+
+  --shadow-sm: 0 1px 3px rgba(17, 24, 39, 0.06);
+  --shadow-md: 0 8px 24px rgba(17, 24, 39, 0.08);
+  --shadow-lg: 0 20px 44px rgba(17, 24, 39, 0.12);
+
+  --dither-ink: #111827;
+  --dither-opacity: 0.055;
+
+  --kbd-bg: #f1f3f5;
+  --kbd-border: rgba(17, 24, 39, 0.14);
+  --kbd-text: #374151;
+  --brand-badge-bg: #111827;
+  --brand-badge-fg: #ffffff;
+
+  color-scheme: light;
 }
 
 * {
@@ -97,17 +146,18 @@ html,
 body,
 #root {
   min-height: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
-  background: var(--bg-body) fixed;
-  background-color: var(--bg-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  background-color: var(--bg-canvas);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -117,10 +167,10 @@ textarea {
   font-family: inherit;
 }
 
-/* 滚动条 */
+/* 极简细滚动条 */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -128,13 +178,13 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.35);
+  background: rgba(142, 149, 162, 0.22);
   border: 2px solid transparent;
   border-radius: 9999px;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.55);
+  background: rgba(142, 149, 162, 0.42);
   background-clip: padding-box;
 }

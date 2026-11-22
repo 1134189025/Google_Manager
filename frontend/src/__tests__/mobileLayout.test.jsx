@@ -7,6 +7,7 @@ const { mockApi } = vi.hoisted(() => ({
   mockApi: {
     getAccounts: vi.fn(),
     getAccountHistory: vi.fn(),
+    getBrowserStatuses: vi.fn(),
   },
 }));
 
@@ -32,45 +33,49 @@ describe('布局回归', () => {
     localStorage.clear();
     mockApi.getAccounts.mockResolvedValue([]);
     mockApi.getAccountHistory.mockResolvedValue({ success: true, data: [] });
+    mockApi.getBrowserStatuses.mockResolvedValue({ success: true, data: {} });
   });
 
-  it('App 使用左侧胶囊导航承载视图切换，并保留版本信息', async () => {
+  it('App 使用悬浮圆角侧栏导航承载视图切换，默认进入首页并保留版本信息', async () => {
     const { container } = render(<App />);
 
-    await screen.findByRole('button', { name: '账号列表' });
+    await screen.findByRole('button', { name: '首页' });
 
-    // 左侧胶囊导航存在，且不再是旧的顶栏结构
     const sideNav = container.querySelector('aside.side-nav');
     expect(sideNav).not.toBeNull();
-    expect(container.querySelector('nav')).toBeNull();
 
-    // 两个视图切换按钮
-    expect(screen.getByRole('button', { name: '账号列表' })).toBeInTheDocument();
+    // 主导航与系统分区按钮
+    expect(screen.getByRole('button', { name: '首页' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /账号列表/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '导入账号' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '回收站' })).toBeInTheDocument();
+    expect(screen.getByTitle('账号浏览器设置')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeInTheDocument();
 
-    // 暗色切换按钮
-    expect(screen.getByRole('button', { name: '切换暗色模式' })).toBeInTheDocument();
+    // 暗黑优先：默认处于暗色模式，提供「切换亮色模式」按钮
+    expect(screen.getByRole('button', { name: '切换亮色模式' })).toBeInTheDocument();
 
-    // 版本信息移动到侧栏底部
+    // 版本信息显示在侧栏底部，悬停提示含完整版本与编译时间
     const version = container.querySelector('.side-nav-version');
     expect(version).not.toBeNull();
-    expect(version.textContent).toContain('版本');
-    expect(version.textContent).toContain('编译');
+    expect(version.getAttribute('title')).toContain('版本');
+    expect(version.getAttribute('title')).toContain('编译');
   });
 
-  it('点击暗色切换会把主题写到 <html data-theme> 与 localStorage', async () => {
+  it('默认暗色并在点击对比度按钮时切换为亮色，写入 <html data-theme> 与 localStorage', async () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     const { container } = render(<App />);
 
-    await screen.findByRole('button', { name: '账号列表' });
-    expect(document.documentElement.dataset.theme).toBe('light');
+    await screen.findByRole('button', { name: '切换亮色模式' });
+    expect(document.documentElement.dataset.theme).toBe('dark');
 
-    await user.click(screen.getByRole('button', { name: '切换暗色模式' }));
+    await user.click(screen.getByRole('button', { name: '切换亮色模式' }));
 
     await waitFor(() => {
-      expect(document.documentElement.dataset.theme).toBe('dark');
+      expect(document.documentElement.dataset.theme).toBe('light');
     });
-    expect(localStorage.getItem('darkMode')).toBe('true');
+    expect(localStorage.getItem('darkMode')).toBe('false');
+    expect(screen.getByRole('button', { name: '切换暗色模式' })).toBeInTheDocument();
     expect(container.querySelector('aside.side-nav')).not.toBeNull();
   });
 

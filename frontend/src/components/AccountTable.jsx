@@ -10,12 +10,13 @@ import {
     ArrowUpDown,
     Globe,
 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
 import { isMultilineField, splitMultiValueLines } from '../utils/multiValueField';
 import { describeSmsUrl } from '../utils/smsUtils';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import SmsCodeCell from './SmsCodeCell';
+import { PixelLoader, PixelMascot, PixelCountdownBar } from './PixelArt';
 
 const BROWSER_STATUS_LABELS = {
     none: '未创建',
@@ -36,20 +37,19 @@ const BrowserButton = ({ account, status, opening, onOpen }) => {
         <button
             onClick={() => onOpen(account)}
             onMouseDown={(e) => e.stopPropagation()}
-            className="gm-icon-btn gm-browser-btn"
+            className="gm-icon-btn gm-row-action-btn gm-browser-btn"
             data-status={browserStatus}
-            style={{ width: 26, height: 26 }}
+            style={{ width: 25, height: 25 }}
             title={opening ? '正在打开浏览器…' : BROWSER_STATUS_TITLES[browserStatus]}
             aria-label={`打开浏览器（${BROWSER_STATUS_LABELS[browserStatus]}）`}
             disabled={opening}
         >
-            <Globe size={15} />
+            <Globe size={14} />
         </button>
     );
 };
 
 const splitDateTime = (value) => {
-    // 数据库存的是 UTC，先换算成本机时间再拆分
     const raw = formatDbTimestamp(value);
     if (!raw) return { date: '-', time: '' };
 
@@ -72,7 +72,7 @@ const splitDateTime = (value) => {
 };
 
 /**
- * 账号表格组件 - 渲染表头和表体
+ * 账号表格组件 - MosMos 暗黑高密表格
  */
 const AccountTable = ({
     paginatedData,
@@ -117,6 +117,27 @@ const AccountTable = ({
     onOpenBrowser,
 }) => {
     const selectAllCheckboxRef = useRef(null);
+    const [flashedCellKey, setFlashedCellKey] = useState(null);
+    const flashTimerRef = useRef(null);
+
+    const triggerCopyFlash = useCallback((cellKey) => {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        setFlashedCellKey(cellKey);
+        flashTimerRef.current = setTimeout(() => {
+            setFlashedCellKey(null);
+            flashTimerRef.current = null;
+        }, 380);
+    }, []);
+
+    useEffect(() => () => {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    }, []);
+
+    const handleCopyCell = useCallback((cellKey, value, label) => {
+        if (value) triggerCopyFlash(cellKey);
+        onCellClick?.(value, label);
+    }, [onCellClick, triggerCopyFlash]);
+
     const currentPageSelectedCount = paginatedData.reduce(
         (count, account) => count + (selectedIds.has(account.id) ? 1 : 0),
         0
@@ -134,7 +155,7 @@ const AccountTable = ({
 
     const renderSortIcon = (key) => {
         if (!sortConfig || sortConfig.key !== key) {
-            return <ArrowUpDown size={12} className="gm-text-3" />;
+            return <ArrowUpDown size={12} className="gm-text-3 gm-sort-icon-idle" />;
         }
         if (sortConfig.direction === 'asc') {
             return <ArrowUp size={12} style={primaryColorStyle} />;
@@ -159,7 +180,7 @@ const AccountTable = ({
     const renderSuggestionPanel = () => {
         if (!showSuggestions || !filteredSuggestions?.length) return null;
         return (
-            <div className="gm-panel absolute z-20 mt-1 w-full max-h-40 overflow-y-auto">
+            <div className="gm-panel absolute z-20 mt-1 w-full max-h-40 overflow-y-auto p-1">
                 {filteredSuggestions.map((item) => (
                     <button
                         key={item}
@@ -169,7 +190,7 @@ const AccountTable = ({
                             e.stopPropagation();
                             onSelectSuggestion?.(item);
                         }}
-                        className="gm-cell text-sm"
+                        className="gm-cell text-xs"
                     >
                         {item}
                     </button>
@@ -305,6 +326,7 @@ const AccountTable = ({
     const renderEditableCell = (acc, field, value, label, maxWidth = '200px', placeholder = '') => {
         const isEditing = editingCell?.accountId === acc.id && editingCell?.field === field;
         const allowWrappedPreview = field === 'recovery';
+        const cellKey = `${acc.id}-${field}`;
 
         if (isEditing) {
             return renderEditingInput(field, placeholder);
@@ -312,11 +334,11 @@ const AccountTable = ({
 
         return (
             <span
-                onClick={() => onCellClick(value, label)}
+                onClick={() => handleCopyCell(cellKey, value, label)}
                 onDoubleClick={(e) => onCellDoubleClick(e, acc.id, field, value)}
                 onMouseDown={(e) => e.stopPropagation()}
-                className={`gm-cell block w-full ${allowWrappedPreview
-                    ? 'min-h-[36px] py-1 leading-5 whitespace-normal break-all'
+                className={`gm-cell block w-full text-xs ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''} ${allowWrappedPreview
+                    ? 'min-h-[34px] py-1 leading-4 whitespace-normal break-all'
                     : 'truncate leading-5 min-h-[20px]'}`}
                 style={allowWrappedPreview ? { maxWidth, ...wrappedPreviewStyle } : { maxWidth }}
                 title={`单击复制，双击编辑：${value || '无'}`}
@@ -333,27 +355,30 @@ const AccountTable = ({
         return isEditing ? (
             renderEditingInput('groupName', '每行一个标签，支持逗号或换行粘贴')
         ) : (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap gap-1 items-start">
                 {tags.length > 0 ? (
-                    tags.map((tag, i) => (
-                        <button
-                            key={`${acc.id}-tag-${i}-${tag}`}
-                            type="button"
-                            onClick={() => onCellClick(tag, '标签')}
-                            onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'groupName', acc.groupName)}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className="gm-cell text-xs"
-                            title="单击复制该标签，双击编辑全部标签"
-                        >
-                            {tag}
-                        </button>
-                    ))
+                    tags.map((tag, i) => {
+                        const cellKey = `${acc.id}-tag-${i}`;
+                        return (
+                            <button
+                                key={`${acc.id}-tag-${i}-${tag}`}
+                                type="button"
+                                onClick={() => handleCopyCell(cellKey, tag, '标签')}
+                                onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'groupName', acc.groupName)}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                className={`gm-tag-pill truncate max-w-full ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''}`}
+                                title={`单击复制该标签，双击编辑全部标签：${tag}`}
+                            >
+                                {tag}
+                            </button>
+                        );
+                    })
                 ) : (
                     <button
                         type="button"
                         onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'groupName', '')}
                         onMouseDown={(e) => e.stopPropagation()}
-                        className="gm-cell h-7 italic gm-text-3"
+                        className="gm-cell h-7 italic gm-text-3 text-xs"
                         title="双击添加标签"
                     >
                         无
@@ -377,7 +402,7 @@ const AccountTable = ({
                     type="button"
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'remark', '')}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell h-7 italic gm-text-3"
+                    className="gm-cell h-7 italic gm-text-3 text-xs"
                     title="双击添加备注"
                 >
                     无
@@ -387,19 +412,22 @@ const AccountTable = ({
 
         return (
             <div className="flex flex-col gap-1">
-                {lines.map((line, index) => (
-                    <button
-                        key={`${acc.id}-remark-${index}`}
-                        type="button"
-                        onClick={() => onCellClick(line, '备注')}
-                        onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'remark', acc.remark)}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className="gm-cell text-xs leading-5 break-words"
-                        title="单击复制该条备注，双击编辑全部备注"
-                    >
-                        {line}
-                    </button>
-                ))}
+                {lines.map((line, index) => {
+                    const cellKey = `${acc.id}-remark-${index}`;
+                    return (
+                        <button
+                            key={`${acc.id}-remark-${index}`}
+                            type="button"
+                            onClick={() => handleCopyCell(cellKey, line, '备注')}
+                            onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'remark', acc.remark)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className={`gm-cell text-xs leading-4 break-words ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''}`}
+                            title={`单击复制该条备注，双击编辑全部备注：${line}`}
+                        >
+                            {line}
+                        </button>
+                    );
+                })}
             </div>
         );
     };
@@ -416,7 +444,7 @@ const AccountTable = ({
                     type="button"
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'phone', '')}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell h-7 italic gm-text-3"
+                    className="gm-cell h-7 italic gm-text-3 text-xs"
                     title="双击编辑手机号"
                 >
                     无
@@ -426,25 +454,27 @@ const AccountTable = ({
 
         const { countryCode, localNumber, normalized } = splitPhoneParts(acc.phone);
         const numberOnly = localNumber || normalized.replace(/^\+/, '');
+        const ccKey = `${acc.id}-phone-cc`;
+        const numKey = `${acc.id}-phone-num`;
 
         return (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
                 <button
                     type="button"
-                    onClick={() => onCellClick(normalized || acc.phone, '国别+手机号')}
+                    onClick={() => handleCopyCell(ccKey, normalized || acc.phone, '国别+手机号')}
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'phone', acc.phone)}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell h-7 text-xs select-none truncate flex items-center gm-text-2"
+                    className={`gm-cell h-6 text-[11px] select-none truncate flex items-center gm-text-2 ${flashedCellKey === ccKey ? 'gm-copy-flash' : ''}`}
                     title="单击复制国别+手机号，双击编辑"
                 >
                     {formatCountryDisplay(countryCode || '+86')}
                 </button>
                 <button
                     type="button"
-                    onClick={() => onCellClick(numberOnly, '手机号')}
+                    onClick={() => handleCopyCell(numKey, numberOnly, '手机号')}
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'phone', acc.phone)}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell min-h-[36px] py-1 text-sm font-medium select-none whitespace-normal break-all"
+                    className={`gm-cell min-h-[34px] py-1 text-xs font-mono font-medium select-none whitespace-normal break-all ${flashedCellKey === numKey ? 'gm-copy-flash' : ''}`}
                     style={wrappedPreviewStyle}
                     title="单击仅复制手机号，双击编辑"
                 >
@@ -454,10 +484,6 @@ const AccountTable = ({
         );
     };
 
-    /**
-     * 手机验证码单元格
-     * 接码地址的编辑走 inlineEdit 的 smsUrl 字段（双击单元格进入配置）
-     */
     const renderSmsCell = (acc) => {
         const isEditing = editingCell?.accountId === acc.id && editingCell?.field === 'smsUrl';
         if (isEditing) {
@@ -491,7 +517,7 @@ const AccountTable = ({
                     type="button"
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', '')}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell h-7 italic gm-text-3"
+                    className="gm-cell h-7 italic gm-text-3 text-xs"
                     title="双击编辑2FA密钥"
                 >
                     无
@@ -500,38 +526,42 @@ const AccountTable = ({
         }
 
         const codeInfo = twoFACodes[acc.id];
+        const secretKey = `${acc.id}-secret`;
+        const codeKey = `${acc.id}-totp`;
 
         return (
-            <div className="flex flex-col gap-1">
-                <button
-                    type="button"
-                    onClick={() => onCellClick(acc.secret, '2FA密钥')}
-                    onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', acc.secret)}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell min-h-[36px] py-1 text-xs font-mono select-none whitespace-normal break-all"
-                    style={wrappedPreviewStyle}
-                    title="单击复制2FA密钥，双击编辑"
-                >
-                    {acc.secret}
-                </button>
+            <div className="flex flex-col gap-0.5">
                 {codeInfo ? (
                     <button
                         type="button"
-                        onClick={() => onCellClick(codeInfo.code, '2FA验证码')}
+                        onClick={() => handleCopyCell(codeKey, codeInfo.code, '2FA验证码')}
                         onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', acc.secret)}
                         onMouseDown={(e) => e.stopPropagation()}
-                        className="gm-cell h-7 text-sm font-mono font-semibold select-none flex items-center gap-1.5"
-                        style={{ color: 'var(--success)' }}
+                        className={`gm-cell gm-code-pill select-none flex flex-col items-start gap-1 ${flashedCellKey === codeKey ? 'gm-copy-flash' : ''}`}
                         title="单击复制2FA验证码，双击编辑密钥"
                     >
-                        <span>{codeInfo.code}</span>
-                        <span className="text-[11px] opacity-70">{codeInfo.expiry}s</span>
+                        <span className="flex items-baseline gap-1.5 w-full">
+                            <span className="gm-code-text">{codeInfo.code}</span>
+                            <span className="text-[10px] font-mono gm-text-3 tabular-nums">{codeInfo.expiry}s</span>
+                        </span>
+                        <PixelCountdownBar expiry={codeInfo.expiry} />
                     </button>
                 ) : (
-                    <span className="gm-text-3 text-xs px-1.5 py-1">
-                        验证码生成中...
+                    <span className="gm-text-3 text-[11px] px-1.5 py-1">
+                        生成中…
                     </span>
                 )}
+                <button
+                    type="button"
+                    onClick={() => handleCopyCell(secretKey, acc.secret, '2FA密钥')}
+                    onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', acc.secret)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className={`gm-cell py-0.5 text-[10.5px] font-mono gm-text-3 select-none whitespace-normal break-all ${flashedCellKey === secretKey ? 'gm-copy-flash' : ''}`}
+                    style={{ ...wrappedPreviewStyle, WebkitLineClamp: 1 }}
+                    title={`单击复制2FA密钥，双击编辑：${acc.secret}`}
+                >
+                    {acc.secret}
+                </button>
             </div>
         );
     };
@@ -550,7 +580,7 @@ const AccountTable = ({
                     type="button"
                     onDoubleClick={(e) => onCellDoubleClick(e, acc.id, field, '')}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-cell h-7 italic gm-text-3"
+                    className="gm-cell h-7 italic gm-text-3 text-xs"
                     title={`双击编辑${label}`}
                 >
                     无
@@ -560,16 +590,17 @@ const AccountTable = ({
 
         const variantClass = variant === 'password'
             ? 'text-xs font-mono gm-text-2'
-            : 'text-sm';
+            : 'text-[13px] font-medium gm-text-1';
+        const cellKey = `${acc.id}-${field}`;
 
         return (
             <button
                 type="button"
-                onClick={() => onCellClick(textValue, label)}
+                onClick={() => handleCopyCell(cellKey, textValue, label)}
                 onDoubleClick={(e) => onCellDoubleClick(e, acc.id, field, textValue)}
                 onMouseDown={(e) => e.stopPropagation()}
-                className={`gm-cell select-none ${allowWrappedPreview
-                    ? `min-h-[36px] py-1 whitespace-normal break-all ${variantClass}`
+                className={`gm-cell select-none ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''} ${allowWrappedPreview
+                    ? `min-h-[34px] py-1 whitespace-normal break-all ${variantClass}`
                     : `h-7 truncate flex items-center ${variantClass}`}`}
                 style={allowWrappedPreview ? { maxWidth, ...wrappedPreviewStyle } : { maxWidth }}
                 title={`单击复制，双击编辑：${textValue}`}
@@ -582,47 +613,46 @@ const AccountTable = ({
     const renderCreatedAtCell = (createdAt) => {
         const { date, time } = splitDateTime(createdAt);
         return (
-            <div className="flex flex-col gap-1 leading-tight">
-                <span className="text-sm whitespace-nowrap gm-text-2">
+            <div className="flex flex-col gap-0.5 leading-tight font-mono">
+                <span className="text-[11.5px] whitespace-nowrap gm-text-2">
                     {date}
                 </span>
-                <span className="text-xs whitespace-nowrap gm-text-3">
+                <span className="text-[10.5px] whitespace-nowrap gm-text-3">
                     {time || '-'}
                 </span>
             </div>
         );
     };
+
     return (
         <div className="gm-table-wrap">
-            {/* 列宽与窄窗口下按优先级隐藏的列见 components.css「表格列宽」 */}
             <div className="overflow-x-auto">
                 <table className="gm-table w-full text-left table-fixed">
                     <thead>
                         <tr>
-                            <th className="px-2 py-2.5 !text-center w-[36px]">
+                            <th className="px-2 py-2.5 !text-center w-[34px]">
                                 <input
                                     ref={selectAllCheckboxRef}
                                     type="checkbox"
                                     checked={allCurrentPageSelected}
                                     onChange={() => onToggleSelectAll(paginatedData)}
-                                    className="w-4 h-4 rounded"
-                                    style={{ accentColor: 'var(--primary)' }}
+                                    className="gm-checkbox"
                                 />
                             </th>
-                            {renderSortableHeader('序号', 'id', 'gm-col-id px-2 py-2.5 !text-center w-[44px]', 'center')}
-                            {renderSortableHeader('账号', 'email', 'px-3 py-2.5 w-[190px]')}
-                            {renderSortableHeader('恢复', 'recovery', 'gm-col-recovery px-2 py-2.5 w-[120px]')}
-                            {renderSortableHeader('2FA', 'secret', 'px-2 py-2.5 w-[84px]')}
-                            {renderSortableHeader('手机', 'phone', 'px-2 py-2.5 w-[96px]')}
-                            <th className="px-2 py-2.5 w-[116px]" title="短信验证码：双击配置接码地址">手机验证码</th>
+                            {renderSortableHeader('序号', 'id', 'gm-col-id px-2 py-2.5 !text-center w-[40px]', 'center')}
+                            {renderSortableHeader('账号', 'email', 'px-2.5 py-2.5 w-[184px]')}
+                            {renderSortableHeader('恢复', 'recovery', 'gm-col-recovery px-2 py-2.5 w-[114px]')}
+                            {renderSortableHeader('2FA', 'secret', 'px-2 py-2.5 w-[104px]')}
+                            {renderSortableHeader('手机', 'phone', 'px-2 py-2.5 w-[98px]')}
+                            <th className="px-2 py-2.5 w-[108px]" title="短信验证码：双击配置接码地址">手机验证码</th>
                             {renderSortableHeader('标签', 'groupName', 'gm-col-tags px-2 py-2.5 w-[96px]')}
                             {/* 备注不设宽度：占用其余全部空间 */}
-                            {renderSortableHeader('备注', 'remark', 'px-3 py-2.5')}
-                            {renderSortableHeader('状态', 'status', 'px-2 py-2.5 !text-center w-[64px]', 'center')}
-                            {renderSortableHeader('年份', 'regYear', 'gm-col-year px-2 py-2.5 !text-center w-[60px]', 'center')}
-                            {renderSortableHeader('国家', 'country', 'gm-col-country px-2 py-2.5 !text-center w-[84px]', 'center')}
-                            <th className="px-2 py-2.5 !text-center w-[150px]">操作</th>
-                            {renderSortableHeader('导入', 'createdAt', 'gm-col-created px-2 py-2.5 w-[96px]')}
+                            {renderSortableHeader('备注', 'remark', 'px-2.5 py-2.5')}
+                            {renderSortableHeader('状态', 'status', 'px-1.5 py-2.5 !text-center w-[58px]', 'center')}
+                            {renderSortableHeader('年份', 'regYear', 'gm-col-year px-1.5 py-2.5 !text-center w-[50px]', 'center')}
+                            {renderSortableHeader('国家', 'country', 'gm-col-country px-1.5 py-2.5 !text-center w-[66px]', 'center')}
+                            <th className="px-1.5 py-2.5 !text-center w-[144px]">操作</th>
+                            {renderSortableHeader('导入', 'createdAt', 'gm-col-created px-2 py-2.5 w-[84px]')}
                         </tr>
                     </thead>
                     <tbody>
@@ -630,17 +660,14 @@ const AccountTable = ({
                             <tr>
                                 <td colSpan="14">
                                     <div className="gm-empty flex flex-col items-center">
-                                        <div
-                                            className="animate-spin rounded-full h-8 w-8 mb-4"
-                                            style={{ border: '2px solid var(--border)', borderTopColor: 'var(--primary)' }}
-                                        ></div>
-                                        <p className="text-lg font-medium">加载中...</p>
+                                        <PixelLoader label="加载中..." />
                                     </div>
                                 </td>
                             </tr>
                         ) : paginatedData.length > 0 ? paginatedData.map((acc, index) => (
-                            <tr key={acc.id}
-                                className={`transition-colors group ${selectedIds.has(acc.id) ? 'is-selected' : ''}`}
+                            <tr
+                                key={acc.id}
+                                className={`group ${selectedIds.has(acc.id) ? 'is-selected' : ''}`}
                                 onMouseDown={(e) => onRowMouseDown(e, acc.id)}
                                 onMouseEnter={() => onRowMouseEnter(acc.id)}
                             >
@@ -654,91 +681,87 @@ const AccountTable = ({
                                             onToggleCheckbox(acc.id);
                                         }}
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        className="w-4 h-4 rounded"
-                                        style={{ accentColor: 'var(--primary)' }}
+                                        className="gm-checkbox"
                                     />
                                 </td>
                                 {/* 序号 */}
-                                <td className="gm-col-id px-2 py-2.5 text-center">
-                                    <span
-                                        className="inline-flex items-center justify-center w-6 h-6 text-xs font-bold"
-                                        style={{
-                                            padding: 0,
-                                            borderRadius: 'var(--radius-sm)',
-                                            background: 'var(--bg-hover)',
-                                            color: 'var(--text-secondary)',
-                                        }}
-                                    >
+                                <td className="gm-col-id px-1.5 py-2.5 text-center">
+                                    <span className="font-mono text-[11px] gm-text-3 tabular-nums">
                                         {(pagination.currentPage - 1) * pagination.pageSize + index + 1}
                                     </span>
                                 </td>
                                 {/* 账号 */}
-                                <td className="px-3 py-2.5 align-top">
-                                    <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-1">
+                                <td className="px-2.5 py-2.5 align-top">
+                                    <div className="flex flex-col gap-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <span
+                                                className={`gm-row-signal ${browserStatuses?.[acc.email] === 'running' ? 'is-running gm-pixel-status-pulse' : acc.status === 'pro' ? 'is-pro' : ''}`}
+                                                aria-hidden="true"
+                                            />
                                             <div className="flex-1 min-w-0">
-                                                {renderAccountLine(acc, 'email', acc.email, '邮箱', '170px', 'example@gmail.com', 'email')}
+                                                {renderAccountLine(acc, 'email', acc.email, '邮箱', '156px', 'example@gmail.com', 'email')}
                                             </div>
                                             <button
                                                 onClick={() => openHistoryDrawer(acc)}
                                                 onMouseDown={(e) => e.stopPropagation()}
-                                                className="gm-icon-btn flex-shrink-0"
+                                                className="gm-icon-btn gm-row-action-btn gm-history-trigger flex-shrink-0"
                                                 style={{ width: 22, height: 22 }}
                                                 title="查看修改历史"
                                             >
                                                 <History size={12} />
                                             </button>
                                         </div>
-                                        {renderAccountLine(acc, 'password', acc.password, '密码', '180px', 'password123', 'password')}
+                                        <div className="pl-3">
+                                            {renderAccountLine(acc, 'password', acc.password, '密码', '160px', 'password123', 'password')}
+                                        </div>
                                     </div>
                                 </td>
                                 {/* 恢复邮箱 */}
-                                <td className="gm-col-recovery px-2 py-2.5 align-top">
+                                <td className="gm-col-recovery px-2 py-2 align-top">
                                     {renderEditableCell(acc, 'recovery', acc.recovery, '恢复邮箱', '100%', 'recovery@example.com')}
                                 </td>
                                 {/* 2FA密钥 */}
-                                <td className="px-2 py-2.5 align-top">
+                                <td className="px-2 py-2 align-top">
                                     {renderTwoFACell(acc)}
                                 </td>
                                 {/* 手机号 */}
-                                <td className="px-2 py-2.5 align-top">
+                                <td className="px-2 py-2 align-top">
                                     {renderPhoneCell(acc)}
                                 </td>
                                 {/* 手机验证码（短信） */}
-                                <td className="px-2 py-2.5 align-top">
+                                <td className="px-2 py-2 align-top">
                                     {renderSmsCell(acc)}
                                 </td>
                                 {/* 标签 */}
-                                <td className="gm-col-tags px-2 py-2.5 align-top">
+                                <td className="gm-col-tags px-2 py-2 align-top">
                                     {renderGroupNameCell(acc)}
                                 </td>
                                 {/* 备注 */}
-                                <td className="px-3 py-2.5 align-top">
+                                <td className="px-2.5 py-2 align-top">
                                     {renderRemarkCell(acc)}
                                 </td>
                                 {/* 状态（Pro / 普通） */}
-                                <td className="px-2 py-2.5 text-center">
-                                    <div className="flex flex-col items-center gap-1">
-                                        <button onClick={() => toggleStatus(acc.id)}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            title="点击切换 Pro 状态"
-                                            className={`gm-badge transition-all duration-300 transform active:scale-95 whitespace-nowrap ${acc.status === 'pro' ? 'gm-badge-on' : 'gm-badge-off'}`}
-                                        >
-                                            {acc.status === 'pro' ? 'Pro' : '普通'}
-                                        </button>
-                                    </div>
+                                <td className="px-1.5 py-2 text-center">
+                                    <button
+                                        onClick={() => toggleStatus(acc.id)}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        title="点击切换 Pro 状态"
+                                        className={`gm-badge whitespace-nowrap ${acc.status === 'pro' ? 'gm-badge-on' : 'gm-badge-off'}`}
+                                    >
+                                        {acc.status === 'pro' ? 'Pro' : '普通'}
+                                    </button>
                                 </td>
                                 {/* 年份 */}
-                                <td className="gm-col-year px-2 py-2.5 text-center align-top">
+                                <td className="gm-col-year px-1.5 py-2 text-center align-top">
                                     {renderEditableCell(acc, 'regYear', acc.regYear, '注册年份', '100%')}
                                 </td>
                                 {/* 国家 */}
-                                <td className="gm-col-country px-2 py-2.5 text-center align-top">
+                                <td className="gm-col-country px-1.5 py-2 text-center align-top">
                                     {renderEditableCell(acc, 'country', acc.country, '国家', '100%')}
                                 </td>
                                 {/* 操作 */}
-                                <td className="gm-col-actions px-2 py-2.5">
-                                    <div className="flex items-center justify-center gap-0.5">
+                                <td className="gm-col-actions px-1.5 py-2.5">
+                                    <div className="gm-action-cluster">
                                         {onOpenBrowser && (
                                             <BrowserButton
                                                 account={acc}
@@ -747,32 +770,59 @@ const AccountTable = ({
                                                 onOpen={onOpenBrowser}
                                             />
                                         )}
-                                        <button onClick={() => onEdit(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="编辑">
-                                            <Edit3 size={15} />
+                                        <button
+                                            onClick={() => onEdit(acc)}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="gm-icon-btn gm-row-action-btn"
+                                            style={{ width: 25, height: 25 }}
+                                            title="编辑"
+                                        >
+                                            <Edit3 size={14} />
                                         </button>
-                                        <button onClick={() => onDelete(acc.id)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="删除">
-                                            <Trash2 size={15} />
+                                        <button
+                                            onClick={() => onDelete(acc.id)}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="gm-icon-btn gm-row-action-btn"
+                                            style={{ width: 25, height: 25 }}
+                                            title="删除"
+                                        >
+                                            <Trash2 size={14} />
                                         </button>
-                                        <button onClick={() => copyAllInfo(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="复制全部信息">
-                                            <Copy size={15} />
+                                        <button
+                                            onClick={() => copyAllInfo(acc)}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="gm-icon-btn gm-row-action-btn"
+                                            style={{ width: 25, height: 25 }}
+                                            title="复制全部信息"
+                                        >
+                                            <Copy size={14} />
                                         </button>
-                                        <button onClick={() => copyPhoneWithSmsUrl(acc)} onMouseDown={(e) => e.stopPropagation()} className="gm-icon-btn" style={{ width: 26, height: 26 }} title="复制号码与接码地址" disabled={!acc.smsUrl}>
-                                            <Link2 size={15} />
+                                        <button
+                                            onClick={() => copyPhoneWithSmsUrl(acc)}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="gm-icon-btn gm-row-action-btn"
+                                            style={{ width: 25, height: 25 }}
+                                            title="复制号码与接码地址"
+                                            disabled={!acc.smsUrl}
+                                        >
+                                            <Link2 size={14} />
                                         </button>
                                     </div>
                                 </td>
                                 {/* 导入时间 */}
-                                <td className="gm-col-created px-2 py-2.5 align-top">
+                                <td className="gm-col-created px-2 py-2 align-top">
                                     {renderCreatedAtCell(acc.createdAt)}
                                 </td>
                             </tr>
                         )) : (
                             <tr>
                                 <td colSpan="14">
-                                    <div className="gm-empty flex flex-col items-center">
-                                        <Search size={48} className="mb-4 opacity-20" />
-                                        <p className="text-lg font-medium">未找到相关账号</p>
-                                        <p className="text-sm">尝试更换关键词或导入新账号</p>
+                                    <div className="gm-empty flex flex-col items-center gap-3">
+                                        <PixelMascot size={48} variant="sleep" className="gm-text-3" />
+                                        <div>
+                                            <p className="text-sm font-semibold gm-text-2">未找到相关账号</p>
+                                            <p className="text-xs mt-1 gm-text-3">尝试更换关键词或导入新账号</p>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>

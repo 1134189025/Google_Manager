@@ -1,0 +1,236 @@
+/* ============================================
+   双轨微动效体系（流畅阻尼轨 + 像素阶梯轨）
+   - 视图与容器级入场动画严格使用 backwards，绝不保留 transform
+   ============================================ */
+
+:root {
+  --ease-damp: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur-mid: 200ms;
+  --dur-view: 240ms;
+}
+
+/* ---------- 流畅阻尼轨 ---------- */
+@keyframes gmViewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gmFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes gmModalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes gmDrawerIn {
+  from {
+    opacity: 0.4;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes gmToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes gmToastDecay {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes gmCheckPop {
+  0% {
+    transform: scale(0.84);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes gmCopyFlash {
+  0% {
+    background-color: var(--primary-light);
+    color: var(--primary);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.gm-view-enter {
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) backwards;
+}
+
+.gm-stagger-1 {
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 30ms backwards;
+}
+
+.gm-stagger-2 {
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 65ms backwards;
+}
+
+.gm-stagger-3 {
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 100ms backwards;
+}
+
+.gm-stagger-4 {
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 135ms backwards;
+}
+
+.gm-copy-flash {
+  animation: gmCopyFlash 360ms var(--ease-damp);
+}
+
+/* ---------- 像素阶梯轨（steps） ---------- */
+@keyframes gmPixelBlink {
+  0%, 90%, 100% {
+    transform: scaleY(1);
+  }
+  94%, 97% {
+    transform: scaleY(0.18);
+  }
+}
+
+@keyframes gmPixelFloatA {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes gmPixelFloatB {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes gmPixelHop {
+  0% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-4px);
+  }
+  70% {
+    transform: translateY(-1px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes gmPixelStepPulse {
+  0%, 100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes gmPixelZ {
+  0%, 100% {
+    opacity: 0.25;
+    transform: translate(0, 0);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translate(1px, -2px);
+  }
+}
+
+@keyframes gmPixelDotPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+.gm-pixel-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: gmPixelBlink 4.6s steps(1, end) infinite;
+}
+
+.gm-pixel-float-a {
+  animation: gmPixelFloatA 2.2s steps(2, end) infinite;
+}
+
+.gm-pixel-float-b {
+  animation: gmPixelFloatB 2.6s steps(2, end) infinite;
+}
+
+.gm-pixel-z {
+  animation: gmPixelZ 2.4s steps(2, end) infinite;
+}
+
+.gm-pixel-mascot-hop:hover .gm-pixel-body,
+.gm-pixel-mascot--wave .gm-pixel-body {
+  animation: gmPixelHop 420ms steps(3, end);
+}
+
+.gm-pixel-loader-cell {
+  animation: gmPixelStepPulse 0.9s steps(2, end) infinite;
+}
+
+.gm-pixel-status-pulse {
+  animation: gmPixelDotPulse 1.6s steps(2, end) infinite;
+}
+
+/* ---------- 降级无障碍 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

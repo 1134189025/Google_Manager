@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import mockApi from './mocks/api';
 import AccountTable from '../components/AccountTable';
 import AccountListView from '../components/AccountListView';
+import RecycleView from '../components/RecycleView';
 import BrowserSettingsDialog from '../components/BrowserSettingsDialog';
 import App from '../App';
 import { formatBytes, describeClearCacheResult } from '../utils/browserUtils';
@@ -227,9 +228,11 @@ describe('AccountListView 打开浏览器与删除配置', () => {
             mockApi.purgeAllDeleted = vi.fn().mockResolvedValue({ success: true, data: 1 });
         });
 
-        const openRecycleBin = async () => {
-            fireEvent.click(screen.getByTitle('查看回收站账号'));
+        const renderRecycleView = async (extraProps = {}) => {
+            const onNotify = extraProps.onNotify || vi.fn();
+            render(<RecycleView onRefreshAccounts={vi.fn()} onNotify={onNotify} {...extraProps} />);
             await screen.findByText('gone@gmail.com');
+            return { onNotify };
         };
 
         it('有配置目录时追加询问，确认后在删除账号之后删除配置', async () => {
@@ -239,9 +242,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
             }));
             mockApi.deleteBrowserProfiles.mockResolvedValue({ success: true, data: { deleted: 1, skipped: 0 } });
             const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
-            const props = baseProps();
-            render(<AccountListView {...props} />);
-            await openRecycleBin();
+            const { onNotify } = await renderRecycleView();
 
             fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
 
@@ -251,14 +252,13 @@ describe('AccountListView 打开浏览器与删除配置', () => {
             expect(mockApi.purgeAccount).toHaveBeenCalledWith(9);
             expect(mockApi.purgeAccount.mock.invocationCallOrder[0])
                 .toBeLessThan(mockApi.deleteBrowserProfiles.mock.invocationCallOrder[0]);
-            expect(props.onNotify).toHaveBeenCalledWith('已删除 1 个浏览器配置');
+            expect(onNotify).toHaveBeenCalledWith('已删除 1 个浏览器配置');
         });
 
         it('选择保留配置时只删除账号', async () => {
             mockApi.getBrowserStatuses.mockResolvedValue({ success: true, data: { 'gone@gmail.com': 'created' } });
             vi.mocked(ask).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-            render(<AccountListView {...baseProps()} />);
-            await openRecycleBin();
+            await renderRecycleView();
 
             fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
 
@@ -268,8 +268,7 @@ describe('AccountListView 打开浏览器与删除配置', () => {
 
         it('没有配置目录时不追加询问', async () => {
             const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
-            render(<AccountListView {...baseProps()} />);
-            await openRecycleBin();
+            await renderRecycleView();
 
             fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
 
@@ -285,16 +284,14 @@ describe('AccountListView 打开浏览器与删除配置', () => {
             }));
             mockApi.deleteBrowserProfiles.mockResolvedValue({ success: true, data: { deleted: 0, skipped: 1 } });
             const confirmSpy = vi.mocked(ask).mockResolvedValue(true);
-            const props = baseProps();
-            render(<AccountListView {...props} />);
-            await openRecycleBin();
+            const { onNotify } = await renderRecycleView();
 
             fireEvent.click(screen.getByRole('button', { name: '清空回收站' }));
 
             await waitFor(() => expect(mockApi.deleteBrowserProfiles).toHaveBeenCalledWith(['gone@gmail.com']));
             expect(confirmSpy).toHaveBeenCalledTimes(2);
             expect(mockApi.purgeAllDeleted).toHaveBeenCalled();
-            expect(props.onNotify).toHaveBeenCalledWith(expect.stringContaining('1 个因正在运行或仍被其他账号使用而保留'));
+            expect(onNotify).toHaveBeenCalledWith(expect.stringContaining('1 个因正在运行或仍被其他账号使用而保留'));
         });
     });
 });
@@ -412,6 +409,8 @@ describe('App 串联：首次打开浏览器先确认设置', () => {
         fireEvent.click(screen.getByRole('button', { name: '取消' }));
         await waitFor(() => expect(screen.queryByText('账号浏览器设置')).toBeNull());
 
+        // App 默认进入首页，切到账号列表后校验行内浏览器打开流程
+        fireEvent.click(screen.getByRole('button', { name: /账号列表/ }));
         await screen.findByText('user1@gmail.com');
         fireEvent.click(browserButtonOf('user1@gmail.com'));
         expect(await screen.findByText('首次使用：确认浏览器设置')).toBeInTheDocument();
