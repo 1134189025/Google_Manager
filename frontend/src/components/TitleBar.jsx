@@ -15,12 +15,19 @@ const getSafeWindow = async () => {
     }
 };
 
+const VIEW_LABELS = {
+    home: '首页',
+    list: '账号列表',
+    import: '导入账号',
+    recycle: '回收站',
+};
+
 /**
- * 极简无边框标题栏
- * - 顶部 36px 透明拖拽区，融入画布
- * - 双击拖拽区切换最大化；右上角提供 — □ × 窗口控制
+ * 独立无边框顶部标题栏
+ * - 独占顶部 38px 空间，与下方内容区严格分离，滚动列表绝不遮挡窗口按钮
+ * - 质感与悬浮侧栏保持一致（半透明石墨磨砂 + 极细底分割线 + 统一圆角窗口按钮）
  */
-const TitleBar = () => {
+const TitleBar = ({ view = 'home' }) => {
     const [maximized, setMaximized] = useState(false);
 
     const syncMaximized = useCallback(async () => {
@@ -92,14 +99,22 @@ const TitleBar = () => {
         }
     };
 
+    const currentLabel = VIEW_LABELS[view] || '工作区';
+
     return (
         <header className="gm-titlebar" data-tauri-drag-region>
             <div
                 className="gm-titlebar-drag"
                 data-tauri-drag-region
                 onDoubleClick={handleToggleMaximize}
-                aria-hidden="true"
-            />
+            >
+                <span className="gm-titlebar-brand" data-tauri-drag-region>
+                    <span className="gm-titlebar-pixel" aria-hidden="true" />
+                    <span className="gm-titlebar-app" data-tauri-drag-region>GoogleManager</span>
+                    <span className="gm-titlebar-sep" aria-hidden="true">/</span>
+                    <span className="gm-titlebar-view" data-tauri-drag-region>{currentLabel}</span>
+                </span>
+            </div>
             <div className="gm-titlebar-controls">
                 <button
                     type="button"
@@ -109,7 +124,7 @@ const TitleBar = () => {
                     title="最小化"
                     aria-label="最小化窗口"
                 >
-                    <Minus size={14} strokeWidth={1.75} />
+                    <Minus size={13} strokeWidth={1.85} />
                 </button>
                 <button
                     type="button"
@@ -120,8 +135,8 @@ const TitleBar = () => {
                     aria-label={maximized ? '还原窗口' : '最大化窗口'}
                 >
                     {maximized
-                        ? <Copy size={12} strokeWidth={1.75} />
-                        : <Square size={12} strokeWidth={1.75} />}
+                        ? <Copy size={11.5} strokeWidth={1.85} />
+                        : <Square size={11.5} strokeWidth={1.85} />}
                 </button>
                 <button
                     type="button"
@@ -131,7 +146,7 @@ const TitleBar = () => {
                     title="关闭"
                     aria-label="关闭窗口"
                 >
-                    <X size={14} strokeWidth={1.75} />
+                    <X size={13.5} strokeWidth={1.85} />
                 </button>
             </div>
         </header>

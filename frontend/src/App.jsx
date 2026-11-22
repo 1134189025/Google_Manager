@@ -481,64 +481,66 @@ const App = () => {
 
     return (
         <div className="app-container">
-            <TitleBar />
             <PixelDitherBackdrop />
+            <TitleBar view={view} />
 
-            <SideNav
-                view={view}
-                accountsCount={accounts.length}
-                darkMode={darkMode}
-                updater={updater}
-                onNavigate={navigateToView}
-                onOpenBrowserSettings={() => openBrowserSettings()}
-                onToggleDarkMode={() => setDarkMode(prev => !prev)}
-            />
+            <div className="app-workspace">
+                <SideNav
+                    view={view}
+                    accountsCount={accounts.length}
+                    darkMode={darkMode}
+                    updater={updater}
+                    onNavigate={navigateToView}
+                    onOpenBrowserSettings={() => openBrowserSettings()}
+                    onToggleDarkMode={() => setDarkMode(prev => !prev)}
+                />
 
-            <main className="main-wrapper">
-                {view === 'home' ? (
-                    <HomeView
-                        accounts={accounts}
-                        browserStatuses={homeBrowserStatuses}
-                        loading={loading}
-                        onTriggerSearch={triggerSearchAction}
-                        onTriggerImport={triggerImportAction}
-                        onTriggerExport={triggerExportAction}
-                        onNavigateList={() => navigateToView('list')}
-                        onOpenBrowser={handleHomeOpenBrowser}
-                        onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
-                    />
-                ) : view === 'list' ? (
-                    <AccountListView
-                        accounts={filteredAccounts}
-                        search={search}
-                        setSearch={setSearch}
-                        groupFilter={groupFilter}
-                        setGroupFilter={setGroupFilter}
-                        allGroups={allGroups}
-                        copyToClipboard={copyToClipboard}
-                        toggleStatus={toggleStatus}
-                        onEdit={setEditingAccount}
-                        onDelete={handleDelete}
-                        onBatchDelete={handleBatchDelete}
-                        onInlineEdit={handleInlineEdit}
-                        onInlineEditMany={handleInlineEditMany}
-                        onRefreshAccounts={() => loadAccounts()}
-                        loading={loading}
-                        onNotify={showNotification}
-                        openBrowserSettings={openBrowserSettings}
-                        pendingAction={pendingListAction}
-                        onConsumePendingAction={consumePendingListAction}
-                    />
-                ) : view === 'recycle' ? (
-                    <RecycleView
-                        onRefreshAccounts={() => loadAccounts()}
-                        onNotify={showNotification}
-                        onNavigateList={() => navigateToView('list')}
-                    />
-                ) : (
-                    <ImportView onImport={handleImport} onCancel={() => navigateToView('list')} importing={importing} />
-                )}
-            </main>
+                <main className="main-wrapper">
+                    {view === 'home' ? (
+                        <HomeView
+                            accounts={accounts}
+                            browserStatuses={homeBrowserStatuses}
+                            loading={loading}
+                            onTriggerSearch={triggerSearchAction}
+                            onTriggerImport={triggerImportAction}
+                            onTriggerExport={triggerExportAction}
+                            onNavigateList={() => navigateToView('list')}
+                            onOpenBrowser={handleHomeOpenBrowser}
+                            onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
+                        />
+                    ) : view === 'list' ? (
+                        <AccountListView
+                            accounts={filteredAccounts}
+                            search={search}
+                            setSearch={setSearch}
+                            groupFilter={groupFilter}
+                            setGroupFilter={setGroupFilter}
+                            allGroups={allGroups}
+                            copyToClipboard={copyToClipboard}
+                            toggleStatus={toggleStatus}
+                            onEdit={setEditingAccount}
+                            onDelete={handleDelete}
+                            onBatchDelete={handleBatchDelete}
+                            onInlineEdit={handleInlineEdit}
+                            onInlineEditMany={handleInlineEditMany}
+                            onRefreshAccounts={() => loadAccounts()}
+                            loading={loading}
+                            onNotify={showNotification}
+                            openBrowserSettings={openBrowserSettings}
+                            pendingAction={pendingListAction}
+                            onConsumePendingAction={consumePendingListAction}
+                        />
+                    ) : view === 'recycle' ? (
+                        <RecycleView
+                            onRefreshAccounts={() => loadAccounts()}
+                            onNotify={showNotification}
+                            onNavigateList={() => navigateToView('list')}
+                        />
+                    ) : (
+                        <ImportView onImport={handleImport} onCancel={() => navigateToView('list')} importing={importing} />
+                    )}
+                </main>
+            </div>
 
             {/* Notification Toast */}
             {notification && (
