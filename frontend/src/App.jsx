@@ -10,7 +10,6 @@ import AccountListView from './components/AccountListView';
 import ImportView from './components/ImportView';
 import RecycleView from './components/RecycleView';
 import RenewalsView from './components/RenewalsView';
-import VaultView from './components/VaultView';
 import CardsView from './components/CardsView';
 import DomainsView from './components/DomainsView';
 import AiSubscriptionsView from './components/AiSubscriptionsView';
@@ -29,7 +28,13 @@ import useAppUpdater from './hooks/useAppUpdater';
 import useBrowserStatus from './hooks/useBrowserStatus';
 import { normalizePhoneNumber } from './utils/phoneUtils';
 import { normalizeSmsUrlInput } from './utils/smsUtils';
-import { normalizeMultiValueValue, splitGroupNameValues } from './utils/multiValueField';
+import {
+    joinMultiValueLines,
+    normalizeMultiValueValue,
+    splitDelimitedGroupNames,
+    splitGroupNameValues,
+    UNCATEGORIZED_FILTER_KEY,
+} from './utils/multiValueField';
 import { DEFAULT_USD_CNY_RATE } from './utils/renewalUtils';
 
 const isTypingTarget = (target) => {
@@ -60,6 +65,7 @@ const App = () => {
 
     // Undo state
     const [deletedAccounts, setDeletedAccounts] = useState([]);
+    const [accountCategories, setAccountCategories] = useState([]);
     const [workspaceOverview, setWorkspaceOverview] = useState(null);
     const [fxInfo, setFxInfo] = useState({
         rate: DEFAULT_USD_CNY_RATE,
@@ -73,6 +79,10 @@ const App = () => {
     const [terminalMounted, setTerminalMounted] = useState(false);
     const [pendingTerminalTarget, setPendingTerminalTarget] = useState(null);
     const terminalTargetSeqRef = useRef(0);
+    const [agentSettingsVersion, setAgentSettingsVersion] = useState(0);
+    const [agentReloadVersion, setAgentReloadVersion] = useState(0);
+    const activeSearchRef = useRef(debouncedSearch);
+    activeSearchRef.current = debouncedSearch;
 
     const refreshOverview = useCallback(async () => {
         if (typeof api?.getWorkspaceOverview !== 'function') return;
@@ -83,6 +93,18 @@ const App = () => {
             }
         } catch {
             // 测试 mock 未提供扩展接口时静默跳过
+        }
+    }, []);
+
+    const refreshAccountCategories = useCallback(async () => {
+        if (typeof api?.getAccountCategories !== 'function') return;
+        try {
+            const res = await api.getAccountCategories();
+            if (res?.success && Array.isArray(res.data)) {
+                setAccountCategories(res.data);
+            }
+        } catch {
+            // 测试 mock 未提供分类接口时静默跳过
         }
     }, []);
 
@@ -140,6 +162,16 @@ const App = () => {
         document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
     }, [darkMode]);
 
+    const handleToggleDarkMode = useCallback(() => {
+        setDarkMode(prev => {
+            const next = !prev;
+            if (typeof document !== 'undefined') {
+                document.documentElement.dataset.theme = next ? 'dark' : 'light';
+            }
+            return next;
+        });
+    }, []);
+
     useEffect(() => {
         return () => {
             if (notificationTimerRef.current) {
@@ -168,7 +200,8 @@ const App = () => {
 
     useEffect(() => {
         refreshFxRate(false);
-    }, [refreshFxRate]);
+        refreshAccountCategories();
+    }, [refreshFxRate, refreshAccountCategories]);
 
     useEffect(() => {
         if (view === 'ai' && typeof api?.getPaymentCards === 'function') {
@@ -186,7 +219,21 @@ const App = () => {
         }
     }, [view]);
 
-    const loadAccounts = async (searchValue = search) => {
+    // --- Helpers ---
+    const showNotification = useCallback((msg, type = 'success') => {
+        setNotification({ msg, type, id: Date.now() });
+
+        if (notificationTimerRef.current) {
+            clearTimeout(notificationTimerRef.current);
+        }
+
+        notificationTimerRef.current = setTimeout(() => {
+            setNotification(null);
+            notificationTimerRef.current = null;
+        }, 5000);
+    }, []);
+
+    const loadAccounts = useCallback(async (searchValue = activeSearchRef.current) => {
         const requestId = ++latestLoadRequestIdRef.current;
         try {
             setLoading(true);
@@ -201,7 +248,7 @@ const App = () => {
             if (requestId !== latestLoadRequestIdRef.current) return;
             setLoading(false);
         }
-    };
+    }, [showNotification]);
 
     // 首页轮询运行中的浏览器，支撑「活跃浏览器」卡片与统计
     const { browserStatuses: homeBrowserStatuses, refresh: refreshHomeBrowserStatus } = useBrowserStatus({
@@ -210,25 +257,35 @@ const App = () => {
         enabled: view === 'home',
     });
 
-    // 获取所有唯一的标签
+    const knownCategoryNames = useMemo(
+        () => accountCategories.map(cat => cat.name).filter(Boolean),
+        [accountCategories],
+    );
+
+    // 获取所有唯一分类与标签（自定义分类按排序置前，账号中已有的自由标签按忽略大小写去重跟在后面）
     const allGroups = useMemo(() => {
-        const groups = accounts.flatMap(acc => splitGroupNameValues(acc.groupName));
-        return [...new Set(groups)].sort((left, right) => left.localeCompare(right, 'zh-CN', { sensitivity: 'base' }));
-    }, [accounts]);
-
-    // --- Helpers ---
-    const showNotification = useCallback((msg, type = 'success') => {
-        setNotification({ msg, type, id: Date.now() });
-
-        if (notificationTimerRef.current) {
-            clearTimeout(notificationTimerRef.current);
+        const ordered = [];
+        const seenLower = new Set();
+        for (const name of knownCategoryNames) {
+            const lower = name.toLowerCase();
+            if (!seenLower.has(lower)) {
+                seenLower.add(lower);
+                ordered.push(name);
+            }
         }
-
-        notificationTimerRef.current = setTimeout(() => {
-            setNotification(null);
-            notificationTimerRef.current = null;
-        }, 5000);
-    }, []);
+        const extra = [];
+        for (const acc of accounts) {
+            for (const tag of splitGroupNameValues(acc.groupName, knownCategoryNames)) {
+                const lower = tag.toLowerCase();
+                if (!seenLower.has(lower)) {
+                    seenLower.add(lower);
+                    extra.push(tag);
+                }
+            }
+        }
+        extra.sort((left, right) => left.localeCompare(right, 'zh-CN', { sensitivity: 'base' }));
+        return [...ordered, ...extra];
+    }, [accounts, knownCategoryNames]);
 
     const copyToClipboard = useCallback(async (text, label) => {
         try {
@@ -381,6 +438,49 @@ const App = () => {
         }
     }, [openBrowserSettings, refreshHomeBrowserStatus, showNotification]);
 
+    const handleCreateAccountCategory = useCallback(async (input) => {
+        if (typeof api?.createAccountCategory !== 'function') {
+            return { success: false, message: '当前环境不支持分类管理' };
+        }
+        const res = await api.createAccountCategory(input);
+        if (res?.success && res.data) {
+            await refreshAccountCategories();
+            showNotification(`已添加分类「${res.data.name}」`);
+        }
+        return res;
+    }, [refreshAccountCategories, showNotification]);
+
+    const handleUpdateAccountCategory = useCallback(async (id, input) => {
+        if (typeof api?.updateAccountCategory !== 'function') {
+            return { success: false, message: '当前环境不支持分类管理' };
+        }
+        const prev = accountCategories.find(c => c.id === id);
+        const res = await api.updateAccountCategory(id, input);
+        if (res?.success && res.data) {
+            if (prev && groupFilter && groupFilter.toLowerCase() === prev.name.toLowerCase() && res.data.name !== prev.name) {
+                setGroupFilter(res.data.name);
+            }
+            await Promise.all([refreshAccountCategories(), loadAccounts(activeSearchRef.current)]);
+            showNotification(`已更新分类「${res.data.name}」`);
+        }
+        return res;
+    }, [accountCategories, groupFilter, loadAccounts, refreshAccountCategories, showNotification]);
+
+    const handleDeleteAccountCategory = useCallback(async (id, categoryName) => {
+        if (typeof api?.deleteAccountCategory !== 'function') {
+            return { success: false, message: '当前环境不支持分类管理' };
+        }
+        const res = await api.deleteAccountCategory(id);
+        if (res?.success) {
+            if (categoryName && groupFilter && groupFilter.toLowerCase() === categoryName.toLowerCase()) {
+                setGroupFilter(null);
+            }
+            await Promise.all([refreshAccountCategories(), loadAccounts(activeSearchRef.current)]);
+            showNotification(`已删除分类「${categoryName || ''}」`);
+        }
+        return res;
+    }, [groupFilter, loadAccounts, refreshAccountCategories, showNotification]);
+
     // 撤回删除
     const undoDelete = async () => {
         if (deletedAccounts.length === 0) return;
@@ -454,7 +554,7 @@ const App = () => {
             smsUrl: normalizeSmsUrlInput(formData.get('smsUrl') || ''),
             regYear: formData.get('regYear'),
             country: formData.get('country'),
-            groupName: normalizeMultiValueValue('groupName', formData.get('groupName') ?? editingAccount.groupName ?? ''),
+            groupName: joinMultiValueLines(splitDelimitedGroupNames(formData.get('groupName') ?? editingAccount.groupName ?? '')),
             remark: normalizeMultiValueValue('remark', formData.get('remark') ?? ''),
         };
 
@@ -524,9 +624,11 @@ const App = () => {
                     ? (normalizePhoneNumber(value) || '')
                     : field === 'smsUrl'
                         ? normalizeSmsUrlInput(value)
-                        : (field === 'groupName' || field === 'remark')
-                            ? normalizeMultiValueValue(field, value)
-                            : value;
+                        : field === 'groupName'
+                            ? joinMultiValueLines(splitDelimitedGroupNames(value))
+                            : field === 'remark'
+                                ? normalizeMultiValueValue(field, value)
+                                : value;
 
             const result = await api.updateAccount(id, { [field]: normalizedValue });
             if (result.success) {
@@ -560,9 +662,11 @@ const App = () => {
                     ? (normalizePhoneNumber(value) || '')
                     : field === 'smsUrl'
                         ? normalizeSmsUrlInput(value)
-                        : (field === 'groupName' || field === 'remark')
-                            ? normalizeMultiValueValue(field, value)
-                            : value;
+                        : field === 'groupName'
+                            ? joinMultiValueLines(splitDelimitedGroupNames(value))
+                            : field === 'remark'
+                                ? normalizeMultiValueValue(field, value)
+                                : value;
             }
             if (Object.keys(payload).length === 0) return false;
 
@@ -620,15 +724,18 @@ const App = () => {
         return { successfulIds, failedCount };
     };
 
-    // 账号已由后端筛选搜索，前端额外过滤标签
+    // 账号已由后端筛选搜索，前端额外过滤分类与标签（忽略大小写，与后端 COLLATE NOCASE 一致）
     const filteredAccounts = useMemo(() => {
         if (!groupFilter) return accounts;
-        const filterSet = new Set([groupFilter]);
+        if (groupFilter === UNCATEGORIZED_FILTER_KEY) {
+            return accounts.filter(acc => splitGroupNameValues(acc.groupName, knownCategoryNames).length === 0);
+        }
+        const filterLower = String(groupFilter).toLowerCase();
         return accounts.filter(acc => {
-            const tags = splitGroupNameValues(acc.groupName);
-            return tags.some(tag => filterSet.has(tag));
+            const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
+            return tags.some(tag => tag.toLowerCase() === filterLower);
         });
-    }, [accounts, groupFilter]);
+    }, [accounts, groupFilter, knownCategoryNames]);
 
     return (
         <div className="app-container">
@@ -645,13 +752,14 @@ const App = () => {
                     onNavigate={navigateToView}
                     onOpenBrowserSettings={() => openBrowserSettings()}
                     onOpenSystemSettings={() => setSystemSettingsDialog({ isOpen: true, tab: 'ai' })}
-                    onToggleDarkMode={() => setDarkMode(prev => !prev)}
+                    onToggleDarkMode={handleToggleDarkMode}
                 />
 
                 <main className="main-wrapper">
                     {view === 'home' ? (
                         <HomeView
                             accounts={accounts}
+                            accountCategories={accountCategories}
                             browserStatuses={homeBrowserStatuses}
                             overview={workspaceOverview}
                             fxInfo={fxInfo}
@@ -671,13 +779,6 @@ const App = () => {
                             onRefreshFxRate={refreshFxRate}
                             onNotify={showNotification}
                             onNavigate={navigateToView}
-                            onOverviewChanged={refreshOverview}
-                        />
-                    ) : view === 'vault' ? (
-                        <VaultView
-                            googleAccounts={accounts}
-                            onNotify={showNotification}
-                            onCopy={copyToClipboard}
                             onOverviewChanged={refreshOverview}
                         />
                     ) : view === 'cards' ? (
@@ -723,10 +824,17 @@ const App = () => {
                             onNotify={showNotification}
                             onOpenSystemSettings={(tab = 'ai') => setSystemSettingsDialog({ isOpen: true, tab })}
                             onOverviewChanged={refreshOverview}
+                            settingsVersion={agentSettingsVersion}
+                            reloadVersion={agentReloadVersion}
                         />
                     ) : view === 'terminal' ? null : view === 'list' ? (
                         <AccountListView
                             accounts={filteredAccounts}
+                            allAccounts={accounts}
+                            accountCategories={accountCategories}
+                            onCreateCategory={handleCreateAccountCategory}
+                            onUpdateCategory={handleUpdateAccountCategory}
+                            onDeleteCategory={handleDeleteAccountCategory}
                             search={search}
                             setSearch={setSearch}
                             groupFilter={groupFilter}
@@ -748,12 +856,19 @@ const App = () => {
                         />
                     ) : view === 'recycle' ? (
                         <RecycleView
+                            accountCategories={accountCategories}
                             onRefreshAccounts={() => loadAccounts()}
                             onNotify={showNotification}
                             onNavigateList={() => navigateToView('list')}
                         />
                     ) : view === 'import' ? (
-                        <ImportView onImport={handleImport} onCancel={() => navigateToView('list')} importing={importing} />
+                        <ImportView
+                            onImport={handleImport}
+                            onCancel={() => navigateToView('list')}
+                            importing={importing}
+                            accountCategories={accountCategories}
+                            onCreateCategory={handleCreateAccountCategory}
+                        />
                     ) : (
                         <div className="max-w-3xl mx-auto gm-card p-8 text-center space-y-2 gm-view-enter">
                             <h2 className="gm-title">模块建设中</h2>
@@ -806,6 +921,8 @@ const App = () => {
             {/* Edit Modal */}
             <EditModal
                 account={editingAccount}
+                accountCategories={accountCategories}
+                onCreateCategory={handleCreateAccountCategory}
                 onClose={() => setEditingAccount(null)}
                 onSubmit={handleUpdate}
             />
@@ -824,9 +941,12 @@ const App = () => {
                 initialTab={systemSettingsDialog.tab}
                 onClose={() => setSystemSettingsDialog(prev => ({ ...prev, isOpen: false }))}
                 onNotify={showNotification}
+                onAgentSettingsSaved={() => setAgentSettingsVersion(v => v + 1)}
                 onBackupRestored={() => {
                     loadAccounts('');
                     refreshOverview();
+                    refreshAccountCategories();
+                    setAgentReloadVersion(v => v + 1);
                 }}
             />
 

@@ -6,7 +6,6 @@ import {
     RefreshCw,
     CalendarClock,
     Bell,
-    KeyRound,
     Sparkles,
     CreditCard,
     Server,
@@ -67,6 +66,7 @@ const DAYS_BADGE_STYLE = {
  */
 const HomeView = ({
     accounts = [],
+    accountCategories = [],
     browserStatuses = {},
     overview = null,
     fxInfo = null,
@@ -82,6 +82,11 @@ const HomeView = ({
 }) => {
     const [now, setNow] = useState(() => new Date());
     const [mascotHover, setMascotHover] = useState(false);
+
+    const knownCategoryNames = useMemo(
+        () => accountCategories.map(cat => cat?.name).filter(Boolean),
+        [accountCategories],
+    );
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -132,6 +137,7 @@ const HomeView = ({
 
     const upcomingRenewals = overview?.upcomingRenewals || [];
     const dueReminders = overview?.dueReminders || [];
+    const pendingRemindersCount = overview?.pendingRemindersCount ?? 0;
     const serversTotal = overview?.serversCount ?? 0;
     const serversOnline = overview?.serversOnlineCount ?? 0;
 
@@ -147,13 +153,13 @@ const HomeView = ({
                 onClick: () => (onNavigateList ? onNavigateList() : onNavigate?.('list')),
             },
             {
-                id: 'vault',
-                label: '账号与密钥',
-                icon: KeyRound,
-                value: String(overview?.vaultItemsCount ?? 0),
-                sub: '密码与 2FA 凭证',
-                led: 'is-primary',
-                onClick: () => onNavigate?.('vault'),
+                id: 'renewals',
+                label: '费用与续费',
+                icon: CalendarClock,
+                value: String(upcomingRenewals.length + pendingRemindersCount),
+                sub: `到期 ${upcomingRenewals.length} · 备忘 ${pendingRemindersCount}`,
+                led: upcomingRenewals.length > 0 ? 'is-warning' : 'is-primary',
+                onClick: () => onNavigate?.('renewals'),
             },
             {
                 id: 'ai',
@@ -215,7 +221,8 @@ const HomeView = ({
             stats.pro,
             stats.sms,
             stats.runningCount,
-            overview?.vaultItemsCount,
+            upcomingRenewals.length,
+            pendingRemindersCount,
             overview?.aiSubscriptionsCount,
             overview?.paymentCardsCount,
             overview?.domainsCount,
@@ -591,7 +598,7 @@ const HomeView = ({
                         {recentAccounts.length > 0 ? (
                             <div className="gm-home-list">
                                 {recentAccounts.map(acc => {
-                                    const tags = splitGroupNameValues(acc.groupName);
+                                    const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
                                     const badgeText = tags[0] || (acc.status === 'pro' ? 'Pro' : '普通');
                                     const timeText = formatDbTimestamp(acc.updatedAt || acc.createdAt);
                                     const isPro = acc.status === 'pro';

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
-import { isMultilineField, splitMultiValueLines } from '../utils/multiValueField';
+import { isMultilineField, splitMultiValueLines, getCategoryColorMeta } from '../utils/multiValueField';
 import { describeSmsUrl } from '../utils/smsUtils';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import SmsCodeCell from './SmsCodeCell';
@@ -115,6 +115,9 @@ const AccountTable = ({
     browserStatuses,
     openingBrowserIds,
     onOpenBrowser,
+    // 自定义分类配色与名称列表
+    categoryColorMap = {},
+    knownCategoryNames = [],
 }) => {
     const selectAllCheckboxRef = useRef(null);
     const [flashedCellKey, setFlashedCellKey] = useState(null);
@@ -350,7 +353,7 @@ const AccountTable = ({
 
     const renderGroupNameCell = (acc) => {
         const isEditing = editingCell?.accountId === acc.id && editingCell?.field === 'groupName';
-        const tags = splitMultiValueLines('groupName', acc.groupName);
+        const tags = splitMultiValueLines('groupName', acc.groupName, knownCategoryNames);
 
         return isEditing ? (
             renderEditingInput('groupName', '每行一个标签，支持逗号或换行粘贴')
@@ -359,6 +362,8 @@ const AccountTable = ({
                 {tags.length > 0 ? (
                     tags.map((tag, i) => {
                         const cellKey = `${acc.id}-tag-${i}`;
+                        const catColor = categoryColorMap?.[tag];
+                        const colorMeta = catColor ? getCategoryColorMeta(catColor) : null;
                         return (
                             <button
                                 key={`${acc.id}-tag-${i}-${tag}`}
@@ -366,10 +371,21 @@ const AccountTable = ({
                                 onClick={() => handleCopyCell(cellKey, tag, '标签')}
                                 onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'groupName', acc.groupName)}
                                 onMouseDown={(e) => e.stopPropagation()}
-                                className={`gm-tag-pill truncate max-w-full ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''}`}
-                                title={`单击复制该标签，双击编辑全部标签：${tag}`}
+                                className={`gm-tag-pill truncate max-w-full inline-flex items-center gap-1.5 ${flashedCellKey === cellKey ? 'gm-copy-flash' : ''}`}
+                                style={colorMeta ? {
+                                    borderColor: colorMeta.border,
+                                    background: colorMeta.bg,
+                                } : undefined}
+                                title={`单击复制该分类/标签，双击编辑：${tag}`}
                             >
-                                {tag}
+                                {colorMeta && (
+                                    <span
+                                        className="w-1.5 h-1.5 rounded-[1px] shrink-0"
+                                        style={{ background: colorMeta.dot }}
+                                        aria-hidden="true"
+                                    />
+                                )}
+                                <span className="truncate">{tag}</span>
                             </button>
                         );
                     })

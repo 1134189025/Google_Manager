@@ -3,6 +3,7 @@ import { UserPlus, FileText, Plus, Loader2 } from 'lucide-react';
 import { parseImportText } from '../utils/importParser';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
 import { describeSmsUrl, extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
+import { appendUniqueLine } from '../utils/multiValueField';
 import { renderInBody } from '../utils/portal';
 import { PixelMascot, PixelLoader } from './PixelArt';
 
@@ -48,13 +49,23 @@ demo@gmail.com----Pass@123----+8613812345678----2022----China----https://2fa.liv
 /**
  * 导入视图组件（分组双列工作台 + 实体感通行证预览卡）
  */
-const ImportView = ({ onImport, onCancel, importing = false }) => {
+const ImportView = ({
+    onImport,
+    onCancel,
+    importing = false,
+    accountCategories = [],
+    onCreateCategory,
+}) => {
     const [importMode, setImportMode] = useState('single');
     const [text, setText] = useState('');
     const [preview, setPreview] = useState([]);
     const [detectedFormats, setDetectedFormats] = useState([]);
     const [showFormatConfirm, setShowFormatConfirm] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
+    const [batchCategory, setBatchCategory] = useState('');
+    const [quickCatName, setQuickCatName] = useState('');
+    const [quickCatError, setQuickCatError] = useState('');
+    const [addingQuickCat, setAddingQuickCat] = useState(false);
 
     const [singleForm, setSingleForm] = useState({
         email: '',
@@ -129,9 +140,45 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
             sms_url: smsUrl,
             reg_year: singleForm.reg_year.trim(),
             country: singleForm.country.trim(),
-            group_name: '',
+            group_name: singleForm.group_name.trim(),
             remark: '',
         }]);
+    };
+
+    const handleQuickAddImportCategory = async (targetMode) => {
+        const trimmed = quickCatName.trim();
+        if (!trimmed || addingQuickCat || typeof onCreateCategory !== 'function') return;
+        setQuickCatError('');
+        setAddingQuickCat(true);
+        try {
+            const res = await onCreateCategory({ name: trimmed, color: 'blue' });
+            if (res?.success && res.data?.name) {
+                if (targetMode === 'single') {
+                    setSingleForm(prev => ({ ...prev, group_name: res.data.name }));
+                } else {
+                    setBatchCategory(res.data.name);
+                }
+                setQuickCatName('');
+            } else {
+                setQuickCatError(res?.message || '添加分类失败');
+            }
+        } finally {
+            setAddingQuickCat(false);
+        }
+    };
+
+    const handleBatchImport = () => {
+        if (importing || isParsing) return;
+        const cat = batchCategory.trim();
+        if (!cat) {
+            onImport(preview);
+            return;
+        }
+        const knownNames = accountCategories.map(c => c.name);
+        onImport(preview.map(item => ({
+            ...item,
+            group_name: appendUniqueLine('groupName', item.group_name || '', cat, [...knownNames, cat]),
+        })));
     };
 
     const isSingleFormValid = Boolean(singleForm.email.trim() && singleForm.password.trim());
@@ -269,7 +316,10 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                         <button
                             key={key}
                             disabled={importing}
-                            onClick={() => setImportMode(key)}
+                            onClick={() => {
+                                setImportMode(key);
+                                if (quickCatError) setQuickCatError('');
+                            }}
                             className={`gm-seg-item flex items-center gap-1.5 ${importMode === key ? 'active' : ''} ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                             {icon}
@@ -323,6 +373,64 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                                 {renderSingleFormField('注册年份', 'reg_year', 'text', '2021', false)}
                                 {renderSingleFormField('国家', 'country', 'text', 'China / Japan / USA', false)}
                             </div>
+                            {(accountCategories.length > 0 || typeof onCreateCategory === 'function') && (
+                                <div className="mt-3.5 space-y-2">
+                                    <label className="gm-field-label">
+                                        <span>归属分类</span>
+                                        <span className="gm-field-opt">(可选)</span>
+                                    </label>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <select
+                                            aria-label="归属分类"
+                                            value={singleForm.group_name}
+                                            onChange={(e) => handleSingleFormChange('group_name', e.target.value)}
+                                            disabled={importing}
+                                            className="gm-input flex-1 min-w-[160px]"
+                                        >
+                                            <option value="">不指定分类</option>
+                                            {accountCategories.map(cat => (
+                                                <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                            ))}
+                                        </select>
+                                        {typeof onCreateCategory === 'function' && (
+                                            <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+                                                <input
+                                                    type="text"
+                                                    maxLength={40}
+                                                    value={quickCatName}
+                                                    onChange={(e) => {
+                                                        setQuickCatName(e.target.value);
+                                                        if (quickCatError) setQuickCatError('');
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            handleQuickAddImportCategory('single');
+                                                        }
+                                                    }}
+                                                    placeholder="新建自定义分类名..."
+                                                    className="gm-input flex-1"
+                                                    disabled={importing || addingQuickCat}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleQuickAddImportCategory('single')}
+                                                    disabled={importing || addingQuickCat || !quickCatName.trim()}
+                                                    className="gm-btn gm-btn-secondary shrink-0"
+                                                >
+                                                    <Plus size={13} />
+                                                    <span>添加分类</span>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {quickCatError && (
+                                        <p role="alert" className="text-xs" style={{ color: 'var(--danger)' }}>
+                                            {quickCatError}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* 精简行格式参考条 */}
@@ -441,6 +549,64 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                             />
                         </div>
 
+                        {(accountCategories.length > 0 || typeof onCreateCategory === 'function') && (
+                            <div className="gm-format-strip space-y-2">
+                                <label className="text-[11.5px] font-medium gm-text-2 block">
+                                    批量归属分类（可选，导入后统一归入该分类）
+                                </label>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <select
+                                        aria-label="批量归属分类"
+                                        value={batchCategory}
+                                        onChange={(e) => setBatchCategory(e.target.value)}
+                                        disabled={importing}
+                                        className="gm-input flex-1 min-w-[160px]"
+                                    >
+                                        <option value="">不指定分类</option>
+                                        {accountCategories.map(cat => (
+                                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                        ))}
+                                    </select>
+                                    {typeof onCreateCategory === 'function' && (
+                                        <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+                                            <input
+                                                type="text"
+                                                maxLength={40}
+                                                value={quickCatName}
+                                                onChange={(e) => {
+                                                    setQuickCatName(e.target.value);
+                                                    if (quickCatError) setQuickCatError('');
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        handleQuickAddImportCategory('batch');
+                                                    }
+                                                }}
+                                                placeholder="新建自定义分类名..."
+                                                className="gm-input flex-1"
+                                                disabled={importing || addingQuickCat}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleQuickAddImportCategory('batch')}
+                                                disabled={importing || addingQuickCat || !quickCatName.trim()}
+                                                className="gm-btn gm-btn-secondary shrink-0"
+                                            >
+                                                <Plus size={13} />
+                                                <span>添加分类</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                {quickCatError && (
+                                    <p role="alert" className="text-xs" style={{ color: 'var(--danger)' }}>
+                                        {quickCatError}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div className="flex items-center gap-3 pt-1">
                             <button
                                 onClick={onCancel}
@@ -451,9 +617,7 @@ const ImportView = ({ onImport, onCancel, importing = false }) => {
                             </button>
                             <button
                                 disabled={preview.length === 0 || importing || isParsing}
-                                onClick={() => {
-                                    if (!importing && !isParsing) onImport(preview);
-                                }}
+                                onClick={handleBatchImport}
                                 className="gm-btn gm-btn-primary flex-1 font-semibold"
                             >
                                 {importing ? (

@@ -1,5 +1,6 @@
 use crate::agent::{
-    self, AgentConnectionTestResult, AgentMessageItem, AgentSettingsInput, AgentSettingsView,
+    self, AgentCompactionResult, AgentConnectionTestResult, AgentContextStatus, AgentMemorySnapshot,
+    AgentMessageItem, AgentModelListResult, AgentSettingsInput, AgentSettingsView,
     AgentStreamManager,
 };
 use crate::ai_quota::{
@@ -7,11 +8,10 @@ use crate::ai_quota::{
     OAuthStartInfo, OAuthStatusInfo,
 };
 use crate::assets_db::{
-    self, AiSubscription, AiSubscriptionInput, AppMonitorSettings, CloudflareConnectionInput,
-    CloudflareConnectionView, DomainInput, DomainItem, PaymentCard, PaymentCardInput, Reminder,
-    ReminderInput, RenewalsSummary, ServerInput, ServerItem, ServerProbeUpdate,
-    VaultBatchImportResult, VaultFolder, VaultFolderInput, VaultItem, VaultItemInput,
-    WorkspaceOverview,
+    self, AccountCategory, AccountCategoryInput, AiSubscription, AiSubscriptionInput,
+    AppMonitorSettings, CloudflareConnectionInput, CloudflareConnectionView, DomainInput,
+    DomainItem, PaymentCard, PaymentCardInput, Reminder, ReminderInput, RenewalsSummary,
+    ServerInput, ServerItem, ServerProbeUpdate, WorkspaceOverview,
 };
 use crate::cloudflare::{CloudflareDnsRecord, CloudflareZone, DnsRecordInput};
 use crate::database::Database;
@@ -202,79 +202,6 @@ fn open_external_url_os(url: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("打开系统浏览器失败: {}", e))
-}
-
-// ─── 账号与密钥库命令 ──────────────────────────────────────────────
-
-#[tauri::command]
-pub fn get_vault_folders(db: State<Database>) -> Result<Vec<VaultFolder>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::query_vault_folders(&conn)
-}
-
-#[tauri::command]
-pub fn create_vault_folder(
-    db: State<Database>,
-    folder: VaultFolderInput,
-) -> Result<VaultFolder, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::create_vault_folder(&conn, &folder)
-}
-
-#[tauri::command]
-pub fn update_vault_folder(
-    db: State<Database>,
-    id: i64,
-    folder: VaultFolderInput,
-) -> Result<VaultFolder, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::update_vault_folder(&conn, id, &folder)
-}
-
-#[tauri::command]
-pub fn delete_vault_folder(db: State<Database>, id: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::delete_vault_folder(&conn, id)
-}
-
-#[tauri::command]
-pub fn get_vault_items(
-    db: State<Database>,
-    search: Option<String>,
-) -> Result<Vec<VaultItem>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::query_vault_items(&conn, search.as_deref())
-}
-
-#[tauri::command]
-pub fn create_vault_item(db: State<Database>, item: VaultItemInput) -> Result<VaultItem, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::create_vault_item(&conn, &item)
-}
-
-#[tauri::command]
-pub fn update_vault_item(
-    db: State<Database>,
-    id: i64,
-    item: VaultItemInput,
-) -> Result<VaultItem, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::update_vault_item(&conn, id, &item)
-}
-
-#[tauri::command]
-pub fn delete_vault_item(db: State<Database>, id: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::delete_vault_item(&conn, id)
-}
-
-#[tauri::command]
-pub fn batch_import_vault_items(
-    db: State<Database>,
-    items: Vec<VaultItemInput>,
-) -> Result<VaultBatchImportResult, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    assets_db::batch_import_vault_items(&conn, &items)
 }
 
 // ─── U 卡与支付卡命令 ──────────────────────────────────────────────
@@ -853,6 +780,54 @@ pub fn save_agent_settings(
     agent::save_agent_settings(&conn, &settings)
 }
 
+fn urls_share_origin(a: &str, b: &str) -> bool {
+    let Ok(ua) = url::Url::parse(a.trim()) else {
+        return false;
+    };
+    let Ok(ub) = url::Url::parse(b.trim()) else {
+        return false;
+    };
+    ua.origin().is_tuple() && ua.origin() == ub.origin()
+}
+
+/// 解析测试连接 / 拉取模型时最终使用的 API Key：
+/// - 入参为 `Some(raw)`（含前端勾选「清除密钥」时显式传入的 `Some("")`）时直接使用，绝不回退已保存密钥；
+/// - 入参为 `None` 时，仅当目标 URL 与已保存 URL 同源（scheme + host + port 一致）才回退复用 `saved_key`。
+fn resolve_effective_agent_api_key(
+    effective_url: &str,
+    saved_url: &str,
+    api_key: Option<&str>,
+    saved_key: &str,
+) -> String {
+    match api_key {
+        Some(raw) => raw.trim().to_string(),
+        None => {
+            if urls_share_origin(effective_url, saved_url) {
+                saved_key.trim().to_string()
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
+struct StreamRegistrationGuard<'a> {
+    streams: &'a AgentStreamManager,
+    stream_id: String,
+}
+
+impl<'a> StreamRegistrationGuard<'a> {
+    fn new(streams: &'a AgentStreamManager, stream_id: String) -> Self {
+        Self { streams, stream_id }
+    }
+}
+
+impl Drop for StreamRegistrationGuard<'_> {
+    fn drop(&mut self) {
+        self.streams.remove(&self.stream_id);
+    }
+}
+
 #[tauri::command]
 pub async fn test_agent_connection(
     db: State<'_, Database>,
@@ -868,6 +843,7 @@ pub async fn test_agent_connection(
             .unwrap_or_default();
         let saved_model = crate::database::get_setting(&conn, agent::SETTING_AGENT_MODEL)?
             .unwrap_or_default();
+        let settings = agent::get_agent_settings(&conn)?;
 
         let effective_url = base_url
             .as_deref()
@@ -884,21 +860,143 @@ pub async fn test_agent_connection(
         if effective_model.is_empty() {
             return Err("请填写要测试的模型名称".to_string());
         }
-        let effective_key = api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(saved_key.trim())
-            .to_string();
+        let effective_key = resolve_effective_agent_api_key(
+            &normalized_url,
+            &saved_url,
+            api_key.as_deref(),
+            &saved_key,
+        );
 
         agent::LoadedAgentConfig {
             base_url: normalized_url,
             api_key: effective_key,
             model: effective_model,
             max_tokens: 16,
+            context_window: settings.context_window,
+            temperature: 0.2,
+            auto_compact: settings.auto_compact,
+            reserve_tokens: settings.reserve_tokens,
+            keep_recent_tokens: settings.keep_recent_tokens,
+            memory_enabled: settings.memory_enabled,
+            custom_system_prompt: String::new(),
         }
     };
     agent::test_agent_connection(&cfg).await
+}
+
+#[tauri::command]
+pub async fn fetch_agent_models(
+    db: State<'_, Database>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+) -> Result<AgentModelListResult, String> {
+    let (effective_url, effective_key) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let saved_url = crate::database::get_setting(&conn, agent::SETTING_AGENT_BASE_URL)?
+            .unwrap_or_default();
+        let saved_key = crate::database::get_setting(&conn, agent::SETTING_AGENT_API_KEY)?
+            .unwrap_or_default();
+        let raw_url = base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(saved_url.trim());
+        let normalized_url = agent::validate_agent_base_url(raw_url)?;
+        let key = resolve_effective_agent_api_key(
+            &normalized_url,
+            &saved_url,
+            api_key.as_deref(),
+            &saved_key,
+        );
+        (normalized_url, key)
+    };
+    agent::fetch_agent_models(&effective_url, &effective_key).await
+}
+
+#[tauri::command]
+pub fn get_agent_context_status(db: State<Database>) -> Result<AgentContextStatus, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let settings = agent::get_agent_settings(&conn)?;
+    agent::compute_agent_context_status(&conn, &settings)
+}
+
+#[tauri::command]
+pub async fn compact_agent_context(
+    db: State<'_, Database>,
+    instructions: Option<String>,
+) -> Result<AgentCompactionResult, String> {
+    let cfg = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        agent::load_agent_config(&conn)?
+    };
+    agent::compact_agent_context(&db, &cfg, instructions.as_deref(), true, None).await
+}
+
+#[tauri::command]
+pub fn get_agent_memory(db: State<Database>) -> Result<AgentMemorySnapshot, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let dir = agent::agent_memory_dir();
+    agent::get_agent_memory_snapshot(&conn, &dir)
+}
+
+#[tauri::command]
+pub fn add_agent_memory_entry(
+    db: State<Database>,
+    target: String,
+    content: String,
+) -> Result<AgentMemorySnapshot, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    agent::add_memory_entry(&conn, &target, &content)?;
+    let dir = agent::agent_memory_dir();
+    agent::sync_memory_files_to_dir(&conn, &dir)?;
+    agent::get_agent_memory_snapshot(&conn, &dir)
+}
+
+#[tauri::command]
+pub fn update_agent_memory_entry(
+    db: State<Database>,
+    id: i64,
+    content: String,
+) -> Result<AgentMemorySnapshot, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    agent::update_memory_entry(&conn, id, &content)?;
+    let dir = agent::agent_memory_dir();
+    agent::sync_memory_files_to_dir(&conn, &dir)?;
+    agent::get_agent_memory_snapshot(&conn, &dir)
+}
+
+#[tauri::command]
+pub fn delete_agent_memory_entry(
+    db: State<Database>,
+    id: i64,
+) -> Result<AgentMemorySnapshot, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    agent::delete_memory_entry(&conn, id)?;
+    let dir = agent::agent_memory_dir();
+    agent::sync_memory_files_to_dir(&conn, &dir)?;
+    agent::get_agent_memory_snapshot(&conn, &dir)
+}
+
+#[tauri::command]
+pub fn clear_agent_memory(
+    db: State<Database>,
+    target: Option<String>,
+) -> Result<AgentMemorySnapshot, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    agent::clear_memory_entries(&conn, target.as_deref())?;
+    let dir = agent::agent_memory_dir();
+    agent::sync_memory_files_to_dir(&conn, &dir)?;
+    agent::get_agent_memory_snapshot(&conn, &dir)
+}
+
+#[tauri::command]
+pub fn open_agent_memory_dir(db: State<Database>) -> Result<(), String> {
+    let dir = agent::agent_memory_dir();
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        agent::sync_memory_files_to_dir(&conn, &dir)?;
+    }
+    crate::browser::open_in_file_manager(&dir)
 }
 
 #[tauri::command]
@@ -926,16 +1024,73 @@ pub async fn send_agent_message(
     if trimmed.is_empty() || trimmed.chars().count() > 32000 {
         return Err("提问内容不能为空且不能超过 32000 个字符".to_string());
     }
-    let (cfg, history, user_msg) = {
+
+    let (cfg, pre_status) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         let cfg = agent::load_agent_config(&conn)?;
-        let history = agent::recent_history_messages(&conn)?;
-        let user_msg = agent::insert_agent_message(&conn, "user", &trimmed, &[])?;
-        (cfg, history, user_msg)
+        let settings = agent::get_agent_settings(&conn)?;
+        let status = agent::compute_agent_context_status(&conn, &settings)?;
+        (cfg, status)
     };
 
     let stream_id = uuid::Uuid::new_v4().to_string();
     let cancel_flag = streams.register(&stream_id);
+    let _stream_guard = StreamRegistrationGuard::new(&streams, stream_id.clone());
+
+    // Pi-Agent 自动上下文压缩检查：estimated_tokens + 本次提问 > context_window - reserve_tokens
+    let incoming_tokens = agent::estimate_text_tokens(&trimmed) + 8;
+    if cfg.auto_compact
+        && pre_status.active_message_count >= 2
+        && pre_status.estimated_tokens.saturating_add(incoming_tokens) > pre_status.threshold_tokens
+    {
+        let _ = app.emit(
+            "agent-stream",
+            serde_json::json!({
+                "stream_id": stream_id,
+                "type": "compacting",
+                "reason": "auto",
+                "tokens_before": pre_status.estimated_tokens,
+            }),
+        );
+        match agent::compact_agent_context(&db, &cfg, None, false, Some(&cancel_flag)).await {
+            Ok(compacted) => {
+                let _ = app.emit(
+                    "agent-stream",
+                    serde_json::json!({
+                        "stream_id": stream_id,
+                        "type": "compacted",
+                        "compaction": compacted.compaction,
+                        "status": compacted.status,
+                    }),
+                );
+            }
+            Err(err) => {
+                log::warn!("自动上下文压缩跳过: {}", err);
+            }
+        }
+    }
+
+    // 若用户在自动压缩期间点击停止生成，不再写入用户消息或空助手回复，直接结束本轮
+    if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
+        let _ = app.emit(
+            "agent-stream",
+            serde_json::json!({
+                "stream_id": stream_id,
+                "type": "done",
+                "cancelled": true,
+            }),
+        );
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        return agent::query_agent_messages(&conn);
+    }
+
+    let (compaction_summary, history, user_msg) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let (latest_comp, history) = agent::active_history_messages(&conn)?;
+        let user_msg = agent::insert_agent_message(&conn, "user", &trimmed, &[])?;
+        (latest_comp.map(|c| c.summary), history, user_msg)
+    };
+
     let _ = app.emit(
         "agent-stream",
         serde_json::json!({
@@ -949,13 +1104,14 @@ pub async fn send_agent_message(
         Some(&app),
         &db,
         cfg,
+        compaction_summary,
         history,
         &trimmed,
         &stream_id,
         &cancel_flag,
     )
     .await;
-    streams.remove(&stream_id);
+    drop(_stream_guard);
 
     if let Err(err) = turn_res {
         let _ = app.emit(
@@ -1044,4 +1200,97 @@ pub fn handle_window_close(
         tray::quit_app(&app);
     }
     Ok(())
+}
+
+// ─── 谷歌账号自定义分类 ──────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_account_categories(db: State<Database>) -> Result<Vec<AccountCategory>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    assets_db::query_account_categories(&conn)
+}
+
+#[tauri::command]
+pub fn create_account_category(
+    db: State<Database>,
+    category: AccountCategoryInput,
+) -> Result<AccountCategory, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    assets_db::create_account_category(&conn, &category)
+}
+
+#[tauri::command]
+pub fn update_account_category(
+    db: State<Database>,
+    id: i64,
+    category: AccountCategoryInput,
+) -> Result<AccountCategory, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    assets_db::update_account_category(&conn, id, &category)
+}
+
+#[tauri::command]
+pub fn delete_account_category(db: State<Database>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    assets_db::delete_account_category(&conn, id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_effective_agent_api_key_prevents_cross_origin_and_clear_leak() {
+        let saved_url = "https://api.openai.com/v1";
+        let saved_key = "sk-saved-openai-secret-123456";
+
+        // 同源且未传 api_key (None)：允许复用已保存密钥（兼容默认端口与路径变化）
+        assert_eq!(
+            resolve_effective_agent_api_key("https://api.openai.com/v1", saved_url, None, saved_key),
+            saved_key
+        );
+        assert_eq!(
+            resolve_effective_agent_api_key("https://api.openai.com:443/v2", saved_url, None, saved_key),
+            saved_key
+        );
+
+        // 同源但前端显式传 Some("") / 空白（勾选清除密钥）：绝不回退旧密钥
+        assert_eq!(
+            resolve_effective_agent_api_key("https://api.openai.com/v1", saved_url, Some(""), saved_key),
+            ""
+        );
+        assert_eq!(
+            resolve_effective_agent_api_key("https://api.openai.com/v1", saved_url, Some("   "), saved_key),
+            ""
+        );
+
+        // 跨源（不同域名、不同端口或不同协议）且未传 api_key (None)：绝不泄露旧密钥
+        assert_eq!(
+            resolve_effective_agent_api_key("https://other-gateway.example/v1", saved_url, None, saved_key),
+            ""
+        );
+        assert_eq!(
+            resolve_effective_agent_api_key("http://127.0.0.1:11434/v1", saved_url, None, saved_key),
+            ""
+        );
+        assert_eq!(
+            resolve_effective_agent_api_key("https://api.openai.com:8443/v1", saved_url, None, saved_key),
+            ""
+        );
+        assert_eq!(
+            resolve_effective_agent_api_key("http://127.0.0.1:11434/v1", "", None, saved_key),
+            ""
+        );
+
+        // 跨源但显式提供了新密钥：使用新密钥
+        assert_eq!(
+            resolve_effective_agent_api_key(
+                "https://other-gateway.example/v1",
+                saved_url,
+                Some("  sk-new-provider-key  "),
+                saved_key
+            ),
+            "sk-new-provider-key"
+        );
+    }
 }

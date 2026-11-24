@@ -124,7 +124,6 @@ describe('HomeView 首页总览', () => {
                 onRefreshFxRate={onRefreshFxRate}
                 fxInfo={{ rate: 7.2, source: 'open.er-api.com', isFallback: false, loading: false }}
                 overview={{
-                    vaultItemsCount: 12,
                     paymentCardsCount: 3,
                     aiSubscriptionsCount: 2,
                     serversCount: 4,
@@ -172,8 +171,29 @@ describe('HomeView 首页总览', () => {
         expect(within(remindersSection).getByText('核对信用卡账单')).toBeInTheDocument();
 
         const assetsSection = screen.getByLabelText('数字资产总览');
+        expect(within(assetsSection).queryByRole('button', { name: /账号与密钥/ })).not.toBeInTheDocument();
+        expect(within(assetsSection).getAllByRole('button')).toHaveLength(8);
+        expect(within(assetsSection).getByRole('button', { name: /费用与续费/ })).toBeInTheDocument();
         expect(within(assetsSection).getByText('3/4')).toBeInTheDocument();
+        await user.click(within(assetsSection).getByRole('button', { name: /费用与续费/ }));
+        expect(onNavigate).toHaveBeenCalledWith('renewals');
         await user.click(within(assetsSection).getByRole('button', { name: /域名管理/ }));
         expect(onNavigate).toHaveBeenCalledWith('domains');
+    });
+
+    it('最近更新徽章传入 accountCategories 时完整保留含空格自定义分类名', () => {
+        const props = defaultProps();
+        render(
+            <HomeView
+                {...props}
+                accounts={[
+                    buildAccount(10, { groupName: 'AI 订阅', updatedAt: '2026-11-24 12:00:00' }),
+                ]}
+                accountCategories={[{ id: 1, name: 'AI 订阅', color: 'violet', sortOrder: 0 }]}
+            />,
+        );
+
+        const recentSection = screen.getByLabelText('最近更新');
+        expect(within(recentSection).getByText('AI 订阅')).toBeInTheDocument();
     });
 });

@@ -23,11 +23,6 @@ import type {
   RenewalsSummary,
   Reminder,
   ReminderInput,
-  VaultFolder,
-  VaultFolderInput,
-  VaultItem,
-  VaultItemInput,
-  VaultBatchImportResult,
   PaymentCard,
   PaymentCardInput,
   DomainItem,
@@ -50,10 +45,16 @@ import type {
   AppMonitorSettings,
   WindowCloseBehavior,
   WindowCloseSettings,
+  AccountCategory,
+  AccountCategoryInput,
   SshSessionInfo,
   SftpDirListing,
   AgentSettingsView,
   AgentSettingsInput,
+  AgentModelListResult,
+  AgentContextStatus,
+  AgentCompactionResult,
+  AgentMemorySnapshot,
   AgentConnectionTestResult,
   AgentMessageItem,
 } from '../types';
@@ -406,55 +407,6 @@ export class TauriAdapter implements ApiAdapter {
     await this.invokeCommand('open_external_url', { url });
   }
 
-  // ─── 账号与密钥库 ─────────────────────────────────────────────
-
-  async getVaultFolders(): Promise<VaultFolder[]> {
-    const list = await this.invokeCommand<any[]>('get_vault_folders');
-    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<VaultFolder>(item));
-  }
-
-  async createVaultFolder(folder: VaultFolderInput): Promise<VaultFolder> {
-    const result = await this.invokeCommand<any>('create_vault_folder', { folder });
-    return snakeToCamel<VaultFolder>(result);
-  }
-
-  async updateVaultFolder(id: number, folder: VaultFolderInput): Promise<VaultFolder> {
-    const result = await this.invokeCommand<any>('update_vault_folder', { id, folder });
-    return snakeToCamel<VaultFolder>(result);
-  }
-
-  async deleteVaultFolder(id: number): Promise<void> {
-    await this.invokeCommand('delete_vault_folder', { id });
-  }
-
-  async getVaultItems(search?: string): Promise<VaultItem[]> {
-    const list = await this.invokeCommand<any[]>('get_vault_items', { search: search || null });
-    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<VaultItem>(item));
-  }
-
-  async createVaultItem(item: VaultItemInput): Promise<VaultItem> {
-    const result = await this.invokeCommand<any>('create_vault_item', { item });
-    return snakeToCamel<VaultItem>(result);
-  }
-
-  async updateVaultItem(id: number, item: VaultItemInput): Promise<VaultItem> {
-    const result = await this.invokeCommand<any>('update_vault_item', { id, item });
-    return snakeToCamel<VaultItem>(result);
-  }
-
-  async deleteVaultItem(id: number): Promise<void> {
-    await this.invokeCommand('delete_vault_item', { id });
-  }
-
-  async batchImportVaultItems(items: VaultItemInput[]): Promise<VaultBatchImportResult> {
-    const result = await this.invokeCommand<any>('batch_import_vault_items', { items });
-    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
-    return {
-      createdCount: Number(data.createdCount ?? 0),
-      skippedCount: Number(data.skippedCount ?? 0),
-    };
-  }
-
   // ─── U 卡与支付卡 ─────────────────────────────────────────────
 
   async getPaymentCards(): Promise<PaymentCard[]> {
@@ -742,6 +694,60 @@ export class TauriAdapter implements ApiAdapter {
     return snakeToCamel<AgentConnectionTestResult>(result);
   }
 
+  async fetchAgentModels(
+    baseUrl?: string | null,
+    apiKey?: string | null,
+  ): Promise<AgentModelListResult> {
+    const result = await this.invokeCommand<any>('fetch_agent_models', {
+      baseUrl: baseUrl ?? null,
+      apiKey: apiKey ?? null,
+    });
+    return snakeToCamel<AgentModelListResult>(result);
+  }
+
+  async getAgentContextStatus(): Promise<AgentContextStatus> {
+    const result = await this.invokeCommand<any>('get_agent_context_status');
+    return snakeToCamel<AgentContextStatus>(result);
+  }
+
+  async compactAgentContext(instructions?: string | null): Promise<AgentCompactionResult> {
+    const result = await this.invokeCommand<any>('compact_agent_context', {
+      instructions: instructions ?? null,
+    });
+    return snakeToCamel<AgentCompactionResult>(result);
+  }
+
+  async getAgentMemory(): Promise<AgentMemorySnapshot> {
+    const result = await this.invokeCommand<any>('get_agent_memory');
+    return snakeToCamel<AgentMemorySnapshot>(result);
+  }
+
+  async addAgentMemoryEntry(target: string, content: string): Promise<AgentMemorySnapshot> {
+    const result = await this.invokeCommand<any>('add_agent_memory_entry', { target, content });
+    return snakeToCamel<AgentMemorySnapshot>(result);
+  }
+
+  async updateAgentMemoryEntry(id: number, content: string): Promise<AgentMemorySnapshot> {
+    const result = await this.invokeCommand<any>('update_agent_memory_entry', { id, content });
+    return snakeToCamel<AgentMemorySnapshot>(result);
+  }
+
+  async deleteAgentMemoryEntry(id: number): Promise<AgentMemorySnapshot> {
+    const result = await this.invokeCommand<any>('delete_agent_memory_entry', { id });
+    return snakeToCamel<AgentMemorySnapshot>(result);
+  }
+
+  async clearAgentMemory(target?: string | null): Promise<AgentMemorySnapshot> {
+    const result = await this.invokeCommand<any>('clear_agent_memory', {
+      target: target ?? null,
+    });
+    return snakeToCamel<AgentMemorySnapshot>(result);
+  }
+
+  async openAgentMemoryDir(): Promise<void> {
+    await this.invokeCommand('open_agent_memory_dir');
+  }
+
   async getAgentMessages(): Promise<AgentMessageItem[]> {
     const list = await this.invokeCommand<any[]>('get_agent_messages');
     return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AgentMessageItem>(item));
@@ -786,6 +792,27 @@ export class TauriAdapter implements ApiAdapter {
 
   async handleWindowClose(action: 'minimize' | 'quit', remember: boolean): Promise<void> {
     await this.invokeCommand('handle_window_close', { action, remember });
+  }
+
+  // ─── 谷歌账号自定义分类 ──────────────────────────────────────────
+
+  async getAccountCategories(): Promise<AccountCategory[]> {
+    const list = await this.invokeCommand<any[]>('get_account_categories');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AccountCategory>(item));
+  }
+
+  async createAccountCategory(category: AccountCategoryInput): Promise<AccountCategory> {
+    const result = await this.invokeCommand<any>('create_account_category', { category });
+    return snakeToCamel<AccountCategory>(result);
+  }
+
+  async updateAccountCategory(id: number, category: AccountCategoryInput): Promise<AccountCategory> {
+    const result = await this.invokeCommand<any>('update_account_category', { id, category });
+    return snakeToCamel<AccountCategory>(result);
+  }
+
+  async deleteAccountCategory(id: number): Promise<void> {
+    await this.invokeCommand('delete_account_category', { id });
   }
 }
 

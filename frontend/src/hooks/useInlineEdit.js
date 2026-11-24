@@ -29,7 +29,15 @@ const focusEditableField = (element, multiline = false) => {
     element.select();
 };
 
-const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, recentValuesByField = {} }) => {
+const useInlineEdit = ({
+    onInlineEdit,
+    onInlineEditMany,
+    getAccount,
+    allGroups,
+    knownCategoryNames = null,
+    recentValuesByField = {},
+}) => {
+    const effectiveKnownCategories = knownCategoryNames ?? allGroups ?? null;
     const [editingCell, setEditingCell] = useState(null);
     const [editValue, setEditValue] = useState('');
     const inputRef = useRef(null);
@@ -103,7 +111,7 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
     const buildSavePatch = (rawValueOverride) => {
         const field = editingCell.field;
         const rawInput = String(rawValueOverride ?? editValue ?? '');
-        const originalValue = normalizeMultiValueValue(field, String(editingCell.originalValue ?? ''));
+        const originalValue = normalizeMultiValueValue(field, String(editingCell.originalValue ?? ''), effectiveKnownCategories);
         const patch = {};
 
         if (field === 'phone' || field === 'smsUrl') {
@@ -154,7 +162,7 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
 
         let currentValue = rawInput;
         if (isMultilineField(field)) {
-            currentValue = normalizeMultiValueValue(field, currentValue);
+            currentValue = normalizeMultiValueValue(field, currentValue, effectiveKnownCategories);
         }
         if (originalValue !== currentValue || field === 'smsUrl') {
             patch[field] = currentValue;
@@ -251,7 +259,7 @@ const useInlineEdit = ({ onInlineEdit, onInlineEditMany, getAccount, allGroups, 
         }
 
         if (isMultilineField(editingCell.field)) {
-            setEditValue(prev => appendUniqueLine(editingCell.field, prev, value));
+            setEditValue(prev => appendUniqueLine(editingCell.field, prev, value, effectiveKnownCategories));
             setShowSuggestions(getSuggestionsForField(editingCell.field).length > 0);
             queueMicrotask(() => {
                 focusEditableField(inputRef.current, true);

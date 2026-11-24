@@ -242,7 +242,6 @@ export interface RenewalsSummary {
 
 export interface WorkspaceOverview {
   googleAccountsCount: number;
-  vaultItemsCount: number;
   paymentCardsCount: number;
   aiSubscriptionsCount: number;
   serversCount: number;
@@ -259,55 +258,6 @@ export interface ExchangeRateInfo {
   updatedAt: string;
   source: string;
   isFallback: boolean;
-}
-
-export type VaultItemKind = 'account' | 'api' | 'ssh' | 'token' | 'password';
-
-export interface VaultFolder {
-  id: number;
-  name: string;
-  sortOrder: number;
-  createdAt: string;
-}
-
-export interface VaultFolderInput {
-  name: string;
-  sortOrder?: number;
-}
-
-export interface VaultItem {
-  id: number;
-  kind: VaultItemKind;
-  name: string;
-  url: string | null;
-  username: string | null;
-  secretValue: string | null;
-  totpSecret: string | null;
-  folderId: number | null;
-  googleAccountId: number | null;
-  googleAccountEmail: string | null;
-  tags: string | null;
-  notes: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface VaultItemInput {
-  kind?: VaultItemKind;
-  name: string;
-  url?: string | null;
-  username?: string | null;
-  secretValue?: string | null;
-  totpSecret?: string | null;
-  folderId?: number | null;
-  googleAccountId?: number | null;
-  tags?: string | null;
-  notes?: string | null;
-}
-
-export interface VaultBatchImportResult {
-  createdCount: number;
-  skippedCount: number;
 }
 
 export interface PaymentCard {
@@ -654,6 +604,21 @@ export interface WindowCloseSettings {
   closeBehavior: WindowCloseBehavior;
 }
 
+export interface AccountCategory {
+  id: number;
+  name: string;
+  color: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountCategoryInput {
+  name: string;
+  color?: string | null;
+  sortOrder?: number | null;
+}
+
 export interface SshSessionInfo {
   sessionId: string;
   serverId: number;
@@ -682,6 +647,13 @@ export interface AgentSettingsView {
   maxTokens: number;
   hasApiKey: boolean;
   apiKeyHint: string | null;
+  contextWindow: number;
+  temperature: number;
+  autoCompact: boolean;
+  reserveTokens: number;
+  keepRecentTokens: number;
+  memoryEnabled: boolean;
+  customSystemPrompt: string;
 }
 
 export interface AgentSettingsInput {
@@ -690,6 +662,81 @@ export interface AgentSettingsInput {
   clearApiKey?: boolean;
   model: string;
   maxTokens?: number;
+  contextWindow?: number;
+  temperature?: number;
+  autoCompact?: boolean;
+  reserveTokens?: number;
+  keepRecentTokens?: number;
+  memoryEnabled?: boolean;
+  customSystemPrompt?: string;
+}
+
+export interface AgentModelInfo {
+  id: string;
+  ownedBy: string | null;
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
+}
+
+export interface AgentModelListResult {
+  models: AgentModelInfo[];
+  sourceUrl: string;
+  fetchedCount: number;
+}
+
+export interface AgentCompactionItem {
+  id: number;
+  sessionId: string;
+  summary: string;
+  firstKeptMessageId: number;
+  compactedMessageCount: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  customInstructions: string | null;
+  createdAt: string;
+}
+
+export interface AgentContextStatus {
+  estimatedTokens: number;
+  contextWindow: number;
+  reserveTokens: number;
+  keepRecentTokens: number;
+  thresholdTokens: number;
+  usagePercent: number;
+  activeMessageCount: number;
+  totalMessageCount: number;
+  compactedMessageCount: number;
+  autoCompact: boolean;
+  needsCompaction: boolean;
+  latestCompaction: AgentCompactionItem | null;
+}
+
+export interface AgentCompactionResult {
+  compaction: AgentCompactionItem;
+  status: AgentContextStatus;
+}
+
+export type AgentMemoryTarget = 'user' | 'memory';
+
+export interface AgentMemoryEntry {
+  id: number;
+  target: AgentMemoryTarget | string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentMemorySnapshot {
+  memoryEnabled: boolean;
+  memoryDir: string;
+  userBudget: number;
+  memoryBudget: number;
+  userUsedChars: number;
+  memoryUsedChars: number;
+  userEntries: AgentMemoryEntry[];
+  memoryEntries: AgentMemoryEntry[];
+  userMarkdown: string;
+  memoryMarkdown: string;
 }
 
 export interface AgentConnectionTestResult {
@@ -774,15 +821,6 @@ export interface ApiAdapter {
   writeTextFile(path: string, content: string): Promise<string>;
   readTextFile(path: string): Promise<string>;
   openExternalUrl(url: string): Promise<void>;
-  getVaultFolders(): Promise<VaultFolder[]>;
-  createVaultFolder(folder: VaultFolderInput): Promise<VaultFolder>;
-  updateVaultFolder(id: number, folder: VaultFolderInput): Promise<VaultFolder>;
-  deleteVaultFolder(id: number): Promise<void>;
-  getVaultItems(search?: string): Promise<VaultItem[]>;
-  createVaultItem(item: VaultItemInput): Promise<VaultItem>;
-  updateVaultItem(id: number, item: VaultItemInput): Promise<VaultItem>;
-  deleteVaultItem(id: number): Promise<void>;
-  batchImportVaultItems(items: VaultItemInput[]): Promise<VaultBatchImportResult>;
   getPaymentCards(): Promise<PaymentCard[]>;
   createPaymentCard(card: PaymentCardInput): Promise<PaymentCard>;
   updatePaymentCard(id: number, card: PaymentCardInput): Promise<PaymentCard>;
@@ -838,6 +876,15 @@ export interface ApiAdapter {
   getAgentSettings(): Promise<AgentSettingsView>;
   saveAgentSettings(settings: AgentSettingsInput): Promise<AgentSettingsView>;
   testAgentConnection(baseUrl?: string | null, apiKey?: string | null, model?: string | null): Promise<AgentConnectionTestResult>;
+  fetchAgentModels(baseUrl?: string | null, apiKey?: string | null): Promise<AgentModelListResult>;
+  getAgentContextStatus(): Promise<AgentContextStatus>;
+  compactAgentContext(instructions?: string | null): Promise<AgentCompactionResult>;
+  getAgentMemory(): Promise<AgentMemorySnapshot>;
+  addAgentMemoryEntry(target: AgentMemoryTarget | string, content: string): Promise<AgentMemorySnapshot>;
+  updateAgentMemoryEntry(id: number, content: string): Promise<AgentMemorySnapshot>;
+  deleteAgentMemoryEntry(id: number): Promise<AgentMemorySnapshot>;
+  clearAgentMemory(target?: AgentMemoryTarget | string | null): Promise<AgentMemorySnapshot>;
+  openAgentMemoryDir(): Promise<void>;
   getAgentMessages(): Promise<AgentMessageItem[]>;
   clearAgentMessages(): Promise<void>;
   sendAgentMessage(message: string): Promise<AgentMessageItem[]>;
@@ -847,4 +894,8 @@ export interface ApiAdapter {
   getWindowCloseSettings(): Promise<WindowCloseSettings>;
   saveWindowCloseSettings(closeBehavior: WindowCloseBehavior): Promise<WindowCloseSettings>;
   handleWindowClose(action: 'minimize' | 'quit', remember: boolean): Promise<void>;
+  getAccountCategories(): Promise<AccountCategory[]>;
+  createAccountCategory(category: AccountCategoryInput): Promise<AccountCategory>;
+  updateAccountCategory(id: number, category: AccountCategoryInput): Promise<AccountCategory>;
+  deleteAccountCategory(id: number): Promise<void>;
 }

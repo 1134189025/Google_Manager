@@ -9,12 +9,17 @@ import { confirmDialog, messageDialog } from '../utils/dialogs';
 /**
  * 回收站整页视图（MosMos 无框极简列表，替代旧版弹窗）
  */
-const RecycleView = ({ onRefreshAccounts, onNotify, onNavigateList }) => {
+const RecycleView = ({ onRefreshAccounts, onNotify, onNavigateList, accountCategories = [] }) => {
     const [accounts, setAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [busyId, setBusyId] = useState(null);
     const [purgingAll, setPurgingAll] = useState(false);
+
+    const knownCategoryNames = useMemo(
+        () => accountCategories.map(cat => cat?.name).filter(Boolean),
+        [accountCategories],
+    );
 
     const notifyError = useCallback((msg) => {
         if (onNotify) {
@@ -235,7 +240,7 @@ const RecycleView = ({ onRefreshAccounts, onNotify, onNavigateList }) => {
                 ) : (
                     <div className="gm-recycle-list" role="list" aria-label="已删除账号列表">
                         {filteredAccounts.map((acc) => {
-                            const tags = splitGroupNameValues(acc.groupName);
+                            const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
                             const isBusy = busyId === acc.id || purgingAll;
                             return (
                                 <div key={acc.id} className="gm-recycle-row" role="listitem">

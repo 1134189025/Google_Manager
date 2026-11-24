@@ -194,7 +194,7 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
             <SideNav
                 view="home"
                 accountsCount={3}
-                overview={{ vaultItemsCount: 4, serversCount: 2 }}
+                overview={{ aiSubscriptionsCount: 2, paymentCardsCount: 3, serversCount: 2 }}
                 darkMode={true}
                 onNavigate={onNavigate}
                 onOpenBrowserSettings={vi.fn()}
@@ -202,15 +202,18 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
             />,
         );
 
-        expect(screen.getByRole('button', { name: /账号与密钥/ })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /账号与密钥/ })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: /AI 订阅/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /U 卡与支付卡/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /服务器/ })).toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: '账号与金融' }));
-        expect(screen.queryByRole('button', { name: /账号与密钥/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /AI 订阅/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /U 卡与支付卡/ })).not.toBeInTheDocument();
         expect(JSON.parse(localStorage.getItem('gm.nav.groups')).finance).toBe(false);
 
         await user.click(screen.getByRole('button', { name: '账号与金融' }));
-        expect(screen.getByRole('button', { name: /账号与密钥/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /AI 订阅/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /U 卡与支付卡/ })).toBeInTheDocument();
     });
 });

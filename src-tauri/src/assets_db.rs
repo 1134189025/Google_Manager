@@ -7,29 +7,6 @@ use std::collections::HashSet;
 pub fn init_asset_tables(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS vault_folders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            sort_order INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS vault_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            kind TEXT NOT NULL DEFAULT 'account',
-            name TEXT NOT NULL,
-            url TEXT,
-            username TEXT,
-            secret_value TEXT,
-            totp_secret TEXT,
-            folder_id INTEGER REFERENCES vault_folders(id) ON DELETE SET NULL,
-            google_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-            tags TEXT,
-            notes TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-
         CREATE TABLE IF NOT EXISTS payment_cards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -172,22 +149,50 @@ pub fn init_asset_tables(conn: &Connection) -> rusqlite::Result<()> {
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE INDEX IF NOT EXISTS idx_vault_items_folder ON vault_items(folder_id);
-        CREATE INDEX IF NOT EXISTS idx_vault_items_google ON vault_items(google_account_id);
+        CREATE TABLE IF NOT EXISTS agent_compactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL DEFAULT 'default',
+            summary TEXT NOT NULL,
+            first_kept_message_id INTEGER NOT NULL,
+            compacted_message_count INTEGER NOT NULL DEFAULT 0,
+            tokens_before INTEGER NOT NULL DEFAULT 0,
+            tokens_after INTEGER NOT NULL DEFAULT 0,
+            custom_instructions TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_memory_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS account_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            color TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE INDEX IF NOT EXISTS idx_ai_subscriptions_google ON ai_subscriptions(google_account_id);
         CREATE INDEX IF NOT EXISTS idx_ai_subscriptions_card ON ai_subscriptions(payment_card_id);
         CREATE INDEX IF NOT EXISTS idx_domains_cf ON domains(cf_connection_id);
         CREATE INDEX IF NOT EXISTS idx_domains_server ON domains(server_id);
         CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(done, due_at);
         CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages(session_id, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_compactions_session ON agent_compactions(session_id, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_memory_target ON agent_memory_entries(target, id);
         ",
     )
 }
 
 /// 所有扩展表定义（按外键依赖拓扑序排列，删除时倒序，恢复时正序）
 const ASSET_TABLE_NAMES: &[&str] = &[
-    "vault_folders",
-    "vault_items",
+    "account_categories",
     "payment_cards",
     "ai_subscriptions",
     "servers",
@@ -195,6 +200,8 @@ const ASSET_TABLE_NAMES: &[&str] = &[
     "domains",
     "reminders",
     "agent_messages",
+    "agent_compactions",
+    "agent_memory_entries",
 ];
 
 fn table_columns(conn: &Connection, schema: &str, table: &str) -> Result<Vec<String>, String> {
@@ -891,7 +898,6 @@ pub fn advance_renewal(conn: &Connection, kind: &str, id: i64) -> Result<String,
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceOverview {
     pub google_accounts_count: usize,
-    pub vault_items_count: usize,
     pub payment_cards_count: usize,
     pub ai_subscriptions_count: usize,
     pub servers_count: usize,
@@ -917,7 +923,6 @@ pub fn get_workspace_overview(
         conn,
         "SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL",
     )?;
-    let vault_items_count = count_table(conn, "SELECT COUNT(*) FROM vault_items")?;
     let payment_cards_count = count_table(conn, "SELECT COUNT(*) FROM payment_cards")?;
     let ai_subscriptions_count = count_table(conn, "SELECT COUNT(*) FROM ai_subscriptions")?;
     let servers_count = count_table(conn, "SELECT COUNT(*) FROM servers")?;
@@ -944,7 +949,6 @@ pub fn get_workspace_overview(
 
     Ok(WorkspaceOverview {
         google_accounts_count,
-        vault_items_count,
         payment_cards_count,
         ai_subscriptions_count,
         servers_count,
@@ -957,351 +961,367 @@ pub fn get_workspace_overview(
     })
 }
 
-// ─── 账号与密钥库 (vault_folders / vault_items) ──────────────────
+// ─── 谷歌账号自定义分类 (account_categories) ──────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VaultFolder {
+pub struct AccountCategory {
     pub id: i64,
     pub name: String,
+    pub color: Option<String>,
     pub sort_order: i64,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VaultFolderInput {
-    pub name: String,
-    #[serde(default)]
-    pub sort_order: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VaultItem {
-    pub id: i64,
-    pub kind: String,
-    pub name: String,
-    pub url: Option<String>,
-    pub username: Option<String>,
-    pub secret_value: Option<String>,
-    pub totp_secret: Option<String>,
-    pub folder_id: Option<i64>,
-    pub google_account_id: Option<i64>,
-    pub google_account_email: Option<String>,
-    pub tags: Option<String>,
-    pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VaultItemInput {
-    #[serde(default)]
-    pub kind: Option<String>,
+pub struct AccountCategoryInput {
     pub name: String,
     #[serde(default)]
-    pub url: Option<String>,
+    pub color: Option<String>,
     #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub secret_value: Option<String>,
-    #[serde(default)]
-    pub totp_secret: Option<String>,
-    #[serde(default)]
-    pub folder_id: Option<i64>,
-    #[serde(default)]
-    pub google_account_id: Option<i64>,
-    #[serde(default)]
-    pub tags: Option<String>,
-    #[serde(default)]
-    pub notes: Option<String>,
+    pub sort_order: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VaultBatchImportResult {
-    pub created_count: usize,
-    pub skipped_count: usize,
-}
+const ALLOWED_CATEGORY_COLORS: &[&str] = &[
+    "blue", "emerald", "amber", "rose", "violet", "cyan", "orange", "slate",
+];
 
-fn normalize_vault_kind(value: Option<&str>) -> String {
-    match value.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("api") => "api".to_string(),
-        Some("ssh") => "ssh".to_string(),
-        Some("token") => "token".to_string(),
-        Some("password") => "password".to_string(),
-        _ => "account".to_string(),
+fn validate_account_category_name(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("分类名称不能为空".to_string());
     }
-}
-
-fn normalize_totp_secret(value: Option<&str>) -> Option<String> {
-    value
-        .map(|s| s.chars().filter(|c| !c.is_whitespace()).collect::<String>())
-        .filter(|s| !s.is_empty())
-}
-
-pub fn query_vault_folders(conn: &Connection) -> Result<Vec<VaultFolder>, String> {
-    let mut stmt = conn
-        .prepare("SELECT id, name, sort_order, created_at FROM vault_folders ORDER BY sort_order ASC, id ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(VaultFolder {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
-}
-
-pub fn create_vault_folder(conn: &Connection, input: &VaultFolderInput) -> Result<VaultFolder, String> {
-    let name = input.name.trim();
-    if name.is_empty() || name.chars().count() > 60 {
-        return Err("文件夹名称不能为空且不超过 60 个字符".to_string());
+    if trimmed.chars().count() > 40 {
+        return Err("分类名称不能超过 40 个字符".to_string());
     }
-    conn.execute(
-        "INSERT INTO vault_folders (name, sort_order) VALUES (?1, ?2)",
-        params![name, input.sort_order.unwrap_or(0)],
-    )
-    .map_err(|e| format!("创建文件夹失败: {}", e))?;
-    let id = conn.last_insert_rowid();
-    conn.query_row(
-        "SELECT id, name, sort_order, created_at FROM vault_folders WHERE id = ?1",
-        [id],
-        |row| {
-            Ok(VaultFolder {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
-}
-
-pub fn update_vault_folder(
-    conn: &Connection,
-    id: i64,
-    input: &VaultFolderInput,
-) -> Result<VaultFolder, String> {
-    let name = input.name.trim();
-    if name.is_empty() || name.chars().count() > 60 {
-        return Err("文件夹名称不能为空且不超过 60 个字符".to_string());
-    }
-    let changed = conn
-        .execute(
-            "UPDATE vault_folders SET name = ?1, sort_order = COALESCE(?2, sort_order) WHERE id = ?3",
-            params![name, input.sort_order, id],
-        )
-        .map_err(|e| format!("更新文件夹失败: {}", e))?;
-    if changed == 0 {
-        return Err("文件夹不存在".to_string());
-    }
-    conn.query_row(
-        "SELECT id, name, sort_order, created_at FROM vault_folders WHERE id = ?1",
-        [id],
-        |row| {
-            Ok(VaultFolder {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
-}
-
-pub fn delete_vault_folder(conn: &Connection, id: i64) -> Result<(), String> {
-    let changed = conn
-        .execute("DELETE FROM vault_folders WHERE id = ?1", [id])
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("文件夹不存在".to_string());
-    }
-    Ok(())
-}
-
-fn map_vault_item(row: &Row) -> rusqlite::Result<VaultItem> {
-    Ok(VaultItem {
-        id: row.get("id")?,
-        kind: row.get("kind")?,
-        name: row.get("name")?,
-        url: row.get("url")?,
-        username: row.get("username")?,
-        secret_value: row.get("secret_value")?,
-        totp_secret: row.get("totp_secret")?,
-        folder_id: row.get("folder_id")?,
-        google_account_id: row.get("google_account_id")?,
-        google_account_email: row.get("google_account_email")?,
-        tags: row.get("tags")?,
-        notes: row.get("notes")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-    })
-}
-
-const VAULT_SELECT_SQL: &str = "
-    SELECT v.id, v.kind, v.name, v.url, v.username, v.secret_value, v.totp_secret,
-           v.folder_id, v.google_account_id,
-           CASE WHEN a.deleted_at IS NULL THEN a.email ELSE NULL END AS google_account_email,
-           v.tags, v.notes, v.created_at, v.updated_at
-    FROM vault_items v
-    LEFT JOIN accounts a ON a.id = v.google_account_id
-";
-
-pub fn get_vault_item_by_id(conn: &Connection, id: i64) -> Result<VaultItem, String> {
-    conn.query_row(
-        &format!("{} WHERE v.id = ?1", VAULT_SELECT_SQL),
-        [id],
-        map_vault_item,
-    )
-    .map_err(|e| e.to_string())
-}
-
-pub fn query_vault_items(conn: &Connection, search: Option<&str>) -> Result<Vec<VaultItem>, String> {
-    let mut sql = VAULT_SELECT_SQL.to_string();
-    let mut params_vec: Vec<String> = Vec::new();
-    if let Some(q) = normalize_optional(search) {
-        let pattern = format!("%{}%", q);
-        sql.push_str(
-            " WHERE (v.name LIKE ?1 OR v.url LIKE ?1 OR v.username LIKE ?1 OR v.tags LIKE ?1 OR v.notes LIKE ?1)",
-        );
-        params_vec.push(pattern);
-    }
-    sql.push_str(" ORDER BY v.updated_at DESC, v.id DESC");
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    let rows = stmt
-        .query_map(refs.as_slice(), map_vault_item)
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
-}
-
-pub fn create_vault_item(conn: &Connection, input: &VaultItemInput) -> Result<VaultItem, String> {
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err("条目标题不能为空".to_string());
-    }
-    let kind = normalize_vault_kind(input.kind.as_deref());
-    conn.execute(
-        "INSERT INTO vault_items
-         (kind, name, url, username, secret_value, totp_secret, folder_id, google_account_id, tags, notes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            kind,
-            name,
-            normalize_optional(input.url.as_deref()),
-            normalize_optional(input.username.as_deref()),
-            input.secret_value.as_deref().filter(|s| !s.is_empty()),
-            normalize_totp_secret(input.totp_secret.as_deref()),
-            input.folder_id,
-            input.google_account_id,
-            normalize_optional(input.tags.as_deref()),
-            normalize_optional(input.notes.as_deref()),
-        ],
-    )
-    .map_err(|e| format!("创建密钥条目失败: {}", e))?;
-    get_vault_item_by_id(conn, conn.last_insert_rowid())
-}
-
-pub fn update_vault_item(
-    conn: &Connection,
-    id: i64,
-    input: &VaultItemInput,
-) -> Result<VaultItem, String> {
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err("条目标题不能为空".to_string());
-    }
-    let kind = normalize_vault_kind(input.kind.as_deref());
-    let changed = conn
-        .execute(
-            "UPDATE vault_items
-             SET kind = ?1, name = ?2, url = ?3, username = ?4, secret_value = ?5,
-                 totp_secret = ?6, folder_id = ?7, google_account_id = ?8, tags = ?9,
-                 notes = ?10, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?11",
-            params![
-                kind,
-                name,
-                normalize_optional(input.url.as_deref()),
-                normalize_optional(input.username.as_deref()),
-                input.secret_value.as_deref().filter(|s| !s.is_empty()),
-                normalize_totp_secret(input.totp_secret.as_deref()),
-                input.folder_id,
-                input.google_account_id,
-                normalize_optional(input.tags.as_deref()),
-                normalize_optional(input.notes.as_deref()),
-                id
-            ],
-        )
-        .map_err(|e| format!("更新密钥条目失败: {}", e))?;
-    if changed == 0 {
-        return Err("密钥条目不存在".to_string());
-    }
-    get_vault_item_by_id(conn, id)
-}
-
-pub fn delete_vault_item(conn: &Connection, id: i64) -> Result<(), String> {
-    let changed = conn
-        .execute("DELETE FROM vault_items WHERE id = ?1", [id])
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("密钥条目不存在".to_string());
-    }
-    Ok(())
-}
-
-pub fn batch_import_vault_items(
-    conn: &Connection,
-    items: &[VaultItemInput],
-) -> Result<VaultBatchImportResult, String> {
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("开启导入事务失败: {}", e))?;
-    let mut created_count = 0usize;
-    let mut skipped_count = 0usize;
-
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, '\n' | '\r' | ',' | '，' | ';' | '；'))
     {
-        let mut stmt = tx
-            .prepare(
-                "INSERT INTO vault_items
-                 (kind, name, url, username, secret_value, totp_secret, folder_id, google_account_id, tags, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            )
-            .map_err(|e| e.to_string())?;
+        return Err("分类名称不能包含换行、逗号或分号".to_string());
+    }
+    if matches!(trimmed, "全部" | "未分类" | "__uncategorized__") {
+        return Err("分类名称不能与系统保留项重名".to_string());
+    }
+    Ok(trimmed.to_string())
+}
 
-        for item in items {
-            let name = item.name.trim();
-            if name.is_empty() {
-                skipped_count += 1;
-                continue;
+fn normalize_category_color(raw: Option<&str>) -> Option<String> {
+    let key = raw?.trim().to_ascii_lowercase();
+    ALLOWED_CATEGORY_COLORS
+        .iter()
+        .find(|&&c| c == key)
+        .map(|s| (*s).to_string())
+}
+
+const GROUP_NAME_SEPARATORS: [char; 5] = ['\n', ',', '，', ';', '；'];
+
+/// 按自定义分类规则拆分账号 `group_name`：
+/// - 含显式分隔符（换行/中英文逗号/中英文分号）时按分隔符拆分；
+/// - 否则若整体匹配任意已知自定义分类（忽略大小写），保留为完整单项（不拆内部空格）；
+/// - 否则兼容旧版按空白字符拆分。
+pub fn split_group_name_values(
+    raw: &str,
+    known_categories_lower: &HashSet<String>,
+) -> Vec<String> {
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let raw_items: Vec<String> = if trimmed.contains(GROUP_NAME_SEPARATORS) {
+        trimmed
+            .split(GROUP_NAME_SEPARATORS)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else if known_categories_lower.contains(&trimmed.to_lowercase()) {
+        vec![trimmed.to_string()]
+    } else {
+        trimmed
+            .split_whitespace()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+
+    let mut out = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for item in raw_items {
+        if seen.insert(item.clone()) {
+            out.push(item);
+        }
+    }
+    out
+}
+
+/// 将账号 `group_name` 中匹配的分类重命名或移除，支持带空格的自定义分类名与多行标签。
+/// 仅当确实命中 `old_name`（大小写不敏感）时返回 `Some(updated)`；未命中则返回 `None`，避免误改无关账号。
+fn rewrite_account_group_name(
+    raw: &str,
+    old_name: &str,
+    new_name: Option<&str>,
+    known_categories_lower: &HashSet<String>,
+) -> Option<Option<String>> {
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let old_lower = old_name.to_lowercase();
+    let items: Vec<String> = if trimmed.contains(GROUP_NAME_SEPARATORS) {
+        trimmed
+            .split(GROUP_NAME_SEPARATORS)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        let trimmed_lower = trimmed.to_lowercase();
+        if trimmed_lower == old_lower || known_categories_lower.contains(&trimmed_lower) {
+            vec![trimmed.to_string()]
+        } else {
+            trimmed
+                .split_whitespace()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        }
+    };
+
+    let mut matched = false;
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for item in items {
+        let candidate = if item.to_lowercase() == old_lower {
+            matched = true;
+            match new_name {
+                Some(replacement) => replacement.to_string(),
+                None => continue,
             }
-            let kind = normalize_vault_kind(item.kind.as_deref());
-            stmt.execute(params![
-                kind,
-                name,
-                normalize_optional(item.url.as_deref()),
-                normalize_optional(item.username.as_deref()),
-                item.secret_value.as_deref().filter(|s| !s.is_empty()),
-                normalize_totp_secret(item.totp_secret.as_deref()),
-                item.folder_id,
-                item.google_account_id,
-                normalize_optional(item.tags.as_deref()),
-                normalize_optional(item.notes.as_deref()),
-            ])
-            .map_err(|e| format!("批量导入密钥条目失败: {}", e))?;
-            created_count += 1;
+        } else {
+            item
+        };
+        if seen.insert(candidate.to_lowercase()) {
+            out.push(candidate);
         }
     }
 
-    tx.commit().map_err(|e| format!("提交导入事务失败: {}", e))?;
-    Ok(VaultBatchImportResult {
-        created_count,
-        skipped_count,
-    })
+    if !matched {
+        return None;
+    }
+
+    if out.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(out.join("\n")))
+    }
+}
+
+fn load_known_category_names_lower(conn: &Connection) -> Result<HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT name FROM account_categories")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut set = HashSet::new();
+    for row in rows {
+        set.insert(row.map_err(|e| e.to_string())?.to_lowercase());
+    }
+    Ok(set)
+}
+
+pub fn query_account_categories(conn: &Connection) -> Result<Vec<AccountCategory>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, color, sort_order, created_at, updated_at
+             FROM account_categories
+             ORDER BY sort_order ASC, id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AccountCategory {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+fn get_account_category_by_id(conn: &Connection, id: i64) -> Result<AccountCategory, String> {
+    conn.query_row(
+        "SELECT id, name, color, sort_order, created_at, updated_at
+         FROM account_categories
+         WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(AccountCategory {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|_| "分类不存在".to_string())
+}
+
+pub fn create_account_category(
+    conn: &Connection,
+    input: &AccountCategoryInput,
+) -> Result<AccountCategory, String> {
+    let name = validate_account_category_name(&input.name)?;
+    let color = normalize_category_color(input.color.as_deref()).or_else(|| Some("blue".to_string()));
+    let next_order: i64 = input.sort_order.unwrap_or_else(|| {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM account_categories",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    });
+
+    conn.execute(
+        "INSERT INTO account_categories (name, color, sort_order) VALUES (?1, ?2, ?3)",
+        params![name, color, next_order],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            format!("分类「{}」已存在", name)
+        } else {
+            format!("创建分类失败: {}", e)
+        }
+    })?;
+
+    get_account_category_by_id(conn, conn.last_insert_rowid())
+}
+
+pub fn update_account_category(
+    conn: &Connection,
+    id: i64,
+    input: &AccountCategoryInput,
+) -> Result<AccountCategory, String> {
+    let existing = get_account_category_by_id(conn, id)?;
+    let new_name = validate_account_category_name(&input.name)?;
+    let color = if input.color.is_some() {
+        normalize_category_color(input.color.as_deref())
+    } else {
+        existing.color.clone()
+    };
+    let sort_order = input.sort_order.unwrap_or(existing.sort_order);
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    // 先读取变更前全部已知分类名，确保重命名/同步阶段不会把其他含空格分类拆碎
+    let known_categories_lower = load_known_category_names_lower(&tx)?;
+
+    tx.execute(
+        "UPDATE account_categories
+         SET name = ?1, color = ?2, sort_order = ?3, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?4",
+        params![new_name, color, sort_order, id],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            format!("分类「{}」已存在", new_name)
+        } else {
+            format!("更新分类失败: {}", e)
+        }
+    })?;
+
+    if existing.name != new_name {
+        let affected: Vec<(i64, String)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, group_name FROM accounts WHERE group_name IS NOT NULL AND TRIM(group_name) != ''",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
+        for (acc_id, raw_group) in affected {
+            if let Some(updated) = rewrite_account_group_name(
+                &raw_group,
+                &existing.name,
+                Some(&new_name),
+                &known_categories_lower,
+            ) {
+                if updated.as_deref() != Some(raw_group.as_str()) {
+                    tx.execute(
+                        "UPDATE accounts SET group_name = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+                        params![updated, acc_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
+    get_account_category_by_id(conn, id)
+}
+
+pub fn delete_account_category(conn: &Connection, id: i64) -> Result<(), String> {
+    let existing = get_account_category_by_id(conn, id)?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    // 先读取删除前全部已知分类名，避免误拆其他含空格分类
+    let known_categories_lower = load_known_category_names_lower(&tx)?;
+
+    tx.execute("DELETE FROM account_categories WHERE id = ?1", [id])
+        .map_err(|e| e.to_string())?;
+
+    let affected: Vec<(i64, String)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, group_name FROM accounts WHERE group_name IS NOT NULL AND TRIM(group_name) != ''",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    for (acc_id, raw_group) in affected {
+        if let Some(updated) =
+            rewrite_account_group_name(&raw_group, &existing.name, None, &known_categories_lower)
+        {
+            if updated.as_deref() != Some(raw_group.as_str()) {
+                tx.execute(
+                    "UPDATE accounts SET group_name = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+                    params![updated, acc_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
 }
 
 // ─── U 卡与支付卡 (payment_cards) ─────────────────────────────────
@@ -3010,89 +3030,6 @@ mod tests {
     }
 
     #[test]
-    fn test_vault_folders_items_and_google_account_set_null() {
-        let tmp = tempfile::tempdir().unwrap();
-        let conn = open_temp_db(tmp.path());
-
-        // 插入一个关联的谷歌账号
-        conn.execute(
-            "INSERT INTO accounts (email, password, status, sold_status) VALUES ('linked@gmail.com', 'pw', 'inactive', 'unsold')",
-            [],
-        )
-        .unwrap();
-        let g_id = conn.last_insert_rowid();
-
-        let folder = create_vault_folder(
-            &conn,
-            &VaultFolderInput {
-                name: "常用服务".to_string(),
-                sort_order: Some(1),
-            },
-        )
-        .unwrap();
-
-        let item = create_vault_item(
-            &conn,
-            &VaultItemInput {
-                kind: Some("account".to_string()),
-                name: "GitHub".to_string(),
-                url: Some("https://github.com".to_string()),
-                username: Some("octocat".to_string()),
-                secret_value: Some("s3cr3t".to_string()),
-                totp_secret: Some("JBSW Y3DP EHPK 3PXP".to_string()),
-                folder_id: Some(folder.id),
-                google_account_id: Some(g_id),
-                tags: Some("dev".to_string()),
-                notes: None,
-            },
-        )
-        .unwrap();
-        assert_eq!(item.totp_secret.as_deref(), Some("JBSWY3DPEHPK3PXP"));
-        assert_eq!(item.google_account_email.as_deref(), Some("linked@gmail.com"));
-
-        // 批量导入
-        let batch = batch_import_vault_items(
-            &conn,
-            &[
-                VaultItemInput {
-                    kind: Some("password".to_string()),
-                    name: "Notion".to_string(),
-                    url: Some("https://notion.so".to_string()),
-                    username: Some("u".to_string()),
-                    secret_value: Some("p".to_string()),
-                    totp_secret: None,
-                    folder_id: Some(folder.id),
-                    google_account_id: None,
-                    tags: None,
-                    notes: None,
-                },
-                VaultItemInput {
-                    kind: None,
-                    name: "  ".to_string(),
-                    url: None,
-                    username: None,
-                    secret_value: None,
-                    totp_secret: None,
-                    folder_id: None,
-                    google_account_id: None,
-                    tags: None,
-                    notes: None,
-                },
-            ],
-        )
-        .unwrap();
-        assert_eq!(batch.created_count, 1);
-        assert_eq!(batch.skipped_count, 1);
-
-        // 删除谷歌账号与文件夹后，外键置空而不级联删除条目
-        conn.execute("DELETE FROM accounts WHERE id = ?1", [g_id]).unwrap();
-        delete_vault_folder(&conn, folder.id).unwrap();
-        let reloaded = get_vault_item_by_id(&conn, item.id).unwrap();
-        assert!(reloaded.folder_id.is_none());
-        assert!(reloaded.google_account_id.is_none());
-    }
-
-    #[test]
     fn test_payment_card_crud_and_renewals_integration() {
         let tmp = tempfile::tempdir().unwrap();
         let conn = open_temp_db(tmp.path());
@@ -3339,5 +3276,246 @@ mod tests {
         assert!(validate_calendar_day("1969-12-31").is_err());
         assert!(validate_calendar_day("2100-01-01").is_err());
         assert!(validate_calendar_day("2026-2-4").is_err());
+    }
+
+    #[test]
+    fn test_account_categories_crud_rename_delete_and_spaced_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_temp_db(tmp.path());
+
+        // 创建自定义分类（含带空格分类名与重名/保留名校验）
+        let cat1 = create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "AI 订阅".to_string(),
+                color: Some("violet".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(cat1.name, "AI 订阅");
+        assert_eq!(cat1.color.as_deref(), Some("violet"));
+
+        assert!(create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "ai 订阅".to_string(),
+                color: None,
+                sort_order: None,
+            },
+        )
+        .is_err());
+        assert!(create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "未分类".to_string(),
+                color: None,
+                sort_order: None,
+            },
+        )
+        .is_err());
+
+        let cat2 = create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "主号".to_string(),
+                color: Some("emerald".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+
+        // 绑定两个账号：一个仅含带空格分类名，一个含多行分类
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status) VALUES ('a@gmail.com', 'pw', 'AI 订阅', 'pro', 'unsold')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status) VALUES ('b@gmail.com', 'pw', 'AI 订阅\n主号', 'inactive', 'unsold')",
+            [],
+        )
+        .unwrap();
+
+        // 重命名分类后自动同步所有账号的 group_name
+        let renamed = update_account_category(
+            &conn,
+            cat1.id,
+            &AccountCategoryInput {
+                name: "Gemini 专属".to_string(),
+                color: Some("amber".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(renamed.name, "Gemini 专属");
+        assert_eq!(renamed.color.as_deref(), Some("amber"));
+
+        let g_a: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'a@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        let g_b: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'b@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(g_a.as_deref(), Some("Gemini 专属"));
+        assert_eq!(g_b.as_deref(), Some("Gemini 专属\n主号"));
+
+        // 删除分类后账号本身保留，仅移除已删分类
+        delete_account_category(&conn, renamed.id).unwrap();
+        let g_a2: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'a@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        let g_b2: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'b@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(g_a2, None);
+        assert_eq!(g_b2.as_deref(), Some("主号"));
+
+        let remaining = query_account_categories(&conn).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, cat2.id);
+    }
+
+    #[test]
+    fn test_category_rename_delete_preserves_unrelated_spaced_and_legacy_groups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_temp_db(tmp.path());
+
+        let cat_spaced = create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "AI 订阅".to_string(),
+                color: Some("violet".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        let cat_prefix = create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "AI".to_string(),
+                color: Some("blue".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        let cat_other = create_account_category(
+            &conn,
+            &AccountCategoryInput {
+                name: "主号".to_string(),
+                color: Some("emerald".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+
+        // 账号 1：单条含空格分类名 "AI 订阅"
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status, updated_at)
+             VALUES ('spaced@gmail.com', 'pw', 'AI 订阅', 'pro', 'unsold', '2026-01-01 00:00:00')",
+            [],
+        )
+        .unwrap();
+        // 账号 2：旧版逗号分隔自由标签（不含任何目标分类）
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status, updated_at)
+             VALUES ('legacy@gmail.com', 'pw', '旧标签1, 旧标签2', 'inactive', 'unsold', '2026-01-01 00:00:00')",
+            [],
+        )
+        .unwrap();
+        // 账号 3：大小写不同的 "ai 订阅"
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status, updated_at)
+             VALUES ('lower@gmail.com', 'pw', 'ai 订阅', 'inactive', 'unsold', '2026-01-01 00:00:00')",
+            [],
+        )
+        .unwrap();
+
+        // 路径 A & C：重命名无关分类 "主号" -> "核心号"，不能拆碎 "AI 订阅"，也不能改写旧逗号标签或刷新 updated_at
+        update_account_category(
+            &conn,
+            cat_other.id,
+            &AccountCategoryInput {
+                name: "核心号".to_string(),
+                color: None,
+                sort_order: None,
+            },
+        )
+        .unwrap();
+
+        let (g1, ts1): (Option<String>, String) = conn
+            .query_row(
+                "SELECT group_name, updated_at FROM accounts WHERE email = 'spaced@gmail.com'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let (g2, ts2): (Option<String>, String) = conn
+            .query_row(
+                "SELECT group_name, updated_at FROM accounts WHERE email = 'legacy@gmail.com'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let (g3, ts3): (Option<String>, String) = conn
+            .query_row(
+                "SELECT group_name, updated_at FROM accounts WHERE email = 'lower@gmail.com'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(g1.as_deref(), Some("AI 订阅"));
+        assert_eq!(ts1, "2026-01-01 00:00:00");
+        assert_eq!(g2.as_deref(), Some("旧标签1, 旧标签2"));
+        assert_eq!(ts2, "2026-01-01 00:00:00");
+        assert_eq!(g3.as_deref(), Some("ai 订阅"));
+        assert_eq!(ts3, "2026-01-01 00:00:00");
+
+        // 路径 B：重命名并删除前缀词分类 "AI"，不能误拆或误伤 "AI 订阅" 与 "ai 订阅"
+        let renamed_prefix = update_account_category(
+            &conn,
+            cat_prefix.id,
+            &AccountCategoryInput {
+                name: "大模型".to_string(),
+                color: None,
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        delete_account_category(&conn, renamed_prefix.id).unwrap();
+        delete_account_category(&conn, cat_other.id).unwrap();
+
+        let g1_after: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'spaced@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        let g2_after: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'legacy@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        let g3_after: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'lower@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(g1_after.as_deref(), Some("AI 订阅"));
+        assert_eq!(g2_after.as_deref(), Some("旧标签1, 旧标签2"));
+        assert_eq!(g3_after.as_deref(), Some("ai 订阅"));
+
+        // 重命名 "AI 订阅" -> "AI 会员"，大小写不敏感命中 "AI 订阅" 和 "ai 订阅"
+        update_account_category(
+            &conn,
+            cat_spaced.id,
+            &AccountCategoryInput {
+                name: "AI 会员".to_string(),
+                color: None,
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        let g1_renamed: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'spaced@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        let g3_renamed: Option<String> = conn
+            .query_row("SELECT group_name FROM accounts WHERE email = 'lower@gmail.com'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(g1_renamed.as_deref(), Some("AI 会员"));
+        assert_eq!(g3_renamed.as_deref(), Some("AI 会员"));
     }
 }

@@ -3,6 +3,10 @@ import {
     Search,
     X,
     FileDown,
+    FolderPlus,
+    SlidersHorizontal,
+    Plus,
+    Check,
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import Pagination from './Pagination';
@@ -15,13 +19,22 @@ import useBrowserStatus from '../hooks/useBrowserStatus';
 import HistoryDrawer from './HistoryDrawer';
 import ExportDialog from './ExportDialog';
 import PromptDialog from './PromptDialog';
+import AccountCategoryDialog from './AccountCategoryDialog';
 import BatchToolbar from './BatchToolbar';
 import AccountTable from './AccountTable';
 import api from '../services/api';
-import { splitMultiValueLines } from '../utils/multiValueField';
+import {
+    getCategoryColorMeta,
+    joinMultiValueLines,
+    splitDelimitedGroupNames,
+    splitGroupNameValues,
+    splitMultiValueLines,
+    UNCATEGORIZED_FILTER_KEY,
+} from '../utils/multiValueField';
 import { describeClearCacheResult } from '../utils/browserUtils';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import { messageDialog } from '../utils/dialogs';
+import { renderInBody } from '../utils/portal';
 
 const REUSABLE_INLINE_FIELDS = ['recovery', 'phone', 'groupName', 'remark', 'regYear', 'country'];
 const DEFAULT_EXPORT_CATEGORY_LABEL_TEMPLATE = '{index}. {groupField}: {groupValue}（共 {count} 条）';
@@ -43,10 +56,10 @@ const DEFAULT_EXPORT_CONFIG = Object.freeze({
 const buildEmptyRecentValues = () =>
     Object.fromEntries(REUSABLE_INLINE_FIELDS.map(field => [field, []]));
 
-const extractReusableCandidates = (field, value) => {
+const extractReusableCandidates = (field, value, knownCategories = null) => {
     if (!REUSABLE_INLINE_FIELDS.includes(field)) return [];
     if (value === null || value === undefined) return [];
-    return splitMultiValueLines(field, value);
+    return splitMultiValueLines(field, value, knownCategories);
 };
 
 const normalizeSortDirection = (direction, fallbackDirection) =>
@@ -114,6 +127,11 @@ const normalizeExportConfig = (rawConfig) => {
  */
 const AccountListView = ({
     accounts,
+    allAccounts = null,
+    accountCategories = [],
+    onCreateCategory,
+    onUpdateCategory,
+    onDeleteCategory,
     search,
     setSearch,
     groupFilter,
@@ -137,8 +155,85 @@ const AccountListView = ({
 }) => {
     const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
     const [inlineRecentValuesByField, setInlineRecentValuesByField] = useState(() => buildEmptyRecentValues());
+    const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
     const searchInputRef = useRef(null);
     const handledActionIdRef = useRef(0);
+
+    const knownCategoryNames = useMemo(
+        () => accountCategories.map(cat => cat.name).filter(Boolean),
+        [accountCategories],
+    );
+
+    const categoryColorMap = useMemo(() => {
+        const map = {};
+        for (const cat of accountCategories) {
+            if (cat?.name) map[cat.name] = cat.color || 'blue';
+        }
+        return map;
+    }, [accountCategories]);
+
+    const countSourceAccounts = useMemo(
+        () => (Array.isArray(allAccounts) ? allAccounts : accounts),
+        [allAccounts, accounts],
+    );
+
+    const { categoryCounts, uncategorizedCount, adHocTags } = useMemo(() => {
+        const counts = {};
+        let uncategorized = 0;
+        const formalByLower = new Map();
+        for (const name of knownCategoryNames) {
+            formalByLower.set(name.toLowerCase(), name);
+        }
+        const adHocSet = new Set();
+        const adHocLowerSet = new Set();
+
+        for (const acc of countSourceAccounts) {
+            const tags = splitGroupNameValues(acc?.groupName, knownCategoryNames);
+            if (tags.length === 0) {
+                uncategorized += 1;
+                continue;
+            }
+            const accountCountedKeys = new Set();
+            for (const tag of tags) {
+                const lower = tag.toLowerCase();
+                const canonical = formalByLower.get(lower) || tag;
+                if (!accountCountedKeys.has(canonical.toLowerCase())) {
+                    accountCountedKeys.add(canonical.toLowerCase());
+                    counts[canonical] = (counts[canonical] || 0) + 1;
+                }
+                if (!formalByLower.has(lower) && !adHocLowerSet.has(lower)) {
+                    adHocLowerSet.add(lower);
+                    adHocSet.add(tag);
+                }
+            }
+        }
+
+        return {
+            categoryCounts: counts,
+            uncategorizedCount: uncategorized,
+            adHocTags: Array.from(adHocSet).sort((a, b) => a.localeCompare(b, 'zh-CN', { sensitivity: 'base' })),
+        };
+    }, [countSourceAccounts, knownCategoryNames]);
+
+    const mergedGroups = useMemo(() => {
+        const seenLower = new Set();
+        const list = [];
+        for (const name of knownCategoryNames) {
+            const lower = name.toLowerCase();
+            if (!seenLower.has(lower)) {
+                seenLower.add(lower);
+                list.push(name);
+            }
+        }
+        for (const name of (allGroups || [])) {
+            const lower = String(name || '').toLowerCase();
+            if (name && !seenLower.has(lower)) {
+                seenLower.add(lower);
+                list.push(name);
+            }
+        }
+        return list;
+    }, [knownCategoryNames, allGroups]);
 
     // 错误提示：优先用右上角提示条，没有时退回系统提示框
     const notifyError = useCallback((msg) => {
@@ -293,7 +388,7 @@ const AccountListView = ({
                 const rawValue = account?.[field];
                 if (!rawValue) continue;
 
-                const candidates = splitMultiValueLines(field, rawValue);
+                const candidates = splitMultiValueLines(field, rawValue, knownCategoryNames);
 
                 for (const candidate of candidates) {
                     if (!candidate || seenByField[field].has(candidate)) continue;
@@ -307,7 +402,7 @@ const AccountListView = ({
         }
 
         return byField;
-    }, [accounts]);
+    }, [accounts, knownCategoryNames]);
 
     const recentValuesByField = useMemo(() => {
         const merged = buildEmptyRecentValues();
@@ -338,7 +433,7 @@ const AccountListView = ({
     }, [inlineRecentValuesByField, accountRecentValuesByField]);
 
     const trackRecentInlineValue = useCallback((field, value) => {
-        const candidates = extractReusableCandidates(field, value);
+        const candidates = extractReusableCandidates(field, value, knownCategoryNames);
         if (candidates.length === 0) return;
 
         setInlineRecentValuesByField(prev => {
@@ -357,7 +452,7 @@ const AccountListView = ({
             next[field] = updated.slice(0, 5);
             return next;
         });
-    }, []);
+    }, [knownCategoryNames]);
 
     const handleInlineEditWithRecent = useCallback((id, field, value) => {
         trackRecentInlineValue(field, value);
@@ -379,7 +474,8 @@ const AccountListView = ({
         onInlineEdit: handleInlineEditWithRecent,
         onInlineEditMany: handleInlineEditManyWithRecent,
         getAccount: (id) => accounts.find(account => account.id === id),
-        allGroups,
+        allGroups: mergedGroups,
+        knownCategoryNames,
         recentValuesByField,
     });
 
@@ -509,11 +605,131 @@ const AccountListView = ({
     };
 
     const [batchEditPrompt, setBatchEditPrompt] = useState(null);
+    const [batchCategoryModal, setBatchCategoryModal] = useState(null); // { count }
+    const [batchSelectedCats, setBatchSelectedCats] = useState([]);
+    const [batchCustomTagInput, setBatchCustomTagInput] = useState('');
+    const [batchCategoryMode, setBatchCategoryMode] = useState('replace'); // 'replace' | 'append'
+    const [batchQuickCatName, setBatchQuickCatName] = useState('');
+    const [batchQuickCatError, setBatchQuickCatError] = useState('');
+    const [batchCategoryError, setBatchCategoryError] = useState('');
+    const [creatingBatchQuickCat, setCreatingBatchQuickCat] = useState(false);
+
+    const handleCloseCategoryDialog = useCallback(() => {
+        setCategoryDialogOpen(false);
+    }, []);
+
+    useEffect(() => {
+        if (!batchCategoryModal) return undefined;
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setBatchCategoryModal(null);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [batchCategoryModal]);
 
     const handleBatchEdit = useCallback((field, fieldLabel) => {
         if (selection.selectedIds.size === 0 || isBatchProcessing) return;
+        if (field === 'groupName') {
+            setBatchSelectedCats([]);
+            setBatchCustomTagInput('');
+            setBatchCategoryMode('replace');
+            setBatchQuickCatName('');
+            setBatchQuickCatError('');
+            setBatchCategoryError('');
+            setBatchCategoryModal({ count: selection.selectedIds.size });
+            return;
+        }
         setBatchEditPrompt({ field, fieldLabel, count: selection.selectedIds.size });
     }, [selection, isBatchProcessing]);
+
+    const toggleBatchSelectedCat = (catName) => {
+        if (batchCategoryError) setBatchCategoryError('');
+        setBatchSelectedCats(prev =>
+            prev.includes(catName) ? prev.filter(n => n !== catName) : [...prev, catName],
+        );
+    };
+
+    const handleCreateBatchQuickCategory = async () => {
+        const trimmed = batchQuickCatName.trim();
+        if (!trimmed || creatingBatchQuickCat || typeof onCreateCategory !== 'function') return;
+        setBatchQuickCatError('');
+        setCreatingBatchQuickCat(true);
+        try {
+            const res = await onCreateCategory({ name: trimmed, color: 'blue' });
+            if (res?.success && res.data?.name) {
+                setBatchSelectedCats(prev => (prev.includes(res.data.name) ? prev : [...prev, res.data.name]));
+                setBatchQuickCatName('');
+                if (batchCategoryError) setBatchCategoryError('');
+            } else {
+                setBatchQuickCatError(res?.message || '添加分类失败');
+            }
+        } finally {
+            setCreatingBatchQuickCat(false);
+        }
+    };
+
+    const applyBatchCategoryAssignment = async (e) => {
+        e.preventDefault();
+        if (selection.selectedIds.size === 0 || isBatchProcessing) return;
+
+        const extraTags = splitDelimitedGroupNames(batchCustomTagInput);
+        const chosenTags = [];
+        const seen = new Set();
+        for (const tag of [...batchSelectedCats, ...extraTags]) {
+            const clean = String(tag || '').trim();
+            if (clean && !seen.has(clean)) {
+                seen.add(clean);
+                chosenTags.push(clean);
+            }
+        }
+
+        const mode = batchCategoryMode;
+        if (mode === 'append' && chosenTags.length === 0) {
+            setBatchCategoryError('追加模式下请至少选择一个分类或输入自定义标签');
+            return;
+        }
+
+        setBatchCategoryError('');
+        const selectedIds = Array.from(selection.selectedIds);
+        setBatchCategoryModal(null);
+        setIsBatchProcessing(true);
+        try {
+            const accountMap = new Map(accounts.map(acc => [acc.id, acc]));
+            const updatePromises = selectedIds.map(id => {
+                let nextVal;
+                if (mode === 'append') {
+                    const existing = splitGroupNameValues(accountMap.get(id)?.groupName, knownCategoryNames);
+                    nextVal = joinMultiValueLines([...existing, ...chosenTags]);
+                } else {
+                    nextVal = joinMultiValueLines(chosenTags);
+                }
+                return handleInlineEditWithRecent(id, 'groupName', nextVal)
+                    .then(success => ({ id, success }))
+                    .catch(error => {
+                        console.error(`更新账号 ${id} 分类失败:`, error);
+                        return { id, success: false, error };
+                    });
+            });
+
+            const results = await Promise.allSettled(updatePromises);
+            const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+            const failCount = results.length - successCount;
+
+            if (failCount > 0 && successCount === 0) {
+                notifyError(`批量分类失败，共 ${failCount} 个账号`);
+            } else if (failCount > 0) {
+                notifyError(`成功更新 ${successCount} 个账号，${failCount} 个失败`);
+            } else {
+                onNotify?.(`已更新 ${successCount} 个账号`);
+            }
+            selection.clearSelection();
+        } finally {
+            setIsBatchProcessing(false);
+        }
+    };
 
     const applyBatchEdit = useCallback(async (field, value) => {
         if (field === 'regYear' && value.trim() !== '') {
@@ -562,7 +778,16 @@ const AccountListView = ({
 
     const handleExportAccounts = async (config) => {
         try {
+            const targetCount = exportScopeCounts[exportDialog.mode] ?? 0;
+            if (targetCount <= 0) {
+                notifyError('当前范围无符合条件的账号可导出');
+                return;
+            }
             const { accountIds, searchParam } = buildExportRequestParams(exportDialog.mode);
+            if (Array.isArray(accountIds) && accountIds.length === 0) {
+                notifyError('当前范围无符合条件的账号可导出');
+                return;
+            }
             const normalizedConfig = normalizeExportConfig(config);
             const fileName = `accounts_export_${formatLocalDate(new Date())}.txt`;
 
@@ -694,31 +919,93 @@ const AccountListView = ({
                     </div>
                 </div>
 
-                {/* 横向像素胶囊标签筛选条（替代呆板的原生下拉框） */}
-                {allGroups && allGroups.length > 0 && (
-                    <div className="gm-filter-strip" role="group" aria-label="按标签筛选">
-                        <button
-                            type="button"
-                            onClick={() => { setGroupFilter(null); pagination.resetPage(); }}
-                            className={`gm-filter-pill ${!groupFilter ? 'is-active' : ''}`}
-                        >
-                            全部
-                        </button>
-                        {allGroups.map(group => (
+                {/* 横向像素胶囊分类筛选条（常驻显示，支持添加/管理自定义分类与未分类筛选） */}
+                <div className="gm-filter-strip" role="group" aria-label="账号分类筛选">
+                    <button
+                        type="button"
+                        onClick={() => { setGroupFilter(null); pagination.resetPage(); }}
+                        className={`gm-filter-pill inline-flex items-center gap-1.5 ${!groupFilter ? 'is-active' : ''}`}
+                    >
+                        <span>全部</span>
+                        <span className="font-mono text-[10.5px] opacity-75">{countSourceAccounts.length}</span>
+                    </button>
+
+                    {mergedGroups.map(group => {
+                        const isActive = groupFilter === group;
+                        const catColor = categoryColorMap[group];
+                        const colorMeta = catColor ? getCategoryColorMeta(catColor) : null;
+                        const count = categoryCounts[group] || 0;
+                        return (
                             <button
                                 key={group}
                                 type="button"
                                 onClick={() => {
-                                    setGroupFilter(groupFilter === group ? null : group);
+                                    setGroupFilter(isActive ? null : group);
                                     pagination.resetPage();
                                 }}
-                                className={`gm-filter-pill ${groupFilter === group ? 'is-active' : ''}`}
+                                className={`gm-filter-pill inline-flex items-center gap-1.5 ${isActive ? 'is-active' : ''}`}
+                                style={isActive && colorMeta ? {
+                                    background: colorMeta.bg,
+                                    borderColor: colorMeta.border,
+                                    color: colorMeta.text,
+                                } : undefined}
                             >
-                                {group}
+                                {colorMeta && (
+                                    <span
+                                        className="w-1.5 h-1.5 rounded-[1px] shrink-0"
+                                        style={{ background: colorMeta.dot }}
+                                        aria-hidden="true"
+                                    />
+                                )}
+                                <span>{group}</span>
+                                <span className="font-mono text-[10.5px] opacity-70">{count}</span>
                             </button>
-                        ))}
-                    </div>
-                )}
+                        );
+                    })}
+
+                    {(uncategorizedCount > 0 || groupFilter === UNCATEGORIZED_FILTER_KEY) && mergedGroups.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setGroupFilter(groupFilter === UNCATEGORIZED_FILTER_KEY ? null : UNCATEGORIZED_FILTER_KEY);
+                                pagination.resetPage();
+                            }}
+                            className={`gm-filter-pill inline-flex items-center gap-1.5 ${groupFilter === UNCATEGORIZED_FILTER_KEY ? 'is-active' : ''}`}
+                        >
+                            <span>未分类</span>
+                            <span className="font-mono text-[10.5px] opacity-70">{uncategorizedCount}</span>
+                        </button>
+                    )}
+
+                    {typeof onCreateCategory === 'function' && (
+                        <button
+                            type="button"
+                            onClick={() => setCategoryDialogOpen(true)}
+                            className="gm-filter-pill inline-flex items-center gap-1"
+                            style={{
+                                borderStyle: 'dashed',
+                                color: 'var(--primary)',
+                                borderColor: 'rgba(91, 142, 244, 0.35)',
+                            }}
+                            title="添加或自定义谷歌邮箱分类"
+                        >
+                            <FolderPlus size={12} />
+                            <span>添加分类</span>
+                        </button>
+                    )}
+
+                    {typeof onCreateCategory === 'function' && (accountCategories.length > 0 || adHocTags.length > 0) && (
+                        <button
+                            type="button"
+                            onClick={() => setCategoryDialogOpen(true)}
+                            className="gm-filter-pill inline-flex items-center gap-1"
+                            title="重命名、改色或删除分类"
+                        >
+                            <SlidersHorizontal size={11.5} />
+                            <span>管理分类</span>
+                        </button>
+                    )}
+                </div>
 
                 {/* 批量操作工具栏 */}
                 <BatchToolbar
@@ -770,6 +1057,8 @@ const AccountListView = ({
                     browserStatuses={browserStatuses}
                     openingBrowserIds={openingBrowserIds}
                     onOpenBrowser={handleOpenBrowser}
+                    categoryColorMap={categoryColorMap}
+                    knownCategoryNames={knownCategoryNames}
                 />
 
                 {/* 分页 */}
@@ -812,6 +1101,189 @@ const AccountListView = ({
                 submitLabel="应用"
                 onSubmit={(value) => applyBatchEdit(batchEditPrompt.field, value)}
                 onCancel={() => setBatchEditPrompt(null)}
+            />
+
+            {/* 批量设置分类 / 标签弹窗 */}
+            {batchCategoryModal && renderInBody(
+                <div
+                    className="gm-overlay"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="批量设置分类"
+                    onClick={() => setBatchCategoryModal(null)}
+                >
+                    <div
+                        className="gm-modal w-full max-w-md"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="gm-modal-header">
+                            <h3 className="gm-title text-base">批量设置分类 / 标签</h3>
+                            <button
+                                type="button"
+                                onClick={() => setBatchCategoryModal(null)}
+                                className="gm-icon-btn"
+                                style={{ width: 30, height: 30 }}
+                                aria-label="关闭批量分类"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <form onSubmit={applyBatchCategoryAssignment}>
+                            <div className="gm-modal-body space-y-3.5">
+                                <p className="text-xs gm-text-2">
+                                    将应用到选中的 {batchCategoryModal.count} 个账号；不勾选且输入框留空时，覆盖模式会清空原有分类。
+                                </p>
+
+                                {mergedGroups.length > 0 && (
+                                    <div className="space-y-1.5">
+                                        <span className="text-xs font-medium gm-text-2 block">点击选择分类（可多选）</span>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {mergedGroups.map(name => {
+                                                const active = batchSelectedCats.includes(name);
+                                                const catColor = categoryColorMap[name];
+                                                const meta = catColor ? getCategoryColorMeta(catColor) : null;
+                                                return (
+                                                    <button
+                                                        key={name}
+                                                        type="button"
+                                                        onClick={() => toggleBatchSelectedCat(name)}
+                                                        className={`gm-filter-pill inline-flex items-center gap-1.5 ${active ? 'is-active' : ''}`}
+                                                        style={active && meta ? {
+                                                            background: meta.bg,
+                                                            borderColor: meta.border,
+                                                            color: meta.text,
+                                                        } : undefined}
+                                                    >
+                                                        {meta && (
+                                                            <span
+                                                                className="w-1.5 h-1.5 rounded-[1px]"
+                                                                style={{ background: meta.dot }}
+                                                                aria-hidden="true"
+                                                            />
+                                                        )}
+                                                        <span>{name}</span>
+                                                        {active && <Check size={11} />}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {typeof onCreateCategory === 'function' && (
+                                    <div className="space-y-1">
+                                        <span className="text-xs font-medium gm-text-2 block">快速新建自定义分类</span>
+                                        <div className="flex items-center gap-1.5">
+                                            <input
+                                                type="text"
+                                                maxLength={40}
+                                                value={batchQuickCatName}
+                                                onChange={(e) => {
+                                                    setBatchQuickCatName(e.target.value);
+                                                    if (batchQuickCatError) setBatchQuickCatError('');
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        handleCreateBatchQuickCategory();
+                                                    }
+                                                }}
+                                                placeholder="输入新分类名，如：AI 订阅"
+                                                className="gm-input flex-1 h-8 text-xs"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleCreateBatchQuickCategory}
+                                                disabled={creatingBatchQuickCat || !batchQuickCatName.trim()}
+                                                className="gm-btn gm-btn-secondary gm-btn-sm shrink-0"
+                                            >
+                                                <Plus size={12} />
+                                                <span>新建并选中</span>
+                                            </button>
+                                        </div>
+                                        {batchQuickCatError && (
+                                            <p role="alert" className="text-xs" style={{ color: 'var(--danger)' }}>
+                                                {batchQuickCatError}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                <label className="block space-y-1">
+                                    <span className="text-xs font-medium gm-text-2">其他自定义标签（可选）</span>
+                                    <input
+                                        type="text"
+                                        value={batchCustomTagInput}
+                                        onChange={(e) => {
+                                            setBatchCustomTagInput(e.target.value);
+                                            if (batchCategoryError) setBatchCategoryError('');
+                                        }}
+                                        placeholder="多个可用逗号分隔，留空则仅使用上方所选分类"
+                                        className="gm-input w-full text-xs"
+                                    />
+                                </label>
+
+                                <div className="flex items-center gap-3 pt-1">
+                                    <label className="flex items-center gap-1.5 text-xs gm-text-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="batchCategoryMode"
+                                            value="replace"
+                                            checked={batchCategoryMode === 'replace'}
+                                            onChange={() => {
+                                                setBatchCategoryMode('replace');
+                                                if (batchCategoryError) setBatchCategoryError('');
+                                            }}
+                                        />
+                                        <span>覆盖原有分类</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 text-xs gm-text-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="batchCategoryMode"
+                                            value="append"
+                                            checked={batchCategoryMode === 'append'}
+                                            onChange={() => {
+                                                setBatchCategoryMode('append');
+                                                if (batchCategoryError) setBatchCategoryError('');
+                                            }}
+                                        />
+                                        <span>追加到现有分类</span>
+                                    </label>
+                                </div>
+                                {batchCategoryError && (
+                                    <p role="alert" className="text-xs" style={{ color: 'var(--danger)' }}>
+                                        {batchCategoryError}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="gm-modal-footer">
+                                <button
+                                    type="button"
+                                    onClick={() => setBatchCategoryModal(null)}
+                                    className="gm-btn gm-btn-secondary flex-1"
+                                >
+                                    取消
+                                </button>
+                                <button type="submit" className="gm-btn gm-btn-primary flex-1">
+                                    应用
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>,
+            )}
+
+            {/* 账号自定义分类管理弹窗 */}
+            <AccountCategoryDialog
+                isOpen={categoryDialogOpen}
+                categories={accountCategories}
+                categoryCounts={categoryCounts}
+                adHocTags={adHocTags}
+                onCreateCategory={onCreateCategory}
+                onUpdateCategory={onUpdateCategory}
+                onDeleteCategory={onDeleteCategory}
+                onClose={handleCloseCategoryDialog}
             />
         </>
     );

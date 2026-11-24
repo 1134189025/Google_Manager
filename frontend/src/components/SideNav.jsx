@@ -8,7 +8,6 @@ import {
     RefreshCw,
     CalendarClock,
     Bot,
-    KeyRound,
     Sparkles,
     CreditCard,
     Server,
@@ -108,7 +107,6 @@ const SideNav = ({
             id: 'finance',
             title: '账号与金融',
             items: [
-                { id: 'vault', label: '账号与密钥', icon: KeyRound, count: overview?.vaultItemsCount || 0 },
                 { id: 'ai', label: 'AI 订阅', icon: Sparkles, count: overview?.aiSubscriptionsCount || 0 },
                 { id: 'cards', label: 'U 卡与支付卡', icon: CreditCard, count: overview?.paymentCardsCount || 0 },
             ],

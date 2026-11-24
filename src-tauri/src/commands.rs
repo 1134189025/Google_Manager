@@ -88,7 +88,12 @@ pub fn list_backups(_db: State<Database>) -> Result<Vec<BackupInfo>, String> {
 #[tauri::command]
 pub fn restore_backup(db: State<Database>, backup_name: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    database::restore_backup(&conn, &backup_name)
+    database::restore_backup(&conn, &backup_name)?;
+    let dir = crate::agent::agent_memory_dir();
+    if let Err(e) = crate::agent::sync_memory_files_to_dir(&conn, &dir) {
+        log::warn!("恢复备份后同步本地记忆文件失败: {}", e);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -247,18 +252,19 @@ fn render_export(
             pro_count, normal_count
         ));
 
-        // 标签分布
+        // 标签分布（识别已知自定义分类，避免把含空格分类名拆碎统计）
+        let known_categories_lower: HashSet<String> =
+            crate::assets_db::query_account_categories(conn)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| c.name.to_lowercase())
+                .collect();
         let mut group_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for acc in &accounts {
             if let Some(ref g) = acc.group_name {
-                if !g.is_empty() {
-                    for tag in g.split(|c: char| c == ',' || c == '，' || c.is_whitespace()) {
-                        let tag = tag.trim();
-                        if !tag.is_empty() {
-                            *group_counts.entry(tag.to_string()).or_insert(0) += 1;
-                        }
-                    }
+                for tag in crate::assets_db::split_group_name_values(g, &known_categories_lower) {
+                    *group_counts.entry(tag).or_insert(0) += 1;
                 }
             }
         }
@@ -791,5 +797,33 @@ mod tests {
 
         // token 与 tpl 必须完整保留，不能被截断
         assert_eq!(sms_url.as_deref(), Some(url));
+    }
+
+    #[test]
+    fn test_render_export_stats_preserves_spaced_account_category() {
+        let conn = setup_export_query_test_db();
+        crate::assets_db::init_asset_tables(&conn).unwrap();
+        crate::assets_db::create_account_category(
+            &conn,
+            &crate::assets_db::AccountCategoryInput {
+                name: "AI 订阅".to_string(),
+                color: Some("violet".to_string()),
+                sort_order: None,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (email, password, group_name, status, sold_status) VALUES (?1, ?2, ?3, 'pro', 'unsold')",
+            params!["spaced@example.com", "pwd", "AI 订阅"],
+        )
+        .unwrap();
+
+        let mut config = build_base_export_config();
+        config.include_stats = true;
+        let (text, count) = render_export(&conn, None, None, &config).unwrap();
+        assert_eq!(count, 1);
+        assert!(text.contains("AI 订阅: 1 个"), "actual output:\n{}", text);
+        assert!(!text.contains("  - AI: 1 个"));
+        assert!(!text.contains("  - 订阅: 1 个"));
     }
 }

@@ -52,13 +52,13 @@ const BatchToolbar = ({
                     )}
 
                     <button
-                        onClick={() => onBatchEdit('groupName', '标签')}
+                        onClick={() => onBatchEdit('groupName', '分类 / 标签')}
                         disabled={isBatchProcessing}
                         className={btnBase}
                         title="为选中账号设置标签"
                     >
                         <Tag size={14} />
-                        <span>批量设置标签</span>
+                        <span>批量设置分类</span>
                     </button>
 
                     <button

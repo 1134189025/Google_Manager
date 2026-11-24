@@ -43,6 +43,7 @@
   /* 极细发丝边框 */
   --border: rgba(255, 255, 255, 0.085);
   --border-light: rgba(255, 255, 255, 0.055);
+  --border-subtle: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.15);
 
   /* 文本层级（柔和暖灰白，避免高反差白字刺眼，同时拉升次级与弱文字可读性） */
@@ -118,6 +119,7 @@
 
   --border: rgba(17, 24, 39, 0.09);
   --border-light: rgba(17, 24, 39, 0.055);
+  --border-subtle: rgba(17, 24, 39, 0.08);
   --border-strong: rgba(17, 24, 39, 0.16);
 
   --text-primary: #111827;

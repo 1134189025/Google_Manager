@@ -16,16 +16,21 @@ import {
     RefreshCw,
     Terminal,
     Cpu,
+    Brain,
+    Minimize2,
+    Archive,
 } from 'lucide-react';
 import api from '../services/api';
+import { snakeToCamel } from '../services/utils';
 import { confirmDialog } from '../utils/dialogs';
 import { isTauriRuntime } from '../utils/tauriRuntime';
+import AgentMemoryDialog from './AgentMemoryDialog';
 
 const STARTER_PROMPTS = [
     '盘点未来 90 天内到期的服务器、域名和 AI 订阅，并按人民币汇总月度与年度支出。',
     '检查当前所有服务器在线状态和 CPU/内存/磁盘指标，指出需要关注的节点。',
     '帮我新建一条提醒：下个月 1 号检查主力服务器和域名续费情况。',
-    '总结目前工作区已录入的谷歌账号、密钥库、支付卡与 AI 订阅分布。',
+    '总结目前工作区已录入的谷歌账号、支付卡、服务器、域名与 AI 订阅分布。',
 ];
 
 const SLASH_SHORTCUTS = [
@@ -430,14 +435,34 @@ const ThinkingBlock = ({ text, isLive = false, elapsedMs = 0 }) => {
     );
 };
 
-const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
+const formatTokenCount = (n) => {
+    const num = Number(n);
+    if (!Number.isFinite(num) || num <= 0) return '0';
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(num >= 10000 ? 0 : 1)}K`;
+    return String(num);
+};
+
+const AgentView = ({
+    onNotify,
+    onOpenSystemSettings,
+    onOverviewChanged,
+    settingsVersion = 0,
+    reloadVersion = 0,
+}) => {
     const [settings, setSettings] = useState(null);
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [stopping, setStopping] = useState(false);
+    const [compacting, setCompacting] = useState(false);
     const [input, setInput] = useState('');
     const [actingProposalKey, setActingProposalKey] = useState(null);
+    const [contextStatus, setContextStatus] = useState(null);
+    const [memorySnapshot, setMemorySnapshot] = useState(null);
+    const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+    const [showArchivedMessages, setShowArchivedMessages] = useState(false);
+    const [compactionSummaryOpen, setCompactionSummaryOpen] = useState(false);
 
     // 实时流式状态（Pi Agent 风格：即时思考流 + 工具执行态 + Token 增量输出）
     const [liveStream, setLiveStream] = useState(null);
@@ -446,31 +471,81 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
     const [traceByMsgId, setTraceByMsgId] = useState({});
 
     const liveStreamRef = useRef(null);
+    const sendingRef = useRef(false);
+    const onNotifyRef = useRef(onNotify);
+    const prevSettingsVersionRef = useRef(settingsVersion);
     const scrollBottomRef = useRef(null);
 
     useEffect(() => {
         liveStreamRef.current = liveStream;
     }, [liveStream]);
 
-    const loadAll = useCallback(async () => {
-        setLoading(true);
+    useEffect(() => {
+        sendingRef.current = sending;
+    }, [sending]);
+
+    useEffect(() => {
+        onNotifyRef.current = onNotify;
+    }, [onNotify]);
+
+    const refreshContextAndMemory = useCallback(async () => {
+        try {
+            const [ctxRes, memRes] = await Promise.all([
+                typeof api?.getAgentContextStatus === 'function'
+                    ? api.getAgentContextStatus()
+                    : Promise.resolve(null),
+                typeof api?.getAgentMemory === 'function'
+                    ? api.getAgentMemory()
+                    : Promise.resolve(null),
+            ]);
+            if (ctxRes?.success && ctxRes.data) setContextStatus(ctxRes.data);
+            if (memRes?.success && memRes.data) setMemorySnapshot(memRes.data);
+        } catch {
+            // 降级静默跳过
+        }
+    }, []);
+
+    const loadAll = useCallback(async ({ preserveLoading = false } = {}) => {
+        if (!preserveLoading) setLoading(true);
         try {
             const [sRes, mRes] = await Promise.all([
                 api.getAgentSettings(),
                 api.getAgentMessages(),
             ]);
-            if (sRes.success && sRes.data) setSettings(sRes.data);
-            if (mRes.success && Array.isArray(mRes.data)) setMessages(mRes.data);
+            if (sRes?.success && sRes.data) setSettings(sRes.data);
+            if (!sendingRef.current && mRes?.success && Array.isArray(mRes.data)) {
+                setMessages(mRes.data);
+            }
+            await refreshContextAndMemory();
         } catch (err) {
-            onNotify?.(`加载 AI 助手失败: ${err?.message || err}`, 'error');
+            onNotifyRef.current?.(`加载 AI 助手失败: ${err?.message || err}`, 'error');
         } finally {
-            setLoading(false);
+            if (!preserveLoading) setLoading(false);
         }
-    }, [onNotify]);
+    }, [refreshContextAndMemory]);
+
+    const refreshSettingsSilently = useCallback(async () => {
+        try {
+            const sRes = await api.getAgentSettings();
+            if (sRes?.success && sRes.data) setSettings(sRes.data);
+            await refreshContextAndMemory();
+        } catch {
+            // 静默跳过，避免中断当前会话
+        }
+    }, [refreshContextAndMemory]);
 
     useEffect(() => {
-        loadAll();
-    }, [loadAll]);
+        loadAll({ preserveLoading: sendingRef.current });
+    }, [loadAll, reloadVersion]);
+
+    // 仅 AI 配置保存（settingsVersion > 0）时静默刷新配置与上下文状态，不置 loading、不覆写消息流
+    useEffect(() => {
+        if (settingsVersion === prevSettingsVersionRef.current) return;
+        prevSettingsVersionRef.current = settingsVersion;
+        if (settingsVersion > 0) {
+            refreshSettingsSilently();
+        }
+    }, [settingsVersion, refreshSettingsSilently]);
 
     // 监听 Tauri 后端发出的实时流式事件
     useEffect(() => {
@@ -482,9 +557,18 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
             try {
                 const mod = await import('@tauri-apps/api/event');
                 if (!active || typeof mod?.listen !== 'function') return;
-                unlisten = await mod.listen('agent-stream', (event) => {
+                const stop = await mod.listen('agent-stream', (event) => {
+                    if (!active) return;
                     const p = event?.payload;
                     if (!p || typeof p !== 'object') return;
+                    if (p.type === 'compacted' && p.status) {
+                        setContextStatus(snakeToCamel(p.status));
+                    }
+                    if (p.type === 'memory_updated' && typeof api?.getAgentMemory === 'function') {
+                        api.getAgentMemory().then(r => {
+                            if (active && r?.success && r.data) setMemorySnapshot(r.data);
+                        }).catch(() => {});
+                    }
                     setLiveStream(prev => {
                         if (!prev) return prev;
                         if (prev.streamId && p.stream_id && prev.streamId !== p.stream_id) {
@@ -492,7 +576,13 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         }
                         const streamId = prev.streamId || p.stream_id || null;
                         if (p.type === 'start') {
-                            return { ...prev, streamId };
+                            return { ...prev, streamId, phase: 'connecting' };
+                        }
+                        if (p.type === 'compacting') {
+                            return { ...prev, streamId, phase: 'compacting' };
+                        }
+                        if (p.type === 'compacted') {
+                            return { ...prev, streamId, phase: 'connecting' };
                         }
                         if (p.type === 'reasoning') {
                             return {
@@ -542,6 +632,11 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         return prev;
                     });
                 });
+                if (active) {
+                    unlisten = stop;
+                } else if (typeof stop === 'function') {
+                    stop();
+                }
             } catch {
                 // 非 Tauri 环境静默降级
             }
@@ -594,9 +689,43 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
         if (res.success) {
             setMessages([]);
             setTraceByMsgId({});
+            setShowArchivedMessages(false);
+            setCompactionSummaryOpen(false);
+            await refreshContextAndMemory();
             onNotify?.('对话历史已清空');
         } else {
             onNotify?.(res.message || '清空失败', 'error');
+        }
+    };
+
+    const handleCompact = async (instructions = null) => {
+        if (compacting || sending) return;
+        if (!isConfigured) {
+            onNotify?.('请先配置 AI 模型接口地址与模型名称', 'error');
+            onOpenSystemSettings?.('ai');
+            return;
+        }
+        if (typeof api?.compactAgentContext !== 'function') return;
+        setCompacting(true);
+        try {
+            const res = await api.compactAgentContext(instructions || null);
+            if (!res.success || !res.data) {
+                onNotify?.(res.message || '压缩上下文失败', 'error');
+                return;
+            }
+            if (res.data.status) {
+                setContextStatus(res.data.status);
+            }
+            setShowArchivedMessages(false);
+            const beforeTok = res.data.compaction?.tokensBefore || 0;
+            const afterTok = res.data.compaction?.tokensAfter || 0;
+            onNotify?.(
+                beforeTok > afterTok
+                    ? `上下文已压缩（${formatTokenCount(beforeTok)} → ${formatTokenCount(afterTok)} tokens）`
+                    : '上下文压缩完成',
+            );
+        } finally {
+            setCompacting(false);
         }
     };
 
@@ -612,16 +741,41 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
         }
     };
 
+    const handleOpenMemoryDialog = async () => {
+        if (sending || compacting) return;
+        await refreshContextAndMemory();
+        setMemoryDialogOpen(true);
+    };
+
     const handleSend = async (customText = null) => {
         let text = String(customText ?? input).trim();
-        if (!text || sending) return;
+        if (!text || sending || compacting) return;
 
-        // 支持 Pi 风格斜杠快捷指令
+        // 支持 Pi 风格 & Hermes 风格斜杠快捷指令
         if (text === '/clear') {
             if (customText === null) setInput('');
             await handleClear();
             return;
         }
+        if (text.toLowerCase() === '/memory') {
+            if (customText === null) setInput('');
+            await refreshContextAndMemory();
+            setMemoryDialogOpen(true);
+            return;
+        }
+        const compactMatch = text.match(/^\/compact(?:\s+([\s\S]*))?$/i);
+        if (compactMatch) {
+            if (!isConfigured) {
+                onNotify?.('请先配置 AI 模型接口地址与模型名称', 'error');
+                onOpenSystemSettings?.('ai');
+                return;
+            }
+            const focus = (compactMatch[1] || '').trim() || null;
+            if (customText === null) setInput('');
+            await handleCompact(focus);
+            return;
+        }
+
         const matchedSlash = SLASH_SHORTCUTS.find(item => item.cmd === text.toLowerCase());
         if (matchedSlash) {
             text = matchedSlash.prompt;
@@ -679,10 +833,12 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         },
                     }));
                 }
+                await refreshContextAndMemory();
             } else {
                 // 请求前参数校验失败时撤回乐观气泡并恢复输入，防止消息丢失
                 setMessages(prev => prev.filter(m => m.id !== optimisticId));
                 if (customText === null) setInput(text);
+                await refreshContextAndMemory();
                 onNotify?.(res.message || '发送消息失败', 'error');
             }
         } finally {
@@ -724,6 +880,192 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                 : String(settings.maxTokens)
         : '';
 
+    const memoryTotalCount =
+        (memorySnapshot?.userEntries?.length || 0) + (memorySnapshot?.memoryEntries?.length || 0);
+
+    const latestCompaction = contextStatus?.latestCompaction || null;
+    const { archivedMessages, activeMessages } = useMemo(() => {
+        if (!latestCompaction?.firstKeptMessageId) {
+            return { archivedMessages: [], activeMessages: messages };
+        }
+        const archived = [];
+        const active = [];
+        for (const m of messages) {
+            if (typeof m.id === 'number' && m.id < latestCompaction.firstKeptMessageId) {
+                archived.push(m);
+            } else {
+                active.push(m);
+            }
+        }
+        return { archivedMessages: archived, activeMessages: active };
+    }, [messages, latestCompaction]);
+
+    const contextPct = Math.min(100, Math.round(Number(contextStatus?.usagePercent || 0)));
+
+    const renderMessageItem = (msg) => {
+        const isUser = msg.role === 'user';
+        const trace = traceByMsgId[msg.id];
+        const inlineSplit = isUser
+            ? { thinking: '', answer: msg.content }
+            : splitInlineThink(msg.content);
+        const combinedThinking = [trace?.reasoning, inlineSplit.thinking]
+            .filter(Boolean)
+            .join('\n\n');
+        const answerText = inlineSplit.answer || msg.content;
+
+        return (
+            <div
+                key={msg.id}
+                className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} gap-2`}
+            >
+                {isUser ? (
+                    <div className="max-w-[85%] rounded-xl px-4 py-2.5 text-xs leading-relaxed whitespace-pre-wrap bg-[var(--primary)] text-white shadow-sm">
+                        {msg.content}
+                    </div>
+                ) : (
+                    <div className="w-full max-w-[92%] space-y-2">
+                        {trace?.tools?.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                                {trace.tools.map(t => (
+                                    <span key={t.id} className="gm-tool-pill is-done">
+                                        <Check size={11} />
+                                        <span>{t.label}</span>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+
+                        {combinedThinking && (
+                            <ThinkingBlock
+                                text={combinedThinking}
+                                isLive={false}
+                                elapsedMs={trace?.elapsedMs || 0}
+                            />
+                        )}
+
+                        <div className="gm-agent-reply-card">
+                            <AgentMarkdown
+                                content={answerText}
+                                onCopyCode={(code) => copyText(code, '代码')}
+                            />
+                            <div className="mt-3 pt-2 border-t border-[var(--border-light)] flex items-center justify-between gap-2 text-[10.5px] font-mono gm-text-3">
+                                <span className="min-w-0 truncate" title={settings?.model || 'assistant'}>
+                                    {settings?.model || 'assistant'}
+                                    {trace?.elapsedMs ? ` · ${(trace.elapsedMs / 1000).toFixed(1)}s` : ''}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => copyText(answerText, '回复内容')}
+                                    className="inline-flex items-center gap-1 shrink-0 hover:text-[var(--text-primary)] cursor-pointer"
+                                >
+                                    <Copy size={11} />
+                                    <span>复制</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {Array.isArray(msg.proposals) &&
+                    msg.proposals.map(prop => {
+                        const st =
+                            PROPOSAL_STATUS_STYLE[prop.status] ||
+                            PROPOSAL_STATUS_STYLE.pending;
+                        const busy = actingProposalKey === `${msg.id}:${prop.id}`;
+                        const diffs = Array.isArray(prop.diffs) ? prop.diffs : [];
+                        return (
+                            <div
+                                key={prop.id}
+                                className="w-full max-w-xl rounded-xl border border-[var(--border-strong)] bg-[var(--bg-panel)] p-4 space-y-3 text-xs"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="font-semibold text-[var(--text-primary)]">
+                                        {prop.targetLabel}
+                                    </div>
+                                    <span
+                                        className="gm-badge text-[11px]"
+                                        style={{
+                                            background: st.background,
+                                            color: st.color,
+                                        }}
+                                    >
+                                        {st.label}
+                                    </span>
+                                </div>
+                                {prop.reason && (
+                                    <p className="text-[var(--text-secondary)]">
+                                        原因：{prop.reason}
+                                    </p>
+                                )}
+                                {diffs.length > 0 && (
+                                    <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+                                        <table className="w-full text-[11px]">
+                                            <thead>
+                                                <tr className="bg-[var(--bg-elevated)] text-left text-[var(--text-secondary)]">
+                                                    <th className="px-2.5 py-1.5">字段</th>
+                                                    <th className="px-2.5 py-1.5">变更前</th>
+                                                    <th className="px-2.5 py-1.5">变更后</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[var(--border-light)]">
+                                                {diffs.map((d, i) => (
+                                                    <tr key={`${d.field}-${i}`}>
+                                                        <td className="px-2.5 py-1.5 font-medium">
+                                                            {d.label || d.field}
+                                                        </td>
+                                                        <td className="px-2.5 py-1.5 font-mono text-[var(--text-muted)]">
+                                                            {formatDiffValue(d.before)}
+                                                        </td>
+                                                        <td className="px-2.5 py-1.5 font-mono text-[var(--primary)]">
+                                                            {formatDiffValue(d.after)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                                {prop.status === 'pending' && (
+                                    <div className="flex justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            className="gm-btn gm-btn-ghost text-xs py-1 px-2.5"
+                                            disabled={busy}
+                                            onClick={() =>
+                                                handleProposalAction(
+                                                    msg.id,
+                                                    prop.id,
+                                                    'reject',
+                                                )
+                                            }
+                                        >
+                                            <X size={13} />
+                                            忽略
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="gm-btn gm-btn-primary text-xs py-1 px-2.5"
+                                            disabled={busy}
+                                            onClick={() =>
+                                                handleProposalAction(
+                                                    msg.id,
+                                                    prop.id,
+                                                    'apply',
+                                                )
+                                            }
+                                        >
+                                            <Check size={13} />
+                                            确认写入
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+            </div>
+        );
+    };
+
     return (
         <div className="max-w-5xl mx-auto flex flex-col gap-3.5 h-[calc(100vh-106px)] gm-view-enter">
             {/* 头部 */}
@@ -735,17 +1077,65 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         <span className="gm-pixel-tag is-accent">PI-STREAM</span>
                     </h1>
                     <p className="gm-subtitle">
-                        极简流式代理：基于本地严格脱敏元数据实时工具检索与推理；写操作生成可确认 Diff 提案。
+                        支持上下文自动/手动压缩与 Hermes 双区本地记忆；基于脱敏元数据实时检索，写操作需 Diff 确认。
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    {contextStatus && (
+                        <div
+                            className={`gm-context-pill ${
+                                contextStatus.needsCompaction
+                                    ? 'is-danger'
+                                    : contextPct >= 65
+                                        ? 'is-warn'
+                                        : ''
+                            }`}
+                            title={`阈值 ${formatTokenCount(contextStatus.thresholdTokens)} · 预留 ${formatTokenCount(contextStatus.reserveTokens)} · 保留近期 ${formatTokenCount(contextStatus.keepRecentTokens)}`}
+                        >
+                            <span>
+                                上下文 {formatTokenCount(contextStatus.estimatedTokens)} / {formatTokenCount(contextStatus.contextWindow)} ({contextStatus.usagePercent}%)
+                            </span>
+                            <span className="gm-context-bar" aria-hidden="true">
+                                <span
+                                    className="gm-context-bar-fill"
+                                    style={{ width: `${contextPct}%` }}
+                                />
+                            </span>
+                        </div>
+                    )}
+                    <button
+                        type="button"
+                        className="gm-btn gm-btn-ghost text-xs"
+                        onClick={handleOpenMemoryDialog}
+                        disabled={sending || compacting}
+                    >
+                        <Brain size={14} className="text-[var(--primary)]" />
+                        <span>本地记忆 ({memoryTotalCount})</span>
+                    </button>
+                    {activeMessages.length >= 2 && (
+                        <button
+                            type="button"
+                            className="gm-btn gm-btn-ghost text-xs"
+                            onClick={() => handleCompact(null)}
+                            disabled={compacting || sending}
+                            title="参考 Pi-Agent 规则压缩较早对话，保留末尾完整问答"
+                        >
+                            <Minimize2 size={13} className={compacting ? 'animate-spin' : ''} />
+                            <span>{compacting ? '压缩中...' : '压缩上下文'}</span>
+                        </button>
+                    )}
                     <button
                         type="button"
                         className="gm-btn gm-btn-ghost text-xs"
                         onClick={() => onOpenSystemSettings?.('ai')}
+                        title={
+                            isConfigured
+                                ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}`
+                                : '配置 AI 模型'
+                        }
                     >
-                        <SlidersHorizontal size={14} />
-                        <span>
+                        <SlidersHorizontal size={14} className="shrink-0" />
+                        <span className="max-w-[200px] truncate">
                             {isConfigured ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}` : '配置 AI 模型'}
                         </span>
                     </button>
@@ -754,7 +1144,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                             type="button"
                             className="gm-btn gm-btn-ghost text-xs text-[var(--danger)]"
                             onClick={handleClear}
-                            disabled={sending}
+                            disabled={sending || compacting}
                         >
                             <Trash2 size={14} />
                             清空对话
@@ -812,7 +1202,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                                 直接提问资产、费用、服务器巡检，或让代理生成续费提醒提案
                             </h2>
                             <p className="text-xs text-[var(--text-secondary)]">
-                                支持流式推理输出、工具调用可视化与 <span className="font-mono">/summary</span> / <span className="font-mono">/renewals</span> / <span className="font-mono">/servers</span> 快捷指令：
+                                支持流式推理、Pi 上下文压缩 (<span className="font-mono">/compact</span>)、Hermes 本地记忆 (<span className="font-mono">/memory</span>) 与 <span className="font-mono">/summary</span> / <span className="font-mono">/renewals</span> / <span className="font-mono">/servers</span> 快捷指令：
                             </p>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-2xl mx-auto text-left">
@@ -831,174 +1221,64 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                     </div>
                 ) : (
                     <>
-                        {messages.map(msg => {
-                            const isUser = msg.role === 'user';
-                            const trace = traceByMsgId[msg.id];
-                            const inlineSplit = isUser
-                                ? { thinking: '', answer: msg.content }
-                                : splitInlineThink(msg.content);
-                            const combinedThinking = [trace?.reasoning, inlineSplit.thinking]
-                                .filter(Boolean)
-                                .join('\n\n');
-                            const answerText = inlineSplit.answer || msg.content;
-
-                            return (
-                                <div
-                                    key={msg.id}
-                                    className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} gap-2`}
+                        {/* 已归档的较早原始消息（Pi Compaction 保留原日志可展开回看） */}
+                        {archivedMessages.length > 0 && (
+                            <div className="space-y-3">
+                                <button
+                                    type="button"
+                                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                                    onClick={() => setShowArchivedMessages(v => !v)}
                                 >
-                                    {isUser ? (
-                                        <div className="max-w-[85%] rounded-xl px-4 py-2.5 text-xs leading-relaxed whitespace-pre-wrap bg-[var(--primary)] text-white shadow-sm">
-                                            {msg.content}
-                                        </div>
-                                    ) : (
-                                        <div className="w-full max-w-[92%] space-y-2">
-                                            {/* 工具执行轨迹胶囊 */}
-                                            {trace?.tools?.length > 0 && (
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {trace.tools.map(t => (
-                                                        <span key={t.id} className="gm-tool-pill is-done">
-                                                            <Check size={11} />
-                                                            <span>{t.label}</span>
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            )}
+                                    <span className="inline-flex items-center gap-1.5 font-mono">
+                                        {showArchivedMessages ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                        <Archive size={12} />
+                                        <span>已归档 {archivedMessages.length} 条较早原始对话（未计入当前请求上下文）</span>
+                                    </span>
+                                    <span>{showArchivedMessages ? '收起' : '展开查看'}</span>
+                                </button>
+                                {showArchivedMessages && (
+                                    <div className="space-y-4 pl-2 border-l-2 border-[var(--border-subtle)] opacity-85">
+                                        {archivedMessages.map(renderMessageItem)}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
-                                            {/* 可折叠思考过程 */}
-                                            {combinedThinking && (
-                                                <ThinkingBlock
-                                                    text={combinedThinking}
-                                                    isLive={false}
-                                                    elapsedMs={trace?.elapsedMs || 0}
-                                                />
-                                            )}
+                        {/* Pi Compaction 摘要分界卡 */}
+                        {latestCompaction && (
+                            <div className="gm-compaction-card">
+                                <button
+                                    type="button"
+                                    onClick={() => setCompactionSummaryOpen(v => !v)}
+                                    className="w-full flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11.5px] cursor-pointer text-left"
+                                >
+                                    <span className="inline-flex items-center gap-2 font-medium text-[var(--text-primary)]">
+                                        {compactionSummaryOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                        <Minimize2 size={13} className="text-[var(--primary)]" />
+                                        <span>上下文已压缩摘要 (Pi Compaction)</span>
+                                        <span className="font-mono text-[10.5px] gm-text-3">
+                                            已归档 {latestCompaction.compactedMessageCount} 条 · {formatTokenCount(latestCompaction.tokensBefore)} → {formatTokenCount(latestCompaction.tokensAfter)} tokens
+                                        </span>
+                                    </span>
+                                    <span className="text-[11px] font-mono text-[var(--primary)]">
+                                        {compactionSummaryOpen ? '收起摘要' : '查看交接摘要'}
+                                    </span>
+                                </button>
+                                {compactionSummaryOpen && (
+                                    <div className="px-3.5 pb-3 pt-2 border-t border-[var(--border-subtle)]">
+                                        <AgentMarkdown
+                                            content={latestCompaction.summary}
+                                            onCopyCode={(code) => copyText(code, '代码')}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
-                                            {/* 助手回复正文（桌面原生 Markdown 排版） */}
-                                            <div className="gm-agent-reply-card">
-                                                <AgentMarkdown
-                                                    content={answerText}
-                                                    onCopyCode={(code) => copyText(code, '代码')}
-                                                />
-                                                <div className="mt-3 pt-2 border-t border-[var(--border-light)] flex items-center justify-between text-[10.5px] font-mono gm-text-3">
-                                                    <span>
-                                                        {settings?.model || 'assistant'}
-                                                        {trace?.elapsedMs ? ` · ${(trace.elapsedMs / 1000).toFixed(1)}s` : ''}
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => copyText(answerText, '回复内容')}
-                                                        className="inline-flex items-center gap-1 hover:text-[var(--text-primary)] cursor-pointer"
-                                                    >
-                                                        <Copy size={11} />
-                                                        <span>复制</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+                        {/* 保留的近期活跃消息 */}
+                        {activeMessages.map(renderMessageItem)}
 
-                                    {Array.isArray(msg.proposals) &&
-                                        msg.proposals.map(prop => {
-                                            const st =
-                                                PROPOSAL_STATUS_STYLE[prop.status] ||
-                                                PROPOSAL_STATUS_STYLE.pending;
-                                            const busy = actingProposalKey === `${msg.id}:${prop.id}`;
-                                            const diffs = Array.isArray(prop.diffs) ? prop.diffs : [];
-                                            return (
-                                                <div
-                                                    key={prop.id}
-                                                    className="w-full max-w-xl rounded-xl border border-[var(--border-strong)] bg-[var(--bg-panel)] p-4 space-y-3 text-xs"
-                                                >
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className="font-semibold text-[var(--text-primary)]">
-                                                            {prop.targetLabel}
-                                                        </div>
-                                                        <span
-                                                            className="gm-badge text-[11px]"
-                                                            style={{
-                                                                background: st.background,
-                                                                color: st.color,
-                                                            }}
-                                                        >
-                                                            {st.label}
-                                                        </span>
-                                                    </div>
-                                                    {prop.reason && (
-                                                        <p className="text-[var(--text-secondary)]">
-                                                            原因：{prop.reason}
-                                                        </p>
-                                                    )}
-                                                    {diffs.length > 0 && (
-                                                        <div className="rounded-lg border border-[var(--border)] overflow-hidden">
-                                                            <table className="w-full text-[11px]">
-                                                                <thead>
-                                                                    <tr className="bg-[var(--bg-elevated)] text-left text-[var(--text-secondary)]">
-                                                                        <th className="px-2.5 py-1.5">字段</th>
-                                                                        <th className="px-2.5 py-1.5">变更前</th>
-                                                                        <th className="px-2.5 py-1.5">变更后</th>
-                                                                    </tr>
-                                                                </thead>
-                                                                <tbody className="divide-y divide-[var(--border-light)]">
-                                                                    {diffs.map((d, i) => (
-                                                                        <tr key={`${d.field}-${i}`}>
-                                                                            <td className="px-2.5 py-1.5 font-medium">
-                                                                                {d.label || d.field}
-                                                                            </td>
-                                                                            <td className="px-2.5 py-1.5 font-mono text-[var(--text-muted)]">
-                                                                                {formatDiffValue(d.before)}
-                                                                            </td>
-                                                                            <td className="px-2.5 py-1.5 font-mono text-[var(--primary)]">
-                                                                                {formatDiffValue(d.after)}
-                                                                            </td>
-                                                                        </tr>
-                                                                    ))}
-                                                                </tbody>
-                                                            </table>
-                                                        </div>
-                                                    )}
-                                                    {prop.status === 'pending' && (
-                                                        <div className="flex justify-end gap-2">
-                                                            <button
-                                                                type="button"
-                                                                className="gm-btn gm-btn-ghost text-xs py-1 px-2.5"
-                                                                disabled={busy}
-                                                                onClick={() =>
-                                                                    handleProposalAction(
-                                                                        msg.id,
-                                                                        prop.id,
-                                                                        'reject',
-                                                                    )
-                                                                }
-                                                            >
-                                                                <X size={13} />
-                                                                忽略
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="gm-btn gm-btn-primary text-xs py-1 px-2.5"
-                                                                disabled={busy}
-                                                                onClick={() =>
-                                                                    handleProposalAction(
-                                                                        msg.id,
-                                                                        prop.id,
-                                                                        'apply',
-                                                                    )
-                                                                }
-                                                            >
-                                                                <Check size={13} />
-                                                                确认写入
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                </div>
-                            );
-                        })}
-
-                        {/* 实时流式输出气泡（立即呈现：连接状态 / 思考过程 / 工具调用 / 逐字回复） */}
+                        {/* 实时流式输出气泡（立即呈现：自动压缩态 / 连接态 / 思考过程 / 工具调用 / 逐字回复） */}
                         {liveStream && (() => {
                             const liveSplit = splitInlineThink(liveStream.content);
                             const liveThinking = [liveStream.reasoning, liveSplit.thinking]
@@ -1006,13 +1286,15 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                                 .join('\n\n');
                             const liveAnswer = liveSplit.answer;
                             const statusText =
-                                liveStream.phase === 'tool'
-                                    ? '正在调用本地脱敏工具…'
-                                    : liveStream.phase === 'thinking' || (liveThinking && !liveAnswer)
-                                        ? '模型正在深度推理…'
-                                        : liveAnswer
-                                            ? '正在流式输出…'
-                                            : '等待模型首字响应…';
+                                liveStream.phase === 'compacting'
+                                    ? '上下文接近上限，正在执行 Pi 自动压缩…'
+                                    : liveStream.phase === 'tool'
+                                        ? '正在调用本地脱敏工具…'
+                                        : liveStream.phase === 'thinking' || (liveThinking && !liveAnswer)
+                                            ? '模型正在深度推理…'
+                                            : liveAnswer
+                                                ? '正在流式输出…'
+                                                : '等待模型首字响应…';
 
                             return (
                                 <div className="flex flex-col items-start gap-2" aria-live="polite">
@@ -1088,7 +1370,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         <button
                             key={item.cmd}
                             type="button"
-                            disabled={sending}
+                            disabled={sending || compacting}
                             onClick={() => handleSend(item.prompt)}
                             className="px-2 py-0.5 rounded bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-mono transition-colors cursor-pointer"
                             title={item.prompt}
@@ -1096,6 +1378,24 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                             {item.cmd} · {item.label}
                         </button>
                     ))}
+                    <button
+                        type="button"
+                        disabled={sending || compacting || activeMessages.length < 2}
+                        onClick={() => handleCompact(null)}
+                        className="px-2 py-0.5 rounded bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-mono transition-colors cursor-pointer"
+                        title="压缩较早历史对话（支持 /compact [聚焦主题]）"
+                    >
+                        /compact · 压缩
+                    </button>
+                    <button
+                        type="button"
+                        disabled={sending || compacting}
+                        onClick={handleOpenMemoryDialog}
+                        className="px-2 py-0.5 rounded bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-mono transition-colors cursor-pointer"
+                        title="查看或编辑 Hermes 本地长期记忆 (USER.md / MEMORY.md)"
+                    >
+                        /memory · 记忆
+                    </button>
                 </div>
 
                 <form
@@ -1108,7 +1408,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                     <textarea
                         rows={2}
                         className="gm-input flex-1 text-xs resize-none"
-                        placeholder="输入问题或让助手生成提醒/费用修改提案（Enter 发送，Shift+Enter 换行，支持 /summary /renewals /servers）..."
+                        placeholder="输入问题或让助手生成提醒/费用修改提案（Enter 发送，Shift+Enter 换行，支持 /compact /memory /summary）..."
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => {
@@ -1117,7 +1417,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                                 handleSend();
                             }
                         }}
-                        disabled={sending}
+                        disabled={sending || compacting}
                     />
                     {sending ? (
                         <button
@@ -1134,7 +1434,7 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                         <button
                             type="submit"
                             className="gm-btn gm-btn-primary text-xs px-4 py-2.5 shrink-0"
-                            disabled={!input.trim()}
+                            disabled={compacting || !input.trim()}
                         >
                             <Send size={14} />
                             <span>发送</span>
@@ -1142,6 +1442,18 @@ const AgentView = ({ onNotify, onOpenSystemSettings, onOverviewChanged }) => {
                     )}
                 </form>
             </div>
+
+            <AgentMemoryDialog
+                isOpen={memoryDialogOpen}
+                snapshot={memorySnapshot}
+                onClose={() => setMemoryDialogOpen(false)}
+                onSnapshotChange={(nextSnap) => {
+                    setMemorySnapshot(nextSnap);
+                    refreshContextAndMemory();
+                }}
+                onNotify={onNotify}
+                onOpenAiSettings={() => onOpenSystemSettings?.('ai')}
+            />
         </div>
     );
 };

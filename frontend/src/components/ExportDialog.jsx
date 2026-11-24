@@ -249,7 +249,15 @@ const ExportDialog = ({
         return previewLines.join('\n');
     };
 
+    const currentExportCount = getCurrentExportCount();
+    const isEmptyExportScope = currentExportCount <= 0;
+
     const handleExport = () => {
+        if (isEmptyExportScope) {
+            messageDialog('当前范围无符合条件的账号可导出', { kind: 'warning' });
+            return;
+        }
+
         if (selectedFields.length === 0) {
             messageDialog('请至少选择一个字段', { kind: 'warning' });
             return;
@@ -284,6 +292,11 @@ const ExportDialog = ({
                         <p className="text-xs mt-0.5 gm-text-2">
                             {getExportModeDescription()}
                         </p>
+                        {isEmptyExportScope && (
+                            <p role="status" className="text-xs mt-1" style={{ color: 'var(--warning)' }}>
+                                当前范围无符合条件的账号可导出
+                            </p>
+                        )}
                     </div>
                     <button
                         onClick={onClose}
@@ -504,7 +517,8 @@ const ExportDialog = ({
                     </button>
                     <button
                         onClick={handleExport}
-                        className="gm-btn gm-btn-success w-full sm:w-auto"
+                        disabled={isEmptyExportScope}
+                        className={`gm-btn gm-btn-success w-full sm:w-auto ${isEmptyExportScope ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <FileText size={15} />
                         导出

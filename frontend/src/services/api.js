@@ -454,98 +454,6 @@ const api = {
         }
     },
 
-    // ─── 账号与密钥库 ──────────────────────────────────────────────
-
-    async getVaultFolders() {
-        try {
-            const data = await adapter.getVaultFolders();
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to get vault folders:', error);
-            return { success: false, data: [], message: getErrorMessage(error) };
-        }
-    },
-
-    async createVaultFolder(folder) {
-        try {
-            const data = await adapter.createVaultFolder(folder);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to create vault folder:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async updateVaultFolder(id, folder) {
-        try {
-            const data = await adapter.updateVaultFolder(id, folder);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to update vault folder:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async deleteVaultFolder(id) {
-        try {
-            await adapter.deleteVaultFolder(id);
-            return { success: true };
-        } catch (error) {
-            console.error('Failed to delete vault folder:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async getVaultItems(search = '') {
-        try {
-            const data = await adapter.getVaultItems(search || undefined);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to get vault items:', error);
-            return { success: false, data: [], message: getErrorMessage(error) };
-        }
-    },
-
-    async createVaultItem(item) {
-        try {
-            const data = await adapter.createVaultItem(item);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to create vault item:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async updateVaultItem(id, item) {
-        try {
-            const data = await adapter.updateVaultItem(id, item);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to update vault item:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async deleteVaultItem(id) {
-        try {
-            await adapter.deleteVaultItem(id);
-            return { success: true };
-        } catch (error) {
-            console.error('Failed to delete vault item:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
-    async batchImportVaultItems(items) {
-        try {
-            const data = await adapter.batchImportVaultItems(items);
-            return { success: true, data };
-        } catch (error) {
-            console.error('Failed to batch import vault items:', error);
-            return { success: false, message: getErrorMessage(error) };
-        }
-    },
-
     // ─── U 卡与支付卡 ──────────────────────────────────────────────
 
     async getPaymentCards() {
@@ -1052,6 +960,96 @@ const api = {
         }
     },
 
+    async fetchAgentModels(baseUrl = null, apiKey = null) {
+        try {
+            const data = await adapter.fetchAgentModels(baseUrl, apiKey);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to fetch agent models:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getAgentContextStatus() {
+        try {
+            const data = await adapter.getAgentContextStatus();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get agent context status:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async compactAgentContext(instructions = null) {
+        try {
+            const data = await adapter.compactAgentContext(instructions);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to compact agent context:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getAgentMemory() {
+        try {
+            const data = await adapter.getAgentMemory();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get agent memory:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async addAgentMemoryEntry(target, content) {
+        try {
+            const data = await adapter.addAgentMemoryEntry(target, content);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to add agent memory entry:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateAgentMemoryEntry(id, content) {
+        try {
+            const data = await adapter.updateAgentMemoryEntry(id, content);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update agent memory entry:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteAgentMemoryEntry(id) {
+        try {
+            const data = await adapter.deleteAgentMemoryEntry(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to delete agent memory entry:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async clearAgentMemory(target = null) {
+        try {
+            const data = await adapter.clearAgentMemory(target);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to clear agent memory:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async openAgentMemoryDir() {
+        try {
+            await adapter.openAgentMemoryDir();
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to open agent memory dir:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
     async getAgentMessages() {
         try {
             const data = await adapter.getAgentMessages();
@@ -1140,6 +1138,48 @@ const api = {
             return { success: true };
         } catch (error) {
             console.error('Failed to handle window close:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── 谷歌账号自定义分类 ──────────────────────────────────────
+
+    async getAccountCategories() {
+        try {
+            const data = await adapter.getAccountCategories();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get account categories:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createAccountCategory(category) {
+        try {
+            const data = await adapter.createAccountCategory(category);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create account category:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateAccountCategory(id, category) {
+        try {
+            const data = await adapter.updateAccountCategory(id, category);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update account category:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteAccountCategory(id) {
+        try {
+            await adapter.deleteAccountCategory(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete account category:', error);
             return { success: false, message: getErrorMessage(error) };
         }
     }
