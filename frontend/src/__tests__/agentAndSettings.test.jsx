@@ -331,7 +331,9 @@ describe('Phase 5: AgentView & SystemSettingsDialog', () => {
         const onRequestClose = vi.fn();
         render(<TitleBar view="home" onRequestClose={onRequestClose} />);
         await user.click(screen.getByRole('button', { name: '关闭窗口' }));
-        expect(onRequestClose).toHaveBeenCalledTimes(1);
+        await waitFor(() => {
+            expect(onRequestClose).toHaveBeenCalledTimes(1);
+        });
 
         const onClose = vi.fn();
         render(<CloseConfirmDialog isOpen={true} onClose={onClose} onNotify={vi.fn()} />);

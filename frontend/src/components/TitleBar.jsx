@@ -98,6 +98,10 @@ const TitleBar = ({ view = 'home', onRequestClose }) => {
     };
 
     const handleClose = async () => {
+        if (!isTauriRuntime()) {
+            onRequestClose?.();
+            return;
+        }
         const win = await getSafeWindow();
         if (!win) {
             onRequestClose?.();
