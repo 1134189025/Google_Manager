@@ -15,7 +15,13 @@ import api from '../services/api';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { resolveBrandIconUrl } from '../utils/brandIcons';
-import { formatCycleLabel, formatMoney } from '../utils/renewalUtils';
+import {
+    DATE_INPUT_MAX,
+    DATE_INPUT_MIN,
+    clampDateInputValue,
+    formatCycleLabel,
+    formatMoney,
+} from '../utils/renewalUtils';
 
 const OAUTH_PROVIDERS = [
     { id: 'openai', label: 'OpenAI / ChatGPT (Codex)' },
@@ -659,9 +665,14 @@ const AiSubscriptionsView = ({
                                     <label className="text-[12px] gm-text-2">下次续费日</label>
                                     <input
                                         type="date"
+                                        min={DATE_INPUT_MIN}
+                                        max={DATE_INPUT_MAX}
                                         className="gm-input w-full"
                                         value={form.renewsAt}
-                                        onChange={(e) => setForm(prev => ({ ...prev, renewsAt: e.target.value }))}
+                                        onChange={(e) => setForm(prev => ({
+                                            ...prev,
+                                            renewsAt: clampDateInputValue(e.target.value),
+                                        }))}
                                     />
                                 </div>
                             </div>

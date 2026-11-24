@@ -111,4 +111,69 @@ describe('HomeView 首页总览', () => {
         await user.click(within(recentSection).getByRole('button', { name: /全部/ }));
         expect(props.onNavigateList).toHaveBeenCalledTimes(1);
     });
+
+    it('首页集合展示统一人民币费用总览、实时汇率、即将到期续费与资产工作区入口', async () => {
+        const user = userEvent.setup();
+        const props = defaultProps();
+        const onNavigate = vi.fn();
+        const onRefreshFxRate = vi.fn();
+        render(
+            <HomeView
+                {...props}
+                onNavigate={onNavigate}
+                onRefreshFxRate={onRefreshFxRate}
+                fxInfo={{ rate: 7.2, source: 'open.er-api.com', isFallback: false, loading: false }}
+                overview={{
+                    vaultItemsCount: 12,
+                    paymentCardsCount: 3,
+                    aiSubscriptionsCount: 2,
+                    serversCount: 4,
+                    serversOnlineCount: 3,
+                    domainsCount: 6,
+                    pendingRemindersCount: 1,
+                    spend: {
+                        cny: { monthly: 100, yearly: 1200, once: 0, count: 2 },
+                        usd: { monthly: 10, yearly: 120, once: 0, count: 1 },
+                        unpriced: 0,
+                    },
+                    upcomingRenewals: [
+                        {
+                            kind: 'server',
+                            id: 1,
+                            name: '香港-VPS',
+                            date: '2026-12-04',
+                            days: 10,
+                            billingAmount: 10,
+                            billingCurrency: 'USD',
+                            billingCycle: 'month',
+                        },
+                    ],
+                    dueReminders: [
+                        { id: 9, title: '核对信用卡账单', dueAt: '2026-12-01' },
+                    ],
+                }}
+            />,
+        );
+
+        const spendSection = screen.getByLabelText('费用结算总览');
+        // 100 + 10 * 7.2 = ¥172.00；年付 1200 + 120 * 7.2 = ¥2064.00
+        expect(within(spendSection).getByText('¥172.00')).toBeInTheDocument();
+        expect(within(spendSection).getByText('¥2064.00')).toBeInTheDocument();
+        expect(within(spendSection).getByText('1 USD = ¥7.2000')).toBeInTheDocument();
+
+        await user.click(within(spendSection).getByRole('button', { name: '刷新实时汇率' }));
+        expect(onRefreshFxRate).toHaveBeenCalledWith(true);
+
+        const renewalsSection = screen.getByLabelText('即将到期续费');
+        expect(within(renewalsSection).getByText('香港-VPS')).toBeInTheDocument();
+        expect(within(renewalsSection).getByText('¥72.00/月付')).toBeInTheDocument();
+
+        const remindersSection = screen.getByLabelText('待办备忘提醒');
+        expect(within(remindersSection).getByText('核对信用卡账单')).toBeInTheDocument();
+
+        const assetsSection = screen.getByLabelText('数字资产总览');
+        expect(within(assetsSection).getByText('3/4')).toBeInTheDocument();
+        await user.click(within(assetsSection).getByRole('button', { name: /域名管理/ }));
+        expect(onNavigate).toHaveBeenCalledWith('domains');
+    });
 });

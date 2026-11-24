@@ -344,6 +344,16 @@ const api = {
         }
     },
 
+    async getUsdCnyRate(forceRefresh = false) {
+        try {
+            const data = await adapter.getUsdCnyRate(forceRefresh);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get USD/CNY rate:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
     async getRenewalsSummary(withinDays = 90) {
         try {
             const data = await adapter.getRenewalsSummary(withinDays);

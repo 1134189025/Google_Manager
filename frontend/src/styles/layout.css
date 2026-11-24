@@ -59,13 +59,28 @@
   color: var(--text-muted);
 }
 
+.gm-titlebar-pixel-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .gm-titlebar-pixel {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 1px;
   background: var(--primary);
-  opacity: 0.85;
+  opacity: 0.9;
   flex-shrink: 0;
+}
+
+.gm-titlebar-pixel.is-dim {
+  opacity: 0.42;
+}
+
+.gm-titlebar-pixel.is-mid {
+  opacity: 0.68;
 }
 
 .gm-titlebar-app {
@@ -297,11 +312,17 @@
   content: "";
   position: absolute;
   left: -1px;
-  top: 9px;
-  bottom: 9px;
-  width: 2px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
   border-radius: 1px;
-  background: var(--primary);
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--primary) 0px,
+    var(--primary) 4px,
+    transparent 4px,
+    transparent 6px
+  );
 }
 
 .nav-item-icon {
@@ -417,21 +438,21 @@
   padding: 18px 28px 36px;
 }
 
-/* ---------- 首页 MosMos 极简非对称无框布局 ---------- */
+/* ---------- 首页像素风个人资产总控台布局 ---------- */
 .gm-home {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 156px;
-  gap: 56px;
-  max-width: 1040px;
+  gap: 36px;
+  max-width: 1140px;
   margin: 0 auto;
-  padding: 24px 12px 24px;
+  padding: 10px 8px 28px;
 }
 
 .gm-home-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
 }
 
 .gm-home-clock {
@@ -456,10 +477,10 @@
 
 .gm-home-greeting {
   margin: 0;
-  font-size: 38px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.025em;
-  line-height: 1.15;
+  line-height: 1.2;
   color: var(--text-primary);
 }
 
@@ -663,12 +684,12 @@
   color: var(--text-muted);
 }
 
-/* 右侧竖排统计栏（无框悬浮，与中下内容自然对齐） */
+/* 右侧竖排统计栏（像素角标轻框，与首页总控台视觉对齐） */
 .gm-home-stats {
   display: flex;
   flex-direction: column;
-  gap: 26px;
-  padding-top: 184px;
+  gap: 22px;
+  padding-top: 72px;
   height: fit-content;
 }
 

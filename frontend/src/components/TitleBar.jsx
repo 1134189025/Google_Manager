@@ -117,7 +117,11 @@ const TitleBar = ({ view = 'home' }) => {
                 onDoubleClick={handleToggleMaximize}
             >
                 <span className="gm-titlebar-brand" data-tauri-drag-region>
-                    <span className="gm-titlebar-pixel" aria-hidden="true" />
+                    <span className="gm-titlebar-pixel-strip" aria-hidden="true">
+                        <span className="gm-titlebar-pixel" />
+                        <span className="gm-titlebar-pixel is-mid" />
+                        <span className="gm-titlebar-pixel is-dim" />
+                    </span>
                     <span className="gm-titlebar-app" data-tauri-drag-region>GoogleManager</span>
                     <span className="gm-titlebar-sep" aria-hidden="true">/</span>
                     <span className="gm-titlebar-view" data-tauri-drag-region>{currentLabel}</span>

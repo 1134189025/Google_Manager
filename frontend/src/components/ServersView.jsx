@@ -29,7 +29,18 @@ import api from '../services/api';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { formatDbTimestamp } from '../utils/timeUtils';
-import { daysUntilDay, formatCycleLabel, formatDaysBadge, formatMoney } from '../utils/renewalUtils';
+import {
+    DATE_INPUT_MAX,
+    DATE_INPUT_MIN,
+    DEFAULT_USD_CNY_RATE,
+    clampDateInputValue,
+    convertToCny,
+    daysUntilDay,
+    formatCnyAmount,
+    formatCycleLabel,
+    formatDaysBadge,
+    formatMoney,
+} from '../utils/renewalUtils';
 
 const EMPTY_SERVER_FORM = {
     name: '',
@@ -122,29 +133,49 @@ const MetricBar = ({ label, value, totalText }) => {
     const pct = hasVal ? Math.max(0, Math.min(100, Math.round(value))) : 0;
     const barColor =
         pct >= 90 ? 'var(--danger)' : pct >= 75 ? 'var(--warning)' : 'var(--primary)';
+    const segments = 10;
+    const activeCount = hasVal ? Math.round((pct / 100) * segments) : 0;
 
     return (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
             <div className="flex items-center justify-between text-[11px]">
                 <span className="text-[var(--text-secondary)]">
                     {label}
                     {totalText ? ` (${totalText})` : ''}
                 </span>
-                <span className="font-mono text-[var(--text-primary)]">
+                <span className="font-mono font-semibold text-[var(--text-primary)]">
                     {hasVal ? `${pct}%` : '-'}
                 </span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden bg-[var(--bg-elevated)]">
-                <div
-                    className="h-full rounded-full transition-all"
-                    style={{ width: `${hasVal ? pct : 0}%`, background: barColor }}
-                />
+            <div className="gm-pixel-meter" aria-hidden="true">
+                {Array.from({ length: segments }).map((_, idx) => (
+                    <span
+                        key={idx}
+                        className="gm-pixel-meter-seg"
+                        style={
+                            idx < activeCount
+                                ? { background: barColor, opacity: 0.92 }
+                                : undefined
+                        }
+                    />
+                ))}
             </div>
         </div>
     );
 };
 
-const ServersView = ({ onNotify, onOverviewChanged, onOpenTerminal, onOpenSystemSettings }) => {
+const looksLikePublicSshKey = (text) => {
+    const trimmed = String(text || '').trim();
+    return /^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-|sk-ssh-)/i.test(trimmed);
+};
+
+const ServersView = ({
+    fxRate = DEFAULT_USD_CNY_RATE,
+    onNotify,
+    onOverviewChanged,
+    onOpenTerminal,
+    onOpenSystemSettings,
+}) => {
     const [servers, setServers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -603,24 +634,31 @@ const ServersView = ({ onNotify, onOverviewChanged, onOpenTerminal, onOpenSystem
 
     const summary = useMemo(() => {
         let online = 0;
-        let monthlyUsd = 0;
         let monthlyCny = 0;
+        let yearlyCny = 0;
+        let usdCount = 0;
         for (const s of servers) {
             if (s.status === 'online') online += 1;
             const amt = Number(s.billingAmount);
             if (!Number.isFinite(amt) || amt <= 0) continue;
-            const monthly =
-                s.billingCycle === 'month' ? amt : s.billingCycle === 'year' ? amt / 12 : 0;
-            if (s.billingCurrency === 'CNY') monthlyCny += monthly;
-            else monthlyUsd += monthly;
+            if (s.billingCurrency === 'USD') usdCount += 1;
+            const cnyAmt = convertToCny(amt, s.billingCurrency, fxRate) || 0;
+            if (s.billingCycle === 'month') {
+                monthlyCny += cnyAmt;
+                yearlyCny += cnyAmt * 12;
+            } else if (s.billingCycle === 'year') {
+                monthlyCny += cnyAmt / 12;
+                yearlyCny += cnyAmt;
+            }
         }
         return {
             total: servers.length,
             online,
-            monthlyUsd: Math.round(monthlyUsd * 100) / 100,
+            usdCount,
             monthlyCny: Math.round(monthlyCny * 100) / 100,
+            yearlyCny: Math.round(yearlyCny * 100) / 100,
         };
-    }, [servers]);
+    }, [servers, fxRate]);
 
     const drawerServices = useMemo(
         () => (servicesDrawerServer ? parseServicesJson(servicesDrawerServer.servicesJson) : null),
@@ -666,26 +704,29 @@ const ServersView = ({ onNotify, onOverviewChanged, onOpenTerminal, onOpenSystem
                 </div>
             </div>
 
-            {/* 概览卡片 */}
+            {/* 概览卡片（统一人民币结算） */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="gm-card p-4">
+                <div className="gm-card gm-pixel-card p-4">
                     <div className="text-xs text-[var(--text-secondary)]">服务器总数</div>
-                    <div className="mt-1 text-2xl font-bold text-[var(--text-primary)]">{summary.total}</div>
+                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--text-primary)]">{summary.total}</div>
                 </div>
-                <div className="gm-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">在线节点</div>
-                    <div className="mt-1 text-2xl font-bold text-[var(--success)]">{summary.online}</div>
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-xs text-[var(--text-secondary)] flex items-center gap-1.5">
+                        <span className="gm-pixel-led is-success" aria-hidden="true" />
+                        <span>在线节点</span>
+                    </div>
+                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--success)]">{summary.online}</div>
                 </div>
-                <div className="gm-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">折合月支出 (USD)</div>
-                    <div className="mt-1 text-2xl font-bold text-[var(--text-primary)]">
-                        {formatMoney(summary.monthlyUsd, 'USD')}
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-xs text-[var(--text-secondary)]">折合月支出（人民币）</div>
+                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--text-primary)]">
+                        {formatCnyAmount(summary.monthlyCny)}
                     </div>
                 </div>
-                <div className="gm-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">折合月支出 (CNY)</div>
-                    <div className="mt-1 text-2xl font-bold text-[var(--text-primary)]">
-                        {formatMoney(summary.monthlyCny, 'CNY')}
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-xs text-[var(--text-secondary)]">折合年支出（人民币）</div>
+                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--primary)]">
+                        {formatCnyAmount(summary.yearlyCny)}
                     </div>
                 </div>
             </div>
@@ -1075,6 +1116,22 @@ const ServersView = ({ onNotify, onOverviewChanged, onOpenTerminal, onOpenSystem
                                             onChange={e => setForm(prev => ({ ...prev, credential: e.target.value }))}
                                             placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                                         />
+                                        {looksLikePublicSshKey(form.credential) && (
+                                            <div
+                                                role="alert"
+                                                className="flex items-start gap-2 rounded-md px-2.5 py-2 text-[11.5px]"
+                                                style={{
+                                                    background: 'var(--warning-soft)',
+                                                    color: 'var(--warning)',
+                                                    border: '1px solid rgba(251, 191, 36, 0.3)',
+                                                }}
+                                            >
+                                                <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                                                <span>
+                                                    检测到您粘贴的似乎是 SSH 公钥（如 ssh-ed25519 / .pub）。连接服务器需要填写私钥文件（通常以 -----BEGIN OPENSSH PRIVATE KEY----- 开头）。
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -1118,9 +1175,14 @@ const ServersView = ({ onNotify, onOverviewChanged, onOpenTerminal, onOpenSystem
                                         <span className="text-[var(--text-secondary)]">到期日期</span>
                                         <input
                                             type="date"
+                                            min={DATE_INPUT_MIN}
+                                            max={DATE_INPUT_MAX}
                                             className="gm-input w-full"
                                             value={form.expiresAt}
-                                            onChange={e => setForm(prev => ({ ...prev, expiresAt: e.target.value }))}
+                                            onChange={e => setForm(prev => ({
+                                                ...prev,
+                                                expiresAt: clampDateInputValue(e.target.value),
+                                            }))}
                                         />
                                     </label>
                                 </div>

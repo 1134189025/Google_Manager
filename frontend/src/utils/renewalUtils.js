@@ -6,6 +6,92 @@
 
 const pad = (n) => String(n).padStart(2, '0');
 
+export const DATE_INPUT_MIN = '1970-01-01';
+export const DATE_INPUT_MAX = '2099-12-31';
+export const DEFAULT_USD_CNY_RATE = 7.25;
+
+/**
+ * 约束原生 <input type="date"> 返回值：截断 Chromium/WebView2 允许输入的 5~6 位年份为 4 位，
+ * 并将年份限制在 1970..2099 合理区间内，避免出现 202612-12-04 这类异常年份。
+ */
+export function clampDateInputValue(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const match = trimmed.match(/^(\d+)-(\d{2})-(\d{2})$/);
+    if (!match) return trimmed;
+    let yearStr = match[1];
+    if (yearStr.length > 4) {
+        yearStr = yearStr.slice(0, 4);
+    }
+    const yearNum = Number(yearStr);
+    if (!Number.isFinite(yearNum)) return '';
+    const clampedYear = yearStr.length === 4 ? Math.min(2099, Math.max(1970, yearNum)) : yearNum;
+    return `${String(clampedYear).padStart(4, '0')}-${match[2]}-${match[3]}`;
+}
+
+export function normalizeFxRate(rate) {
+    const n = Number(rate);
+    if (!Number.isFinite(n) || n < 4 || n > 15) return DEFAULT_USD_CNY_RATE;
+    return Math.round(n * 10000) / 10000;
+}
+
+export function convertToCny(amount, currency = 'USD', usdCnyRate = DEFAULT_USD_CNY_RATE) {
+    const num = Number(amount);
+    if (!Number.isFinite(num)) return null;
+    if (String(currency || 'USD').toUpperCase() === 'CNY') {
+        return Math.round(num * 100) / 100;
+    }
+    const rate = normalizeFxRate(usdCnyRate);
+    return Math.round(num * rate * 100) / 100;
+}
+
+export function formatCnyAmount(amount) {
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) return '-';
+    return `¥${amount.toFixed(2)}`;
+}
+
+/**
+ * 将后端返回的 USD + CNY 双币种汇总统一折算为单人民币结算指标
+ */
+export function computeUnifiedCnySpend(spend, usdCnyRate = DEFAULT_USD_CNY_RATE) {
+    const rate = normalizeFxRate(usdCnyRate);
+    const cny = spend?.cny || { monthly: 0, yearly: 0, once: 0, count: 0 };
+    const usd = spend?.usd || { monthly: 0, yearly: 0, once: 0, count: 0 };
+    const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+    const cnyMonthly = round2(cny.monthly);
+    const cnyYearly = round2(cny.yearly);
+    const cnyOnce = round2(cny.once);
+
+    const usdMonthly = round2(usd.monthly);
+    const usdYearly = round2(usd.yearly);
+    const usdOnce = round2(usd.once);
+
+    const usdMonthlyInCny = round2(usdMonthly * rate);
+    const usdYearlyInCny = round2(usdYearly * rate);
+    const usdOnceInCny = round2(usdOnce * rate);
+
+    return {
+        rate,
+        monthlyCny: round2(cnyMonthly + usdMonthlyInCny),
+        yearlyCny: round2(cnyYearly + usdYearlyInCny),
+        onceCny: round2(cnyOnce + usdOnceInCny),
+        cnyMonthly,
+        cnyYearly,
+        cnyOnce,
+        cnyCount: Number(cny.count || 0),
+        usdMonthly,
+        usdYearly,
+        usdOnce,
+        usdMonthlyInCny,
+        usdYearlyInCny,
+        usdCount: Number(usd.count || 0),
+        totalPricedCount: Number(cny.count || 0) + Number(usd.count || 0),
+        unpricedCount: Number(spend?.unpriced || 0),
+    };
+}
+
 export function localTodayDay(now = new Date()) {
     return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }

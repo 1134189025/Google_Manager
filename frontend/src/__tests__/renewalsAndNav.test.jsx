@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     calendarDay,
+    clampDateInputValue,
+    computeUnifiedCnySpend,
+    convertToCny,
     daysUntilDay,
     shiftDay,
     buildRenewalsIcs,
@@ -13,6 +16,7 @@ import SideNav from '../components/SideNav';
 const { mockApi } = vi.hoisted(() => ({
     mockApi: {
         getRenewalsSummary: vi.fn(),
+        getUsdCnyRate: vi.fn(),
         getReminders: vi.fn(),
         advanceRenewal: vi.fn(),
         createReminder: vi.fn(),
@@ -58,6 +62,15 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
                 },
             },
         });
+        mockApi.getUsdCnyRate.mockResolvedValue({
+            success: true,
+            data: {
+                rate: 7.2,
+                updatedAt: '2026-11-24T12:00:00Z',
+                source: 'open.er-api.com',
+                isFallback: false,
+            },
+        });
         mockApi.getReminders.mockResolvedValue({
             success: true,
             data: [
@@ -84,9 +97,23 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
         });
     });
 
-    it('renewalUtils 正确处理日历日、顺延月底钳制与 ICS 生成', () => {
+    it('renewalUtils 正确处理日历日、6 位年份截断、人民币实时换算与 ICS 生成', () => {
         expect(calendarDay('2026-11-24')).toBe('2026-11-24');
         expect(calendarDay('2026-02-30')).toBe('');
+        expect(clampDateInputValue('202612-12-04')).toBe('2026-12-04');
+        expect(clampDateInputValue('2999-05-01')).toBe('2099-05-01');
+        expect(convertToCny(10, 'USD', 7.2)).toBe(72);
+        expect(convertToCny(35, 'CNY', 7.2)).toBe(35);
+        const unified = computeUnifiedCnySpend(
+            {
+                cny: { monthly: 10, yearly: 120, once: 0, count: 1 },
+                usd: { monthly: 5, yearly: 60, once: 0, count: 1 },
+                unpriced: 2,
+            },
+            7.2,
+        );
+        expect(unified.monthlyCny).toBe(46);
+        expect(unified.yearlyCny).toBe(552);
         expect(shiftDay('2026-01-31', 'month')).toBe('2026-02-28');
         expect(shiftDay('2024-02-29', 'year')).toBe('2025-02-28');
         expect(shiftDay('2026-11-24', 'week')).toBe('2026-12-01');
@@ -114,15 +141,23 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
         expect(ics).toContain('DTSTART;VALUE=DATE:20261201');
     });
 
-    it('RenewalsView 展示支出与时间线，并支持一键顺延、新建与完成备忘', async () => {
+    it('RenewalsView 以单人民币统一结算展示美元折算与时间线，并支持一键顺延、新建与完成备忘', async () => {
         const user = userEvent.setup();
         const onNotify = vi.fn();
         const onOverviewChanged = vi.fn();
         render(<RenewalsView onNotify={onNotify} onOverviewChanged={onOverviewChanged} />);
 
         await screen.findByText('Tokyo-VPS');
-        expect(screen.getByText('$5.00')).toBeInTheDocument();
-        expect(screen.getByText('¥10.00')).toBeInTheDocument();
+        // 人民币 10 + 美元 5 * 7.2 = ¥46.00 / 月，年付 120 + 60 * 7.2 = ¥552.00 / 年
+        expect(await screen.findByText('¥46.00')).toBeInTheDocument();
+        expect(screen.getByText('¥552.00')).toBeInTheDocument();
+        expect(screen.getByText(/1 USD = ¥7\.2000/)).toBeInTheDocument();
+        expect(screen.queryByText('美元支出 (USD)')).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: '刷新实时汇率' }));
+        await waitFor(() => {
+            expect(mockApi.getUsdCnyRate).toHaveBeenCalledWith(true);
+        });
 
         await user.click(screen.getByRole('button', { name: /已续费/ }));
         await waitFor(() => {

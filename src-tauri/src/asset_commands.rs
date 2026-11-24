@@ -13,11 +13,49 @@ use crate::assets_db::{
 };
 use crate::cloudflare::{CloudflareDnsRecord, CloudflareZone, DnsRecordInput};
 use crate::database::Database;
+use crate::fx::{self, ExchangeRateInfo};
 use crate::ssh_client::{self, SftpDirListing, SshSessionInfo, SshSessionManager};
 use std::path::Path;
 use tauri::{AppHandle, State};
 
 const MAX_TEXT_FILE_BYTES: usize = 10 * 1024 * 1024;
+
+/// 获取实时 USD -> CNY 汇率（6 小时内复用本地缓存，网络等待期间不持有数据库锁）
+#[tauri::command]
+pub async fn get_usd_cny_rate(
+    db: State<'_, Database>,
+    force_refresh: Option<bool>,
+) -> Result<ExchangeRateInfo, String> {
+    let force = force_refresh.unwrap_or(false);
+    let cached = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        fx::read_cached_rate(&conn)
+    };
+
+    if !force {
+        if let Some(ref info) = cached {
+            if fx::is_cache_fresh(info, chrono::Utc::now()) {
+                return Ok(info.clone());
+            }
+        }
+    }
+
+    match fx::fetch_live_usd_cny_rate().await {
+        Ok((rate, source)) => {
+            let fresh = ExchangeRateInfo {
+                rate,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                source,
+                is_fallback: false,
+            };
+            if let Ok(conn) = db.0.lock() {
+                let _ = fx::save_cached_rate(&conn, &fresh);
+            }
+            Ok(fresh)
+        }
+        Err(_) => Ok(fx::fallback_rate_info(cached)),
+    }
+}
 
 #[tauri::command]
 pub fn get_workspace_overview(db: State<Database>) -> Result<WorkspaceOverview, String> {

@@ -19,6 +19,7 @@ import type {
   BrowserUsage,
   ExportFileResult,
   WorkspaceOverview,
+  ExchangeRateInfo,
   RenewalsSummary,
   Reminder,
   ReminderInput,
@@ -345,6 +346,13 @@ export class TauriAdapter implements ApiAdapter {
   async getWorkspaceOverview(): Promise<WorkspaceOverview> {
     const result = await this.invokeCommand<any>('get_workspace_overview');
     return snakeToCamel<WorkspaceOverview>(result || {});
+  }
+
+  async getUsdCnyRate(forceRefresh = false): Promise<ExchangeRateInfo> {
+    const result = await this.invokeCommand<any>('get_usd_cny_rate', {
+      forceRefresh: Boolean(forceRefresh),
+    });
+    return snakeToCamel<ExchangeRateInfo>(result || {});
   }
 
   async getRenewalsSummary(withinDays?: number): Promise<RenewalsSummary> {

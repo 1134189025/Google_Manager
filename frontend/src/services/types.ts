@@ -254,6 +254,13 @@ export interface WorkspaceOverview {
   spend: SpendSummary;
 }
 
+export interface ExchangeRateInfo {
+  rate: number;
+  updatedAt: string;
+  source: string;
+  isFallback: boolean;
+}
+
 export type VaultItemKind = 'account' | 'api' | 'ssh' | 'token' | 'password';
 
 export interface VaultFolder {
@@ -736,6 +743,7 @@ export interface ApiAdapter {
   getBrowserUsage(): Promise<BrowserUsage>;
   openBrowserProfileDir(accountId: number): Promise<void>;
   getWorkspaceOverview(): Promise<WorkspaceOverview>;
+  getUsdCnyRate(forceRefresh?: boolean): Promise<ExchangeRateInfo>;
   getRenewalsSummary(withinDays?: number): Promise<RenewalsSummary>;
   advanceRenewal(kind: string, id: number): Promise<string>;
   getReminders(): Promise<Reminder[]>;

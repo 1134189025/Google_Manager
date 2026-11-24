@@ -8,6 +8,7 @@ mod cloudflare;
 mod commands;
 mod database;
 mod domain_probe;
+mod fx;
 mod sms;
 mod ssh_client;
 mod totp;
@@ -73,6 +74,7 @@ pub fn run() {
             commands::get_browser_usage,
             commands::open_browser_profile_dir,
             asset_commands::get_workspace_overview,
+            asset_commands::get_usd_cny_rate,
             asset_commands::get_renewals_summary,
             asset_commands::advance_renewal,
             asset_commands::get_reminders,

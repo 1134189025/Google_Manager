@@ -186,4 +186,22 @@ describe('Phase 2: passwordCsv & cardUtils & VaultView & CardsView', () => {
         await user.click(within(dialog).getByRole('button', { name: '应用识别结果' }));
         expect(within(dialog).getByPlaceholderText('RedotPay / 招商银行')).toHaveValue('招商银行');
     });
+
+    it('CardsView 在亮色模式下卡片正面切换为亮色配色，并支持正反面翻转切换', async () => {
+        const user = userEvent.setup();
+        const { container } = render(
+            <CardsView darkMode={false} fxRate={7.2} onNotify={vi.fn()} onCopy={vi.fn()} />,
+        );
+
+        await screen.findByText('招行经典卡');
+        const frontFace = container.querySelector('[data-card-face="front"]');
+        expect(frontFace).toHaveAttribute('data-card-theme', 'light');
+
+        // 点击翻转按钮翻到背面，再点击翻回正面
+        await user.click(screen.getByRole('button', { name: '翻转 招行经典卡 查看背面' }));
+        expect(frontFace.parentElement.style.transform).toBe('rotateY(180deg)');
+
+        await user.click(screen.getByRole('button', { name: '翻回 招行经典卡 正面' }));
+        expect(frontFace.parentElement.style.transform).toBe('rotateY(0deg)');
+    });
 });

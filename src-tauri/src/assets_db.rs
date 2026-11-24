@@ -294,9 +294,21 @@ pub fn validate_calendar_day(value: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("日期不能为空".to_string());
     }
-    NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .map_err(|_| format!("日期格式必须为 YYYY-MM-DD：{}", trimmed))
+    if trimmed.len() != 10 {
+        return Err(format!(
+            "日期格式必须为 4 位年份 YYYY-MM-DD（1970-2099）：{}",
+            trimmed
+        ));
+    }
+    let parsed = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| format!("日期格式必须为 YYYY-MM-DD：{}", trimmed))?;
+    if !(1970..=2099).contains(&parsed.year()) {
+        return Err(format!(
+            "年份必须在 1970 到 2099 之间：{}",
+            trimmed
+        ));
+    }
+    Ok(parsed.format("%Y-%m-%d").to_string())
 }
 
 pub fn normalize_optional_day(value: Option<&str>) -> Result<Option<String>, String> {
@@ -917,17 +929,17 @@ pub fn get_workspace_overview(
     let pending_reminders_count =
         count_table(conn, "SELECT COUNT(*) FROM reminders WHERE done = 0")?;
 
-    let renewals = get_renewals_summary(conn, 30, today)?;
+    let renewals = get_renewals_summary(conn, 90, today)?;
     let reminders = query_reminders(conn)?;
     let due_reminders: Vec<Reminder> = reminders
         .into_iter()
         .filter(|r| !r.done)
         .filter(|r| {
             days_until(&r.due_at, today)
-                .map(|d| d <= r.lead_days)
+                .map(|d| d <= r.lead_days.max(30))
                 .unwrap_or(false)
         })
-        .take(5)
+        .take(6)
         .collect();
 
     Ok(WorkspaceOverview {
@@ -939,7 +951,7 @@ pub fn get_workspace_overview(
         servers_online_count,
         domains_count,
         pending_reminders_count,
-        upcoming_renewals: renewals.timeline.into_iter().take(5).collect(),
+        upcoming_renewals: renewals.timeline.into_iter().take(6).collect(),
         due_reminders,
         spend: renewals.spend,
     })
@@ -3315,5 +3327,14 @@ mod tests {
         assert_eq!(query_servers(&conn, Some("Tokyo")).unwrap().len(), 1);
         delete_server(&conn, created.id).unwrap();
         assert!(get_server_by_id(&conn, created.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_validate_calendar_day_enforces_4_digit_year_bounds() {
+        assert_eq!(validate_calendar_day("2026-12-04").unwrap(), "2026-12-04");
+        assert!(validate_calendar_day("202612-12-04").is_err());
+        assert!(validate_calendar_day("1969-12-31").is_err());
+        assert!(validate_calendar_day("2100-01-01").is_err());
+        assert!(validate_calendar_day("2026-2-4").is_err());
     }
 }

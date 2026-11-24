@@ -10,12 +10,25 @@ import {
     X,
     Check,
     AlertTriangle,
+    Calendar,
+    Server,
 } from 'lucide-react';
 import api from '../services/api';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { resolveBrandIconUrl } from '../utils/brandIcons';
-import { daysUntilDay, formatCycleLabel, formatDaysBadge, formatMoney } from '../utils/renewalUtils';
+import {
+    DATE_INPUT_MAX,
+    DATE_INPUT_MIN,
+    DEFAULT_USD_CNY_RATE,
+    clampDateInputValue,
+    convertToCny,
+    daysUntilDay,
+    formatCnyAmount,
+    formatCycleLabel,
+    formatDaysBadge,
+    formatMoney,
+} from '../utils/renewalUtils';
 
 const EMPTY_DOMAIN_FORM = {
     name: '',
@@ -41,17 +54,39 @@ const EMPTY_DNS_FORM = {
 };
 
 const BADGE_STYLE = {
-    danger: { background: 'var(--danger-soft)', color: 'var(--danger)' },
-    warning: { background: 'var(--warning-soft)', color: 'var(--warning)' },
-    accent: { background: 'var(--primary-light)', color: 'var(--primary)' },
-    muted: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)' },
+    danger: {
+        background: 'var(--danger-soft)',
+        color: 'var(--danger)',
+        border: '1px solid rgba(248, 113, 113, 0.32)',
+    },
+    warning: {
+        background: 'var(--warning-soft)',
+        color: 'var(--warning)',
+        border: '1px solid rgba(251, 191, 36, 0.34)',
+    },
+    accent: {
+        background: 'var(--primary-light)',
+        color: 'var(--primary)',
+        border: '1px solid rgba(91, 142, 244, 0.34)',
+    },
+    healthy: {
+        background: 'var(--success-soft)',
+        color: 'var(--success)',
+        border: '1px solid rgba(52, 211, 153, 0.3)',
+    },
+    muted: {
+        background: 'var(--bg-hover)',
+        color: 'var(--text-secondary)',
+        border: '1px solid var(--border)',
+    },
 };
 
-const DomainsView = ({ servers = [], onNotify, onOverviewChanged }) => {
+const DomainsView = ({ servers = [], fxRate = DEFAULT_USD_CNY_RATE, onNotify, onOverviewChanged }) => {
     const [domains, setDomains] = useState([]);
     const [connections, setConnections] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [filterMode, setFilterMode] = useState('all');
     const [probingId, setProbingId] = useState(null);
 
     // 域名增改弹窗
@@ -98,14 +133,43 @@ const DomainsView = ({ servers = [], onNotify, onOverviewChanged }) => {
         loadData();
     }, [loadData]);
 
+    const domainStats = useMemo(() => {
+        let expiringSoon = 0;
+        let cfManaged = 0;
+        let missingExpiry = 0;
+        let yearlyCny = 0;
+        for (const d of domains) {
+            if (d.cfZoneId) cfManaged += 1;
+            const days = d.expiresAt ? daysUntilDay(d.expiresAt) : null;
+            if (days == null) missingExpiry += 1;
+            else if (days <= 30) expiringSoon += 1;
+            if (typeof d.billingAmount === 'number' && Number.isFinite(d.billingAmount) && d.billingAmount > 0) {
+                const cny = convertToCny(d.billingAmount, d.billingCurrency, fxRate) || 0;
+                if (d.billingCycle === 'month') yearlyCny += cny * 12;
+                else if (d.billingCycle === 'year') yearlyCny += cny;
+            }
+        }
+        return {
+            total: domains.length,
+            expiringSoon,
+            cfManaged,
+            missingExpiry,
+            yearlyCny: Math.round(yearlyCny * 100) / 100,
+        };
+    }, [domains, fxRate]);
+
     const filteredDomains = useMemo(() => {
         const q = search.trim().toLowerCase();
-        if (!q) return domains;
-        return domains.filter(d =>
-            [d.name, d.registrar, ...(d.nameservers || []), d.tags, d.notes]
-                .some(v => String(v ?? '').toLowerCase().includes(q)),
-        );
-    }, [domains, search]);
+        return domains.filter(d => {
+            const days = d.expiresAt ? daysUntilDay(d.expiresAt) : null;
+            if (filterMode === 'expiring' && !(days != null && days <= 30)) return false;
+            if (filterMode === 'cf' && !d.cfZoneId) return false;
+            if (filterMode === 'unset' && Boolean(d.expiresAt)) return false;
+            if (!q) return true;
+            return [d.name, d.registrar, ...(d.nameservers || []), d.tags, d.notes]
+                .some(v => String(v ?? '').toLowerCase().includes(q));
+        });
+    }, [domains, search, filterMode]);
 
     const serverMap = useMemo(
         () => Object.fromEntries(servers.map(s => [s.id, s.name])),
@@ -391,59 +455,148 @@ const DomainsView = ({ servers = [], onNotify, onOverviewChanged }) => {
                 </div>
             </div>
 
-            {/* 搜索 */}
-            <div className="relative max-w-md">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 gm-text-3" />
-                <input
-                    type="text"
-                    className="gm-input w-full pl-9"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="搜索域名、注册商、NS 或备注…"
-                />
+            {/* 顶部 4 格域名汇总（统一人民币） */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-[11.5px] gm-text-3 font-medium">域名总数</div>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold font-mono gm-text-1">{domainStats.total}</span>
+                        <span className="text-[11px] gm-text-3 font-mono">
+                            {domainStats.missingExpiry > 0 ? `${domainStats.missingExpiry} 待补日期` : '日期完整'}
+                        </span>
+                    </div>
+                </div>
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-[11.5px] gm-text-3 font-medium">30 天内到期</div>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                        <span
+                            className="text-2xl font-bold font-mono"
+                            style={{ color: domainStats.expiringSoon > 0 ? 'var(--warning)' : 'var(--success)' }}
+                        >
+                            {domainStats.expiringSoon}
+                        </span>
+                        <span className="text-[11px] gm-text-3">
+                            {domainStats.expiringSoon > 0 ? '需关注续费' : '状态健康'}
+                        </span>
+                    </div>
+                </div>
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-[11.5px] gm-text-3 font-medium">Cloudflare 托管</div>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold font-mono" style={{ color: 'var(--primary)' }}>
+                            {domainStats.cfManaged}
+                        </span>
+                        <span className="text-[11px] gm-text-3 font-mono">{connections.length} 个账号</span>
+                    </div>
+                </div>
+                <div className="gm-card gm-pixel-card p-4">
+                    <div className="text-[11.5px] gm-text-3 font-medium">年度域名费用 (CNY)</div>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                        <span className="text-2xl font-bold font-mono gm-text-1">
+                            {formatCnyAmount(domainStats.yearlyCny)}
+                        </span>
+                        <span className="text-[11px] gm-text-3">/ 年</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* 搜索与状态筛选 */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="relative flex-1 min-w-[240px] max-w-md">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 gm-text-3" />
+                    <input
+                        type="text"
+                        className="gm-input w-full pl-9"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="搜索域名、注册商、NS 或备注…"
+                    />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                        { id: 'all', label: `全部 (${domainStats.total})` },
+                        { id: 'expiring', label: `30天到期 (${domainStats.expiringSoon})` },
+                        { id: 'cf', label: `CF 托管 (${domainStats.cfManaged})` },
+                        { id: 'unset', label: `未填日期 (${domainStats.missingExpiry})` },
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setFilterMode(tab.id)}
+                            className={`gm-filter-pill ${filterMode === tab.id ? 'is-active' : ''}`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {/* 域名列表 */}
             {filteredDomains.length === 0 ? (
-                <div className="gm-card p-10 text-center text-[13px] gm-text-3">
-                    {loading ? '正在加载域名…' : '暂无域名记录，可手动添加或通过 Cloudflare 连接导入'}
+                <div className="gm-card gm-pixel-card p-10 text-center text-[13px] gm-text-3">
+                    {loading ? '正在加载域名…' : '暂无匹配域名记录，可手动添加或通过 Cloudflare 连接导入'}
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {filteredDomains.map(dom => {
                         const days = dom.expiresAt ? daysUntilDay(dom.expiresAt) : null;
-                        const badge = days != null ? formatDaysBadge(days) : null;
+                        const rawBadge = days != null ? formatDaysBadge(days) : null;
+                        const badgeTone = !rawBadge
+                            ? 'muted'
+                            : rawBadge.tone === 'muted' && days > 30
+                                ? 'healthy'
+                                : rawBadge.tone;
+                        const urgencyRail = days == null
+                            ? 'unset'
+                            : days <= 7
+                                ? 'danger'
+                                : days <= 30
+                                    ? 'warning'
+                                    : 'healthy';
                         const regIcon = resolveBrandIconUrl([dom.registrar]);
+                        const tld = dom.name?.includes('.') ? `.${dom.name.split('.').pop().toUpperCase()}` : '';
+                        const cnyCost = typeof dom.billingAmount === 'number'
+                            ? convertToCny(dom.billingAmount, dom.billingCurrency, fxRate)
+                            : null;
+                        const nsList = Array.isArray(dom.nameservers) ? dom.nameservers : [];
+
                         return (
-                            <div key={dom.id} className="gm-card p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                                key={dom.id}
+                                data-urgency={urgencyRail}
+                                className="gm-domain-card"
+                            >
+                                {/* 顶行：核心域名标识 + 右上角静默操作 */}
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0">
                                         {regIcon ? (
                                             <img
                                                 src={regIcon}
                                                 alt=""
-                                                className="w-7 h-7 rounded-md bg-white/10 p-1 object-contain shrink-0"
+                                                className="w-9 h-9 rounded-lg bg-white/95 border border-black/10 p-1.5 object-contain shrink-0"
                                             />
                                         ) : (
-                                            <div className="w-7 h-7 rounded-md bg-[var(--bg-elevated)] flex items-center justify-center shrink-0">
-                                                <Globe size={14} className="gm-text-3" />
+                                            <div className="gm-domain-icon shrink-0">
+                                                <Globe size={16} />
                                             </div>
                                         )}
                                         <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="text-[14.5px] font-semibold gm-text-1 truncate font-mono">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <h3 className="text-[17px] font-bold tracking-tight gm-text-1 truncate font-mono">
                                                     {dom.name}
                                                 </h3>
+                                                {tld && (
+                                                    <span className="gm-pixel-tag">{tld}</span>
+                                                )}
                                                 {dom.cfZoneId && (
-                                                    <span className="gm-chip gm-chip-accent">CF</span>
+                                                    <span className="gm-chip gm-chip-accent font-mono">CF</span>
                                                 )}
                                                 {dom.autoRenew && (
-                                                    <span className="gm-chip">自动续费</span>
+                                                    <span className="gm-chip gm-chip-success">自动续费</span>
                                                 )}
                                             </div>
-                                            <div className="text-[11.5px] gm-text-3 truncate">
-                                                {dom.registrar || '未知注册商'}
-                                                {dom.serverId && serverMap[dom.serverId] ? ` · 绑定主机 ${serverMap[dom.serverId]}` : ''}
+                                            <div className="mt-0.5 text-[12px] gm-text-2 truncate">
+                                                {dom.registrar || '未知注册商 · 可点右上探测自动识别'}
                                             </div>
                                         </div>
                                     </div>
@@ -477,48 +630,120 @@ const DomainsView = ({ servers = [], onNotify, onOverviewChanged }) => {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-                                    <div className="flex items-center gap-2 font-mono gm-text-2">
-                                        <span>到期: {dom.expiresAt || '未填写'}</span>
-                                        {typeof dom.billingAmount === 'number' && (
-                                            <span>
-                                                · {formatMoney(dom.billingAmount, dom.billingCurrency)}/{formatCycleLabel(dom.billingCycle)}
+                                {/* 中层：高对比核心信息带（到期倒计时 + 费用折合人民币） */}
+                                <div className="gm-domain-metrics">
+                                    <div className="gm-domain-metric-cell">
+                                        <div className="text-[10.5px] uppercase tracking-wider gm-text-3 flex items-center gap-1.5">
+                                            <Calendar size={11} />
+                                            <span>到期状态</span>
+                                        </div>
+                                        <div className="mt-1.5 flex items-center justify-between gap-2 flex-wrap">
+                                            <span
+                                                className={`font-mono text-[14px] font-semibold ${
+                                                    dom.expiresAt ? 'gm-text-1' : 'gm-text-3'
+                                                }`}
+                                            >
+                                                {dom.expiresAt || '未填写到期日'}
                                             </span>
-                                        )}
+                                            {rawBadge ? (
+                                                <span
+                                                    className="px-2 py-0.5 rounded-[5px] text-[11px] font-mono font-semibold"
+                                                    style={BADGE_STYLE[badgeTone]}
+                                                >
+                                                    {rawBadge.text}
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleProbeDomain(dom)}
+                                                    className="text-[11px] font-mono text-[var(--primary)] hover:underline cursor-pointer"
+                                                >
+                                                    立即探测 →
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                    {badge && (
-                                        <span className="px-2 py-0.5 rounded text-[11px] font-medium" style={BADGE_STYLE[badge.tone]}>
-                                            {badge.text}
-                                        </span>
-                                    )}
+
+                                    <div className="gm-domain-metric-cell">
+                                        <div className="text-[10.5px] uppercase tracking-wider gm-text-3">
+                                            续费成本（人民币）
+                                        </div>
+                                        <div className="mt-1.5 flex items-baseline justify-between gap-2">
+                                            {cnyCost !== null ? (
+                                                <div className="flex items-baseline gap-1.5 flex-wrap">
+                                                    <span className="font-mono text-[15px] font-bold gm-text-1">
+                                                        {formatCnyAmount(cnyCost)}
+                                                    </span>
+                                                    <span className="text-[11px] gm-text-3">
+                                                        /{formatCycleLabel(dom.billingCycle)}
+                                                    </span>
+                                                    {dom.billingCurrency === 'USD' && (
+                                                        <span className="text-[10.5px] font-mono gm-text-3">
+                                                            ({formatMoney(dom.billingAmount, 'USD')})
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-[12.5px] gm-text-3">未设置费用</span>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
 
-                                {dom.nameservers?.length > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                        {dom.nameservers.slice(0, 4).map(ns => (
-                                            <span key={ns} className="gm-chip font-mono text-[10.5px]">{ns}</span>
-                                        ))}
-                                    </div>
-                                )}
-
                                 {dom.probeError && (
-                                    <div className="text-[11.5px]" style={{ color: 'var(--warning)' }}>
+                                    <div
+                                        className="text-[11.5px] px-2.5 py-1.5 rounded-md font-mono"
+                                        style={{
+                                            background: 'var(--warning-soft)',
+                                            color: 'var(--warning)',
+                                            border: '1px solid rgba(251, 191, 36, 0.25)',
+                                        }}
+                                    >
                                         上次探测异常：{dom.probeError}
                                     </div>
                                 )}
 
-                                {dom.cfConnectionId && dom.cfZoneId && (
-                                    <div className="pt-1 flex justify-end">
+                                {/* 底栏：紧凑 NS 与主机绑定 + 高亮 DNS 管理按钮 */}
+                                <div className="gm-domain-footer">
+                                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                                        {nsList.length > 0 ? (
+                                            <span
+                                                className="gm-domain-ns-pill"
+                                                title={`DNS 服务器：\n${nsList.join('\n')}`}
+                                            >
+                                                <span className="gm-domain-ns-dot" />
+                                                <span className="truncate">{nsList[0]}</span>
+                                                {nsList.length > 1 && (
+                                                    <span className="gm-text-3 shrink-0">+{nsList.length - 1}</span>
+                                                )}
+                                            </span>
+                                        ) : (
+                                            <span className="text-[11px] gm-text-3 font-mono">未记录 NS</span>
+                                        )}
+                                        {dom.serverId && serverMap[dom.serverId] && (
+                                            <span className="gm-chip font-mono text-[10.5px]">
+                                                <Server size={10} />
+                                                {serverMap[dom.serverId]}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {dom.cfConnectionId && dom.cfZoneId && (
                                         <button
                                             type="button"
                                             onClick={() => openDnsManager(dom)}
-                                            className="gm-btn gm-btn-secondary gm-btn-sm"
+                                            className="gm-btn gm-btn-sm shrink-0"
+                                            style={{
+                                                background: 'var(--primary-light)',
+                                                color: 'var(--primary)',
+                                                borderColor: 'rgba(91, 142, 244, 0.38)',
+                                            }}
                                         >
                                             <Cloud size={12} />
                                             <span>管理 DNS</span>
                                         </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         );
                     })}
@@ -602,9 +827,14 @@ const DomainsView = ({ servers = [], onNotify, onOverviewChanged }) => {
                                     <label className="text-[12px] gm-text-2">到期日</label>
                                     <input
                                         type="date"
+                                        min={DATE_INPUT_MIN}
+                                        max={DATE_INPUT_MAX}
                                         className="gm-input w-full"
                                         value={domainForm.expiresAt}
-                                        onChange={(e) => setDomainForm(prev => ({ ...prev, expiresAt: e.target.value }))}
+                                        onChange={(e) => setDomainForm(prev => ({
+                                            ...prev,
+                                            expiresAt: clampDateInputValue(e.target.value),
+                                        }))}
                                     />
                                 </div>
                             </div>

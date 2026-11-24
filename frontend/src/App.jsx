@@ -28,6 +28,7 @@ import useBrowserStatus from './hooks/useBrowserStatus';
 import { normalizePhoneNumber } from './utils/phoneUtils';
 import { normalizeSmsUrlInput } from './utils/smsUtils';
 import { normalizeMultiValueValue, splitGroupNameValues } from './utils/multiValueField';
+import { DEFAULT_USD_CNY_RATE } from './utils/renewalUtils';
 
 const isTypingTarget = (target) => {
     if (!target || typeof target.tagName !== 'string') return false;
@@ -58,6 +59,13 @@ const App = () => {
     // Undo state
     const [deletedAccounts, setDeletedAccounts] = useState([]);
     const [workspaceOverview, setWorkspaceOverview] = useState(null);
+    const [fxInfo, setFxInfo] = useState({
+        rate: DEFAULT_USD_CNY_RATE,
+        updatedAt: '',
+        source: '默认参考汇率',
+        isFallback: true,
+        loading: false,
+    });
     const [paymentCardsCache, setPaymentCardsCache] = useState([]);
     const [serversCache, setServersCache] = useState([]);
     const [terminalMounted, setTerminalMounted] = useState(false);
@@ -74,6 +82,27 @@ const App = () => {
         } catch {
             // 测试 mock 未提供扩展接口时静默跳过
         }
+    }, []);
+
+    const refreshFxRate = useCallback(async (force = false) => {
+        if (typeof api?.getUsdCnyRate !== 'function') return;
+        setFxInfo(prev => ({ ...prev, loading: true }));
+        try {
+            const res = await api.getUsdCnyRate(force);
+            if (res?.success && res.data && Number.isFinite(Number(res.data.rate))) {
+                setFxInfo({
+                    rate: Number(res.data.rate),
+                    updatedAt: res.data.updatedAt || '',
+                    source: res.data.source || '实时汇率',
+                    isFallback: Boolean(res.data.isFallback),
+                    loading: false,
+                });
+                return;
+            }
+        } catch {
+            // 测试 mock 未提供或离线时静默回退
+        }
+        setFxInfo(prev => ({ ...prev, loading: false }));
     }, []);
 
     // 账号浏览器设置弹窗；首次打开浏览器时由列表页/首页等待其结果（是否已保存）
@@ -133,6 +162,10 @@ const App = () => {
     useEffect(() => {
         refreshOverview();
     }, [refreshOverview, accounts.length]);
+
+    useEffect(() => {
+        refreshFxRate(false);
+    }, [refreshFxRate]);
 
     useEffect(() => {
         if (view === 'ai' && typeof api?.getPaymentCards === 'function') {
@@ -567,6 +600,8 @@ const App = () => {
                             accounts={accounts}
                             browserStatuses={homeBrowserStatuses}
                             overview={workspaceOverview}
+                            fxInfo={fxInfo}
+                            onRefreshFxRate={refreshFxRate}
                             loading={loading}
                             onTriggerSearch={triggerSearchAction}
                             onTriggerImport={triggerImportAction}
@@ -578,6 +613,8 @@ const App = () => {
                         />
                     ) : view === 'renewals' ? (
                         <RenewalsView
+                            fxInfo={fxInfo}
+                            onRefreshFxRate={refreshFxRate}
                             onNotify={showNotification}
                             onNavigate={navigateToView}
                             onOverviewChanged={refreshOverview}
@@ -591,6 +628,8 @@ const App = () => {
                         />
                     ) : view === 'cards' ? (
                         <CardsView
+                            darkMode={darkMode}
+                            fxRate={fxInfo.rate}
                             onNotify={showNotification}
                             onCopy={copyToClipboard}
                             onOverviewChanged={refreshOverview}
@@ -598,6 +637,7 @@ const App = () => {
                     ) : view === 'domains' ? (
                         <DomainsView
                             servers={serversCache}
+                            fxRate={fxInfo.rate}
                             onNotify={showNotification}
                             onOverviewChanged={refreshOverview}
                         />
@@ -610,6 +650,7 @@ const App = () => {
                         />
                     ) : view === 'servers' ? (
                         <ServersView
+                            fxRate={fxInfo.rate}
                             onNotify={showNotification}
                             onOverviewChanged={() => {
                                 refreshOverview();

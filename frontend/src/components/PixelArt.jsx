@@ -298,4 +298,17 @@ export const PixelProgress = ({ progress = null, segments = 20 }) => {
     );
 };
 
+/**
+ * 像素虚线分割条（用于区块过渡与像素风层级强化）
+ */
+export const PixelDivider = ({ className = '' }) => (
+    <div
+        aria-hidden="true"
+        className={`w-full h-[3px] opacity-40 ${className}`}
+        style={{
+            backgroundImage: 'repeating-linear-gradient(to right, var(--border-strong) 0 4px, transparent 4px 8px)',
+        }}
+    />
+);
+
 export default PixelMascot;

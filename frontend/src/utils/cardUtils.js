@@ -75,6 +75,30 @@ export const CARD_PALETTES = {
     graphite: 'linear-gradient(135deg, #2b3242 0%, #1e2330 60%, #151822 100%)',
 };
 
+export const CARD_PALETTES_LIGHT = {
+    ruby: 'linear-gradient(135deg, #fff1f4 0%, #fde4ea 54%, #f8fafc 100%)',
+    garnet: 'linear-gradient(135deg, #fff0f3 0%, #fce1e8 54%, #f8fafc 100%)',
+    cobalt: 'linear-gradient(135deg, #eff5ff 0%, #ddeaff 54%, #f8fafc 100%)',
+    navy: 'linear-gradient(135deg, #eef3fc 0%, #dce6f8 54%, #f7f9fc 100%)',
+    jade: 'linear-gradient(135deg, #ecfdf8 0%, #d4f5ec 54%, #f7fbfa 100%)',
+    forest: 'linear-gradient(135deg, #eefbf3 0%, #d7f3e2 54%, #f7fbf9 100%)',
+    copper: 'linear-gradient(135deg, #fff6ed 0%, #fde7d2 54%, #fbfaf8 100%)',
+    amethyst: 'linear-gradient(135deg, #f5f0ff 0%, #e7ddff 54%, #faf9fc 100%)',
+    graphite: 'linear-gradient(135deg, #f4f6fa 0%, #e5eaf3 54%, #fbfcfe 100%)',
+};
+
+export const CARD_ACCENTS = {
+    ruby: { borderLight: 'rgba(190, 24, 93, 0.22)', accent: '#be185d' },
+    garnet: { borderLight: 'rgba(159, 18, 57, 0.22)', accent: '#9f1239' },
+    cobalt: { borderLight: 'rgba(37, 99, 235, 0.24)', accent: '#2563eb' },
+    navy: { borderLight: 'rgba(30, 64, 175, 0.22)', accent: '#1e40af' },
+    jade: { borderLight: 'rgba(5, 150, 105, 0.24)', accent: '#059669' },
+    forest: { borderLight: 'rgba(22, 163, 74, 0.24)', accent: '#15803d' },
+    copper: { borderLight: 'rgba(194, 65, 12, 0.24)', accent: '#c2410c' },
+    amethyst: { borderLight: 'rgba(124, 58, 237, 0.24)', accent: '#7c3aed' },
+    graphite: { borderLight: 'rgba(71, 85, 105, 0.22)', accent: '#334155' },
+};
+
 export function findChinaBank(input) {
     const text = String(input ?? '').trim();
     if (!text) return undefined;
@@ -138,16 +162,31 @@ export function inferRegionGroup(region, explicitGroup) {
     return 'overseas';
 }
 
-export function cardAppearance(issuer = '', network = '', bankCode = '') {
-    const bank = findChinaBank(bankCode || issuer);
-    if (bank) {
+export function cardAppearance(issuer = '', network = '', bankCode = '', options = {}) {
+    const isLight = Boolean(options?.lightMode);
+    const buildStyle = (mark, palette, issuerIconUrl) => {
+        const accentMeta = CARD_ACCENTS[palette] || CARD_ACCENTS.graphite;
         return {
-            mark: bank[0] === 'HXBANK' ? 'HXB' : bank[0] === 'SPABANK' ? 'PAB' : bank[0],
-            palette: bank[3],
-            background: CARD_PALETTES[bank[3]],
-            issuerIconUrl: resolveBrandIconUrl([bank[0], bank[1]]),
+            mark,
+            palette,
+            isLight,
+            background: isLight
+                ? (CARD_PALETTES_LIGHT[palette] || CARD_PALETTES_LIGHT.graphite)
+                : (CARD_PALETTES[palette] || CARD_PALETTES.graphite),
+            borderColor: isLight ? accentMeta.borderLight : 'rgba(255, 255, 255, 0.14)',
+            accentColor: accentMeta.accent,
+            issuerIconUrl,
             networkIconUrl: resolveBrandIconUrl([network]),
         };
+    };
+
+    const bank = findChinaBank(bankCode || issuer);
+    if (bank) {
+        return buildStyle(
+            bank[0] === 'HXBANK' ? 'HXB' : bank[0] === 'SPABANK' ? 'PAB' : bank[0],
+            bank[3],
+            resolveBrandIconUrl([bank[0], bank[1]]),
+        );
     }
     const presets = {
         redotpay: ['R', 'ruby'],
@@ -164,24 +203,16 @@ export function cardAppearance(issuer = '', network = '', bankCode = '') {
     const key = String(issuer || '').trim().toLowerCase();
     const known = presets[key];
     if (known) {
-        return {
-            mark: known[0],
-            palette: known[1],
-            background: CARD_PALETTES[known[1]],
-            issuerIconUrl: resolveBrandIconUrl([issuer]),
-            networkIconUrl: resolveBrandIconUrl([network]),
-        };
+        return buildStyle(known[0], known[1], resolveBrandIconUrl([issuer]));
     }
     const hash = [...(key || network || 'card')].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) >>> 0, 0);
     const paletteNames = ['navy', 'jade', 'graphite', 'copper', 'amethyst'];
     const palette = paletteNames[hash % paletteNames.length];
-    return {
-        mark: String(issuer || network || 'C').trim().slice(0, 2).toUpperCase(),
+    return buildStyle(
+        String(issuer || network || 'C').trim().slice(0, 2).toUpperCase(),
         palette,
-        background: CARD_PALETTES[palette],
-        issuerIconUrl: resolveBrandIconUrl([issuer]),
-        networkIconUrl: resolveBrandIconUrl([network]),
-    };
+        resolveBrandIconUrl([issuer]),
+    );
 }
 
 export function formatCardNumberGroups(number) {

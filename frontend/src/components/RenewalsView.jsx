@@ -10,6 +10,7 @@ import {
     Bell,
     Clock,
     Wallet,
+    ArrowLeftRight,
     X,
 } from 'lucide-react';
 import api from '../services/api';
@@ -17,8 +18,15 @@ import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import {
+    DATE_INPUT_MAX,
+    DATE_INPUT_MIN,
+    DEFAULT_USD_CNY_RATE,
     buildRenewalsIcs,
+    clampDateInputValue,
+    computeUnifiedCnySpend,
+    convertToCny,
     daysUntilDay,
+    formatCnyAmount,
     formatCycleLabel,
     formatDaysBadge,
     formatKindLabel,
@@ -42,7 +50,7 @@ const DAYS_BADGE_STYLE = {
     muted: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)' },
 };
 
-const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
+const RenewalsView = ({ fxInfo: externalFxInfo, onRefreshFxRate, onNotify, onNavigate, onOverviewChanged }) => {
     const [withinDays, setWithinDays] = useState(90);
     const [summary, setSummary] = useState({
         timeline: [],
@@ -52,6 +60,14 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
             unpriced: 0,
         },
     });
+    const [localFxInfo, setLocalFxInfo] = useState({
+        rate: DEFAULT_USD_CNY_RATE,
+        updatedAt: '',
+        source: '默认参考汇率',
+        isFallback: true,
+        loading: false,
+    });
+    const fxInfo = externalFxInfo || localFxInfo;
     const [reminders, setReminders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [advancingKey, setAdvancingKey] = useState('');
@@ -60,6 +76,35 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [showCompleted, setShowCompleted] = useState(false);
+
+    const loadLocalFx = useCallback(async (force = false) => {
+        if (externalFxInfo || typeof api?.getUsdCnyRate !== 'function') return;
+        setLocalFxInfo(prev => ({ ...prev, loading: true }));
+        try {
+            const res = await api.getUsdCnyRate(force);
+            if (res?.success && res.data && Number.isFinite(Number(res.data.rate))) {
+                setLocalFxInfo({
+                    rate: Number(res.data.rate),
+                    updatedAt: res.data.updatedAt || '',
+                    source: res.data.source || '实时汇率',
+                    isFallback: Boolean(res.data.isFallback),
+                    loading: false,
+                });
+                return;
+            }
+        } catch {
+            // 保持默认或上次汇率
+        }
+        setLocalFxInfo(prev => ({ ...prev, loading: false }));
+    }, [externalFxInfo]);
+
+    const handleRefreshFx = async () => {
+        if (typeof onRefreshFxRate === 'function') {
+            await onRefreshFxRate(true);
+        } else {
+            await loadLocalFx(true);
+        }
+    };
 
     const loadData = useCallback(async (days = withinDays) => {
         setLoading(true);
@@ -84,6 +129,17 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
     useEffect(() => {
         loadData(withinDays);
     }, [withinDays, loadData]);
+
+    useEffect(() => {
+        if (!externalFxInfo) {
+            loadLocalFx(false);
+        }
+    }, [externalFxInfo, loadLocalFx]);
+
+    const unifiedSpend = useMemo(
+        () => computeUnifiedCnySpend(summary.spend, fxInfo.rate),
+        [summary.spend, fxInfo.rate],
+    );
 
     const handleAdvanceRenewal = async (item) => {
         const key = `${item.kind}:${item.id}`;
@@ -271,55 +327,91 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
                 </div>
             </div>
 
-            {/* 支出统计卡片 */}
+            {/* 单人民币统一结算总览（自动按实时汇率折算 USD） */}
             <section className="grid grid-cols-1 md:grid-cols-3 gap-4" aria-label="支出概览">
-                <div className="gm-card p-4 space-y-2">
+                <div className="gm-card gm-pixel-card p-4 space-y-2">
                     <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span>美元支出 (USD)</span>
+                        <span className="flex items-center gap-1.5">
+                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
+                            <span>月度总支出（人民币结算）</span>
+                        </span>
                         <Wallet size={14} />
                     </div>
-                    <div className="flex items-baseline gap-3">
-                        <span className="font-mono text-2xl font-semibold gm-text-1">
-                            {formatMoney(summary.spend.usd.monthly, 'USD')}
+                    <div className="flex items-baseline gap-2.5">
+                        <span className="font-mono text-2xl font-bold gm-text-1">
+                            {formatCnyAmount(unifiedSpend.monthlyCny)}
                         </span>
                         <span className="text-[12px] gm-text-3">/ 月</span>
                     </div>
-                    <div className="text-[12px] gm-text-2 font-mono">
-                        折合年付 {formatMoney(summary.spend.usd.yearly, 'USD')}
-                        {summary.spend.usd.once > 0 && ` · 一次性 ${formatMoney(summary.spend.usd.once, 'USD')}`}
+                    <div className="text-[11.5px] gm-text-2 font-mono">
+                        {unifiedSpend.usdMonthly > 0 ? (
+                            <>
+                                含美元折算 {formatMoney(unifiedSpend.usdMonthly, 'USD')} → {formatCnyAmount(unifiedSpend.usdMonthlyInCny)}
+                            </>
+                        ) : (
+                            '全部为人民币计费，无需换汇'
+                        )}
                     </div>
                 </div>
 
-                <div className="gm-card p-4 space-y-2">
+                <div className="gm-card gm-pixel-card p-4 space-y-2">
                     <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span>人民币支出 (CNY)</span>
+                        <span className="flex items-center gap-1.5">
+                            <span className="gm-pixel-led is-success" aria-hidden="true" />
+                            <span>折合年付总支出（人民币）</span>
+                        </span>
                         <Wallet size={14} />
                     </div>
-                    <div className="flex items-baseline gap-3">
-                        <span className="font-mono text-2xl font-semibold gm-text-1">
-                            {formatMoney(summary.spend.cny.monthly, 'CNY')}
+                    <div className="flex items-baseline gap-2.5">
+                        <span className="font-mono text-2xl font-bold gm-text-1">
+                            {formatCnyAmount(unifiedSpend.yearlyCny)}
                         </span>
-                        <span className="text-[12px] gm-text-3">/ 月</span>
+                        <span className="text-[12px] gm-text-3">/ 年</span>
                     </div>
-                    <div className="text-[12px] gm-text-2 font-mono">
-                        折合年付 {formatMoney(summary.spend.cny.yearly, 'CNY')}
-                        {summary.spend.cny.once > 0 && ` · 一次性 ${formatMoney(summary.spend.cny.once, 'CNY')}`}
+                    <div className="text-[11.5px] gm-text-2 font-mono">
+                        {unifiedSpend.onceCny > 0
+                            ? `另含一次性支出 ${formatCnyAmount(unifiedSpend.onceCny)}`
+                            : unifiedSpend.usdYearly > 0
+                                ? `含美元年付 ${formatMoney(unifiedSpend.usdYearly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdYearlyInCny)}`
+                                : `共 ${unifiedSpend.totalPricedCount} 项已标价资产`}
                     </div>
                 </div>
 
-                <div className="gm-card p-4 space-y-2">
+                <div className="gm-card gm-pixel-card p-4 space-y-2">
                     <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span>计费条目统计</span>
-                        <Clock size={14} />
-                    </div>
-                    <div className="flex items-baseline gap-3">
-                        <span className="font-mono text-2xl font-semibold" style={{ color: 'var(--primary)' }}>
-                            {(summary.spend.usd.count || 0) + (summary.spend.cny.count || 0)}
+                        <span className="flex items-center gap-1.5">
+                            <ArrowLeftRight size={13} style={{ color: 'var(--primary)' }} />
+                            <span>实时汇率 &amp; 计费统计</span>
                         </span>
-                        <span className="text-[12px] gm-text-3">项已标价资产</span>
+                        <button
+                            type="button"
+                            onClick={handleRefreshFx}
+                            disabled={Boolean(fxInfo.loading)}
+                            className="gm-btn gm-btn-ghost p-1 text-[11px]"
+                            aria-label="刷新实时汇率"
+                            title="立即拉取最新 USD → CNY 汇率"
+                        >
+                            <RefreshCw size={12} className={fxInfo.loading ? 'animate-spin' : ''} />
+                        </button>
                     </div>
-                    <div className="text-[12px] gm-text-2">
-                        未标价 {summary.spend.unpriced} 项 · 即将到期 {summary.timeline.length} 项
+                    <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-xl font-bold" style={{ color: 'var(--primary)' }}>
+                            1 USD = ¥{unifiedSpend.rate.toFixed(4)}
+                        </span>
+                        <span
+                            className={`gm-pixel-tag ${fxInfo.isFallback ? '' : 'is-success'}`}
+                            title={fxInfo.updatedAt ? `更新于 ${fxInfo.updatedAt}` : ''}
+                        >
+                            {fxInfo.isFallback ? '缓存/参考' : '实时汇率'}
+                        </span>
+                    </div>
+                    <div className="text-[11.5px] gm-text-2 flex items-center justify-between gap-2">
+                        <span>
+                            已标价 <strong className="font-mono gm-text-1">{unifiedSpend.totalPricedCount}</strong> 项 · 即将到期 <strong className="font-mono gm-text-1">{summary.timeline.length}</strong> 项
+                        </span>
+                        <span className="text-[10.5px] gm-text-3 truncate max-w-[110px]" title={fxInfo.source}>
+                            {fxInfo.source}
+                        </span>
                     </div>
                 </div>
             </section>
@@ -376,11 +468,23 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
                                             <div className="flex items-center gap-2 mt-1 text-[11.5px] gm-text-3 font-mono">
                                                 <span>{item.date}</span>
                                                 {item.subtitle && <span className="truncate">· {item.subtitle}</span>}
-                                                {typeof item.billingAmount === 'number' && (
-                                                    <span>
-                                                        · {formatMoney(item.billingAmount, item.billingCurrency)}/{formatCycleLabel(item.billingCycle)}
-                                                    </span>
-                                                )}
+                                                {typeof item.billingAmount === 'number' && (() => {
+                                                    const cnyPrice = convertToCny(
+                                                        item.billingAmount,
+                                                        item.billingCurrency,
+                                                        unifiedSpend.rate,
+                                                    );
+                                                    return (
+                                                        <span className="gm-text-2">
+                                                            · {formatCnyAmount(cnyPrice)}/{formatCycleLabel(item.billingCycle)}
+                                                            {item.billingCurrency === 'USD' && (
+                                                                <span className="ml-1 gm-text-3">
+                                                                    ({formatMoney(item.billingAmount, 'USD')})
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0">
@@ -539,9 +643,14 @@ const RenewalsView = ({ onNotify, onNavigate, onOverviewChanged }) => {
                                     <label className="text-[12px] gm-text-2">到期日期 *</label>
                                     <input
                                         type="date"
+                                        min={DATE_INPUT_MIN}
+                                        max={DATE_INPUT_MAX}
                                         className="gm-input w-full"
                                         value={form.dueAt}
-                                        onChange={(e) => setForm(prev => ({ ...prev, dueAt: e.target.value }))}
+                                        onChange={(e) => setForm(prev => ({
+                                            ...prev,
+                                            dueAt: clampDateInputValue(e.target.value),
+                                        }))}
                                         required
                                     />
                                 </div>

@@ -1,8 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, UserPlus, FileDown, Globe, ArrowRight } from 'lucide-react';
-import { PixelMascot } from './PixelArt';
+import {
+    Globe,
+    ArrowRight,
+    Wallet,
+    RefreshCw,
+    CalendarClock,
+    Bell,
+    KeyRound,
+    Sparkles,
+    CreditCard,
+    Server,
+    Terminal,
+    Bot,
+    Users,
+    ArrowLeftRight,
+} from 'lucide-react';
+import { PixelDivider, PixelMascot } from './PixelArt';
 import { splitGroupNameValues } from '../utils/multiValueField';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import {
+    DEFAULT_USD_CNY_RATE,
+    computeUnifiedCnySpend,
+    convertToCny,
+    formatCnyAmount,
+    formatCycleLabel,
+    formatDaysBadge,
+    formatKindLabel,
+    formatMoney,
+} from '../utils/renewalUtils';
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -15,8 +40,8 @@ const formatClock = (date) => {
 
 const getGreetingByHour = (hour) => {
     if (hour < 6) return '还在忙吗？';
-    if (hour < 12) return '早安，开始今天的工作？';
-    if (hour < 18) return '下午好，账号状态一切正常';
+    if (hour < 12) return '早安，资产状态一目了然';
+    if (hour < 18) return '下午好，数字资产总控台';
     return '晚上好，今天还顺利吗？';
 };
 
@@ -27,13 +52,25 @@ const parseDbTimeMs = (value) => {
     return Number.isNaN(ts) ? 0 : ts;
 };
 
+const DAYS_BADGE_STYLE = {
+    danger: { background: 'var(--danger-soft)', color: 'var(--danger)' },
+    warning: { background: 'var(--warning-soft)', color: 'var(--warning)' },
+    accent: { background: 'var(--primary-light)', color: 'var(--primary)' },
+    muted: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)' },
+};
+
 /**
- * MosMos 风格极简首页总览
+ * 像素风个人数字资产首页总控台
+ * - 顶部聚合：统一人民币月/年费用、实时 USD→CNY 汇率、即将到期与待办数
+ * - 中部矩阵：8 大工作区资产一键直达 + 到期续费/备忘双栏看板
+ * - 底部保留：活跃浏览器与最近更新谷歌账号；右侧保留竖排账号统计
  */
 const HomeView = ({
     accounts = [],
     browserStatuses = {},
     overview = null,
+    fxInfo = null,
+    onRefreshFxRate,
     loading = false,
     onTriggerSearch,
     onTriggerImport,
@@ -81,90 +118,431 @@ const HomeView = ({
             .slice(0, 5);
     }, [accounts]);
 
+    const effectiveFx = fxInfo || {
+        rate: DEFAULT_USD_CNY_RATE,
+        source: '默认参考汇率',
+        isFallback: true,
+        loading: false,
+    };
+
+    const unifiedSpend = useMemo(
+        () => computeUnifiedCnySpend(overview?.spend, effectiveFx.rate),
+        [overview?.spend, effectiveFx.rate],
+    );
+
+    const upcomingRenewals = overview?.upcomingRenewals || [];
+    const dueReminders = overview?.dueReminders || [];
+    const serversTotal = overview?.serversCount ?? 0;
+    const serversOnline = overview?.serversOnlineCount ?? 0;
+
+    const workspaceTiles = useMemo(
+        () => [
+            {
+                id: 'list',
+                label: '谷歌账号',
+                icon: Users,
+                value: String(stats.total),
+                sub: `Pro ${stats.pro} · 接码 ${stats.sms}`,
+                led: stats.runningCount > 0 ? 'is-success' : 'is-primary',
+                onClick: () => (onNavigateList ? onNavigateList() : onNavigate?.('list')),
+            },
+            {
+                id: 'vault',
+                label: '账号与密钥',
+                icon: KeyRound,
+                value: String(overview?.vaultItemsCount ?? 0),
+                sub: '密码与 2FA 凭证',
+                led: 'is-primary',
+                onClick: () => onNavigate?.('vault'),
+            },
+            {
+                id: 'ai',
+                label: 'AI 订阅',
+                icon: Sparkles,
+                value: String(overview?.aiSubscriptionsCount ?? 0),
+                sub: '额度与 OAuth 直连',
+                led: 'is-primary',
+                onClick: () => onNavigate?.('ai'),
+            },
+            {
+                id: 'cards',
+                label: 'U 卡与支付卡',
+                icon: CreditCard,
+                value: String(overview?.paymentCardsCount ?? 0),
+                sub: '卡面与 CVV 账单',
+                led: 'is-primary',
+                onClick: () => onNavigate?.('cards'),
+            },
+            {
+                id: 'servers',
+                label: '服务器节点',
+                icon: Server,
+                value: `${serversOnline}/${serversTotal}`,
+                sub: serversTotal > 0 ? `${serversOnline} 台在线` : '暂未录入主机',
+                led: serversOnline > 0 ? 'is-success' : serversTotal > 0 ? 'is-warning' : '',
+                onClick: () => onNavigate?.('servers'),
+            },
+            {
+                id: 'domains',
+                label: '域名管理',
+                icon: Globe,
+                value: String(overview?.domainsCount ?? 0),
+                sub: 'WHOIS 与 CF DNS',
+                led: 'is-primary',
+                onClick: () => onNavigate?.('domains'),
+            },
+            {
+                id: 'terminal',
+                label: 'SSH 终端',
+                icon: Terminal,
+                value: 'TTY',
+                sub: '多标签与 SFTP',
+                led: 'is-success',
+                onClick: () => onNavigate?.('terminal'),
+            },
+            {
+                id: 'agent',
+                label: 'AI 助手',
+                icon: Bot,
+                value: 'SAFE',
+                sub: '脱敏洞察与提案',
+                led: 'is-primary',
+                onClick: () => onNavigate?.('agent'),
+            },
+        ],
+        [
+            stats.total,
+            stats.pro,
+            stats.sms,
+            stats.runningCount,
+            overview?.vaultItemsCount,
+            overview?.aiSubscriptionsCount,
+            overview?.paymentCardsCount,
+            overview?.domainsCount,
+            serversOnline,
+            serversTotal,
+            onNavigateList,
+            onNavigate,
+        ],
+    );
+
     const greeting = getGreetingByHour(now.getHours());
 
     return (
         <div className="gm-home gm-view-enter">
             {/* 左侧主栏 */}
             <div className="gm-home-main">
-                <div className="gm-home-clock" aria-label="当前时间">
-                    {formatClock(now)}
+                {/* 顶部像素问候 + 快捷操作条 */}
+                <section className="space-y-3 gm-stagger-1">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                            <div
+                                onMouseEnter={() => setMascotHover(true)}
+                                onMouseLeave={() => setMascotHover(false)}
+                                className="inline-flex text-[color:var(--text-primary)] cursor-default shrink-0"
+                            >
+                                <PixelMascot
+                                    size={46}
+                                    variant={loading ? 'loading' : (mascotHover ? 'wave' : 'idle')}
+                                />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="gm-pixel-tag is-accent" aria-label="当前时间">
+                                        {formatClock(now)}
+                                    </span>
+                                    <span className="text-[11px] font-mono gm-text-3">
+                                        WORKSPACE · ALL-IN-ONE
+                                    </span>
+                                </div>
+                                <h1 className="gm-home-greeting mt-1">{greeting}</h1>
+                            </div>
+                        </div>
+
+                        {/* 紧凑快捷键操作区（完整保留 Ctrl+K / Alt+N / Alt+E 交互） */}
+                        <div className="flex flex-wrap items-center gap-2" aria-label="快捷操作">
+                            <button
+                                type="button"
+                                onClick={onTriggerSearch}
+                                className="gm-btn gm-btn-secondary gm-btn-sm"
+                            >
+                                <kbd className="gm-kbd">Ctrl+K</kbd>
+                                <span>搜索账号</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onTriggerImport}
+                                className="gm-btn gm-btn-secondary gm-btn-sm"
+                            >
+                                <kbd className="gm-kbd">Alt+N</kbd>
+                                <span>导入账号</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onTriggerExport}
+                                className="gm-btn gm-btn-secondary gm-btn-sm"
+                            >
+                                <kbd className="gm-kbd">Alt+E</kbd>
+                                <span>导出账号</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                {/* 核心焦点 1：费用与续费统一人民币结算面板 */}
+                <section className="gm-home-spend-hero gm-pixel-card gm-stagger-1" aria-label="费用结算总览">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--border-light)]">
+                        <div className="flex items-center gap-2">
+                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
+                            <Wallet size={15} style={{ color: 'var(--primary)' }} />
+                            <h2 className="text-[13.5px] font-semibold gm-text-1">
+                                资产费用总览（统一人民币结算）
+                            </h2>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span
+                                className="inline-flex items-center gap-1.5 text-[11px] font-mono gm-text-2 px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-light)]"
+                                title={`汇率来源：${effectiveFx.source}`}
+                            >
+                                <ArrowLeftRight size={11} style={{ color: 'var(--primary)' }} />
+                                <span>1 USD = ¥{unifiedSpend.rate.toFixed(4)}</span>
+                            </span>
+                            {typeof onRefreshFxRate === 'function' && (
+                                <button
+                                    type="button"
+                                    onClick={() => onRefreshFxRate(true)}
+                                    disabled={Boolean(effectiveFx.loading)}
+                                    className="gm-btn gm-btn-ghost p-1"
+                                    aria-label="刷新实时汇率"
+                                    title="立即刷新 USD → CNY 实时汇率"
+                                >
+                                    <RefreshCw size={12} className={effectiveFx.loading ? 'animate-spin' : ''} />
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => onNavigate?.('renewals')}
+                                className="gm-btn gm-btn-sm"
+                                style={{
+                                    background: 'var(--primary-light)',
+                                    color: 'var(--primary)',
+                                    borderColor: 'rgba(107, 155, 247, 0.36)',
+                                }}
+                            >
+                                <span>费用详情</span>
+                                <ArrowRight size={12} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3.5">
+                        <div>
+                            <div className="text-[11.5px] gm-text-3">本月预计总支出</div>
+                            <div className="mt-1 flex items-baseline gap-1.5">
+                                <span className="font-mono text-[26px] font-bold tracking-tight gm-text-1">
+                                    {formatCnyAmount(unifiedSpend.monthlyCny)}
+                                </span>
+                                <span className="text-[11.5px] gm-text-3">/ 月</span>
+                            </div>
+                            <div className="mt-1 text-[11px] font-mono gm-text-3">
+                                {unifiedSpend.usdMonthly > 0
+                                    ? `含美元 ${formatMoney(unifiedSpend.usdMonthly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdMonthlyInCny)}`
+                                    : `${unifiedSpend.totalPricedCount} 项已标价资产`}
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-[11.5px] gm-text-3">折合年度总支出</div>
+                            <div className="mt-1 flex items-baseline gap-1.5">
+                                <span className="font-mono text-[26px] font-bold tracking-tight" style={{ color: 'var(--primary)' }}>
+                                    {formatCnyAmount(unifiedSpend.yearlyCny)}
+                                </span>
+                                <span className="text-[11.5px] gm-text-3">/ 年</span>
+                            </div>
+                            <div className="mt-1 text-[11px] font-mono gm-text-3">
+                                {unifiedSpend.onceCny > 0
+                                    ? `另含一次性 ${formatCnyAmount(unifiedSpend.onceCny)}`
+                                    : unifiedSpend.unpricedCount > 0
+                                        ? `尚有 ${unifiedSpend.unpricedCount} 项未填费用`
+                                        : '全部周期费用已计入'}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col justify-between gap-2 sm:border-l sm:border-[var(--border-light)] sm:pl-4">
+                            <div className="flex items-center justify-between text-[12px]">
+                                <span className="gm-text-3 flex items-center gap-1.5">
+                                    <CalendarClock size={13} style={{ color: 'var(--warning)' }} />
+                                    <span>90 天内到期续费</span>
+                                </span>
+                                <span className="font-mono font-bold text-[15px] gm-text-1">
+                                    {upcomingRenewals.length} 项
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[12px]">
+                                <span className="gm-text-3 flex items-center gap-1.5">
+                                    <Bell size={13} style={{ color: 'var(--primary)' }} />
+                                    <span>待办备忘提醒</span>
+                                </span>
+                                <span className="font-mono font-bold text-[15px] gm-text-1">
+                                    {overview?.pendingRemindersCount ?? 0} 项
+                                </span>
+                            </div>
+                            <div className="text-[10.5px] font-mono gm-text-3 truncate">
+                                {effectiveFx.isFallback ? '汇率：缓存/参考' : `实时汇率 · ${effectiveFx.source}`}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* 核心焦点 2：即将到期续费 & 待办提醒双栏面板 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 gm-stagger-2">
+                    <section className="gm-card gm-pixel-card p-4 space-y-2.5" aria-label="即将到期续费">
+                        <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
+                            <h2 className="text-[13px] font-semibold gm-text-1 flex items-center gap-1.5">
+                                <CalendarClock size={14} style={{ color: 'var(--warning)' }} />
+                                <span>即将到期续费</span>
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => onNavigate?.('renewals')}
+                                className="gm-home-more-btn inline-flex items-center gap-1"
+                            >
+                                <span>处理</span>
+                                <ArrowRight size={12} />
+                            </button>
+                        </div>
+                        {upcomingRenewals.length > 0 ? (
+                            <div className="space-y-1.5">
+                                {upcomingRenewals.slice(0, 5).map(item => {
+                                    const badge = formatDaysBadge(item.days);
+                                    const cnyAmt = typeof item.billingAmount === 'number'
+                                        ? convertToCny(item.billingAmount, item.billingCurrency, unifiedSpend.rate)
+                                        : null;
+                                    return (
+                                        <button
+                                            key={`${item.kind}-${item.id}`}
+                                            type="button"
+                                            onClick={() => onNavigate?.('renewals')}
+                                            className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-light)] text-left transition-colors cursor-pointer"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="gm-pixel-tag">{formatKindLabel(item.kind)}</span>
+                                                    <span className="text-[12.5px] font-medium gm-text-1 truncate">
+                                                        {item.name}
+                                                    </span>
+                                                </div>
+                                                <div className="mt-0.5 text-[11px] font-mono gm-text-3 flex items-center gap-2">
+                                                    <span>{item.date}</span>
+                                                    {cnyAmt !== null && (
+                                                        <span className="gm-text-2">
+                                                            {formatCnyAmount(cnyAmt)}/{formatCycleLabel(item.billingCycle)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <span
+                                                className="px-2 py-0.5 rounded-[4px] text-[10.5px] font-mono font-semibold shrink-0"
+                                                style={DAYS_BADGE_STYLE[badge.tone]}
+                                            >
+                                                {badge.text}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="py-5 text-center text-[12px] gm-text-3">
+                                近期暂无即将到期的资产续费
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="gm-card gm-pixel-card p-4 space-y-2.5" aria-label="待办备忘提醒">
+                        <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
+                            <h2 className="text-[13px] font-semibold gm-text-1 flex items-center gap-1.5">
+                                <Bell size={14} style={{ color: 'var(--primary)' }} />
+                                <span>待办备忘提醒</span>
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => onNavigate?.('renewals')}
+                                className="gm-home-more-btn inline-flex items-center gap-1"
+                            >
+                                <span>管理</span>
+                                <ArrowRight size={12} />
+                            </button>
+                        </div>
+                        {dueReminders.length > 0 ? (
+                            <div className="space-y-1.5">
+                                {dueReminders.slice(0, 5).map(rem => (
+                                    <button
+                                        key={`rem-${rem.id}`}
+                                        type="button"
+                                        onClick={() => onNavigate?.('renewals')}
+                                        className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-light)] text-left transition-colors cursor-pointer"
+                                    >
+                                        <span className="text-[12.5px] font-medium gm-text-1 truncate">
+                                            {rem.title}
+                                        </span>
+                                        <span className="font-mono text-[11px] gm-text-3 shrink-0">
+                                            {rem.dueAt}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="py-5 text-center text-[12px] gm-text-3">
+                                暂无到期备忘提醒，可前往费用与续费页新建
+                            </div>
+                        )}
+                    </section>
                 </div>
 
-                <section className="gm-home-hero gm-stagger-1">
-                    <div className="gm-home-hero-row">
-                        <div
-                            onMouseEnter={() => setMascotHover(true)}
-                            onMouseLeave={() => setMascotHover(false)}
-                            className="inline-flex text-[color:var(--text-primary)] cursor-default shrink-0"
-                        >
-                            <PixelMascot
-                                size={54}
-                                variant={loading ? 'loading' : (mascotHover ? 'wave' : 'idle')}
-                            />
-                        </div>
-                        <h1 className="gm-home-greeting">{greeting}</h1>
+                {/* 核心焦点 3：全部数字资产工作区像素矩阵 */}
+                <section className="gm-home-section gm-stagger-2" aria-label="数字资产总览">
+                    <div className="gm-home-section-head">
+                        <h2 className="gm-home-section-title flex items-center gap-2">
+                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
+                            <span>数字资产工作区</span>
+                        </h2>
+                        <span className="text-[11px] font-mono gm-text-3">点击磁贴直达对应模块</span>
                     </div>
-                    <p className="gm-home-subcopy">
-                        在任意视图按 <span className="gm-text-1 font-mono">Ctrl + K</span> 立即检索账号，或直接点击下方快捷入口切入工作。
-                    </p>
-                </section>
-
-                {/* 复刻 MosMos 无框双行快捷键引导区 */}
-                <section className="gm-home-shortcuts gm-stagger-2" aria-label="快捷操作">
-                    <div className="gm-home-shortcut-line">
-                        <button
-                            type="button"
-                            onClick={onTriggerSearch}
-                            className="gm-shortcut-row"
-                        >
-                            <span className="gm-shortcut-keys">
-                                <kbd className="gm-kbd gm-kbd-lg">Ctrl</kbd>
-                                <span className="gm-kbd-plus">+</span>
-                                <kbd className="gm-kbd gm-kbd-lg">K</kbd>
-                            </span>
-                            <span className="gm-shortcut-desc">
-                                <span className="sr-only">搜索账号</span>
-                                <span>搜索账号，即时检索邮箱、备注或标签</span>
-                            </span>
-                        </button>
-                    </div>
-
-                    <div className="gm-home-shortcut-line">
-                        <button
-                            type="button"
-                            onClick={onTriggerImport}
-                            className="gm-shortcut-row"
-                        >
-                            <span className="gm-shortcut-keys">
-                                <kbd className="gm-kbd gm-kbd-lg">Alt</kbd>
-                                <span className="gm-kbd-plus">+</span>
-                                <kbd className="gm-kbd gm-kbd-lg">N</kbd>
-                            </span>
-                            <span className="gm-shortcut-desc">
-                                <span>导入账号，单条或批量粘贴</span>
-                            </span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={onTriggerExport}
-                            className="gm-shortcut-row"
-                        >
-                            <span className="gm-shortcut-keys">
-                                <kbd className="gm-kbd gm-kbd-lg">Alt</kbd>
-                                <span className="gm-kbd-plus">+</span>
-                                <kbd className="gm-kbd gm-kbd-lg">E</kbd>
-                            </span>
-                            <span className="gm-shortcut-desc">
-                                <span>导出账号，自定义格式</span>
-                            </span>
-                        </button>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {workspaceTiles.map(tile => {
+                            const Icon = tile.icon;
+                            return (
+                                <button
+                                    key={tile.id}
+                                    type="button"
+                                    onClick={tile.onClick}
+                                    className="gm-home-asset-tile"
+                                >
+                                    <div className="flex items-center justify-between gap-2 w-full">
+                                        <span className="text-[11.5px] font-medium gm-text-2 flex items-center gap-1.5 truncate">
+                                            <Icon size={13} style={{ color: 'var(--primary)' }} className="shrink-0" />
+                                            <span className="truncate">{tile.label}</span>
+                                        </span>
+                                        <span className={`gm-pixel-led ${tile.led}`} aria-hidden="true" />
+                                    </div>
+                                    <div>
+                                        <div className="font-mono text-xl font-bold gm-text-1 leading-tight">
+                                            {tile.value}
+                                        </div>
+                                        <div className="mt-0.5 text-[10.5px] gm-text-3 truncate">
+                                            {tile.sub}
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
                     </div>
                 </section>
 
-                {/* 复刻 MosMos 无框纵向双区块：活跃浏览器 → 最近更新 */}
-                <div className="gm-home-sections gm-stagger-3">
+                <PixelDivider />
+
+                {/* 活跃浏览器 + 最近更新谷歌账号 */}
+                <div className="gm-home-sections gm-stagger-3" style={{ paddingTop: 0, gap: '20px' }}>
                     <section className="gm-home-section" aria-label="活跃浏览器">
                         <div className="gm-home-section-head">
                             <h2 className="gm-home-section-title">
@@ -256,71 +634,6 @@ const HomeView = ({
                             </div>
                         )}
                     </section>
-
-                    {overview && (
-                        <section className="gm-home-section" aria-label="数字资产总览">
-                            <div className="gm-home-section-head">
-                                <h2 className="gm-home-section-title">数字资产工作区</h2>
-                                <button
-                                    type="button"
-                                    onClick={() => onNavigate?.('renewals')}
-                                    className="gm-home-more-btn inline-flex items-center gap-1"
-                                >
-                                    <span>续费与备忘</span>
-                                    <ArrowRight size={12} />
-                                </button>
-                            </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-                                {[
-                                    { id: 'vault', label: '账号密钥', count: overview.vaultItemsCount ?? 0 },
-                                    { id: 'ai', label: 'AI 订阅', count: overview.aiSubscriptionsCount ?? 0 },
-                                    { id: 'cards', label: '支付卡', count: overview.paymentCardsCount ?? 0 },
-                                    { id: 'servers', label: '服务器', count: overview.serversCount ?? 0 },
-                                    { id: 'domains', label: '域名', count: overview.domainsCount ?? 0 },
-                                ].map(tile => (
-                                    <button
-                                        key={tile.id}
-                                        type="button"
-                                        onClick={() => onNavigate?.(tile.id)}
-                                        className="gm-card p-3 text-left hover:border-[var(--primary)] transition-colors"
-                                    >
-                                        <div className="text-[11px] gm-text-3">{tile.label}</div>
-                                        <div className="font-mono text-lg font-semibold gm-text-1 mt-0.5">
-                                            {tile.count}
-                                        </div>
-                                    </button>
-                                ))}
-                            </div>
-                            {(overview.upcomingRenewals?.length > 0 || overview.dueReminders?.length > 0) && (
-                                <div className="gm-home-list mt-1">
-                                    {(overview.upcomingRenewals || []).slice(0, 3).map(item => (
-                                        <button
-                                            key={`${item.kind}-${item.id}`}
-                                            type="button"
-                                            onClick={() => onNavigate?.('renewals')}
-                                            className="gm-home-row"
-                                        >
-                                            <span className="truncate text-[13px]">{item.name}</span>
-                                            <span className="font-mono text-[11.5px] gm-text-3 shrink-0">
-                                                {item.date} ({item.days < 0 ? `已过期 ${Math.abs(item.days)} 天` : `${item.days} 天后`})
-                                            </span>
-                                        </button>
-                                    ))}
-                                    {(overview.dueReminders || []).slice(0, 2).map(rem => (
-                                        <button
-                                            key={`rem-${rem.id}`}
-                                            type="button"
-                                            onClick={() => onNavigate?.('renewals')}
-                                            className="gm-home-row"
-                                        >
-                                            <span className="truncate text-[13px]">[备忘] {rem.title}</span>
-                                            <span className="font-mono text-[11.5px] gm-text-3 shrink-0">{rem.dueAt}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </section>
-                    )}
                 </div>
             </div>
 

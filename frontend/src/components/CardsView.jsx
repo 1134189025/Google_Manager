@@ -25,7 +25,15 @@ import {
     formatCardNumberGroups,
     inferRegionGroup,
 } from '../utils/cardUtils';
-import { formatMoney } from '../utils/renewalUtils';
+import {
+    DATE_INPUT_MAX,
+    DATE_INPUT_MIN,
+    DEFAULT_USD_CNY_RATE,
+    clampDateInputValue,
+    convertToCny,
+    formatCnyAmount,
+    formatMoney,
+} from '../utils/renewalUtils';
 
 const EMPTY_CARD_FORM = {
     name: '',
@@ -50,7 +58,21 @@ const EMPTY_CARD_FORM = {
     notes: '',
 };
 
-const CardsView = ({ onNotify, onCopy, onOverviewChanged }) => {
+const CardsView = ({ darkMode, fxRate = DEFAULT_USD_CNY_RATE, onNotify, onCopy, onOverviewChanged }) => {
+    const [docLight, setDocLight] = useState(
+        () => typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light',
+    );
+    const isLightMode = typeof darkMode === 'boolean' ? !darkMode : docLight;
+
+    useEffect(() => {
+        if (typeof darkMode === 'boolean' || typeof document === 'undefined') return undefined;
+        const syncTheme = () => setDocLight(document.documentElement.dataset.theme === 'light');
+        syncTheme();
+        const observer = new MutationObserver(syncTheme);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        return () => observer.disconnect();
+    }, [darkMode]);
+
     const [cards, setCards] = useState([]);
     const [loading, setLoading] = useState(true);
     const [regionGroup, setRegionGroup] = useState('all');
@@ -277,64 +299,190 @@ const CardsView = ({ onNotify, onCopy, onOverviewChanged }) => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                     {filteredCards.map(card => {
-                        const appearance = cardAppearance(card.issuer || card.name, card.network, card.bankCode);
+                        const appearance = cardAppearance(card.issuer || card.name, card.network, card.bankCode, {
+                            lightMode: isLightMode,
+                        });
                         const isFlipped = Boolean(flipped[card.id]);
                         const isRevealed = Boolean(revealed[card.id]);
                         const displayLast4 = card.last4 || '••••';
+                        const lightCard = appearance.isLight;
+                        const cnyFee = typeof card.billingAmount === 'number'
+                            ? convertToCny(card.billingAmount, card.billingCurrency, fxRate)
+                            : null;
 
                         return (
                             <div key={card.id} className="space-y-2.5">
-                                <div style={{ perspective: '1000px' }}>
+                                <div style={{ perspective: '1200px' }}>
                                     <div
                                         style={{
                                             position: 'relative',
-                                            height: '204px',
+                                            height: '208px',
                                             transformStyle: 'preserve-3d',
+                                            WebkitTransformStyle: 'preserve-3d',
                                             transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                                             transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
                                         }}
                                     >
                                         {/* 正面 */}
                                         <div
+                                            data-card-face="front"
+                                            data-card-theme={lightCard ? 'light' : 'dark'}
                                             onClick={() => setFlipped(prev => ({ ...prev, [card.id]: true }))}
-                                            className="absolute inset-0 rounded-2xl p-5 flex flex-col justify-between text-white cursor-pointer border border-white/15 shadow-lg"
+                                            className={`absolute inset-0 rounded-2xl p-5 flex flex-col justify-between cursor-pointer overflow-hidden gm-pixel-card-face ${
+                                                lightCard
+                                                    ? 'text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.08)]'
+                                                    : 'text-white shadow-[0_14px_34px_rgba(0,0,0,0.45)]'
+                                            }`}
                                             style={{
                                                 background: appearance.background,
+                                                border: `1px solid ${appearance.borderColor}`,
                                                 backfaceVisibility: 'hidden',
+                                                WebkitBackfaceVisibility: 'hidden',
+                                                transform: 'rotateY(0deg) translateZ(1px)',
+                                                zIndex: isFlipped ? 0 : 2,
                                             }}
                                         >
-                                            <div className="flex items-start justify-between gap-2">
+                                            {/* 像素微点装饰层 */}
+                                            <div
+                                                aria-hidden="true"
+                                                className="pointer-events-none absolute inset-0"
+                                                style={{
+                                                    backgroundImage: lightCard
+                                                        ? 'radial-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px)'
+                                                        : 'radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)',
+                                                    backgroundSize: '8px 8px',
+                                                    maskImage: 'linear-gradient(135deg, transparent 35%, black 100%)',
+                                                    WebkitMaskImage: 'linear-gradient(135deg, transparent 35%, black 100%)',
+                                                }}
+                                            />
+
+                                            <div className="relative flex items-start justify-between gap-2">
                                                 <div className="flex items-center gap-2.5 min-w-0">
                                                     {appearance.issuerIconUrl ? (
                                                         <img
                                                             src={appearance.issuerIconUrl}
                                                             alt=""
-                                                            className="w-7 h-7 rounded-md bg-white/90 p-1 object-contain shrink-0"
+                                                            className={`w-7 h-7 rounded-md p-1 object-contain shrink-0 ${
+                                                                lightCard
+                                                                    ? 'bg-white border border-slate-200/90 shadow-xs'
+                                                                    : 'bg-white/95'
+                                                            }`}
                                                         />
                                                     ) : (
-                                                        <span className="w-7 h-7 rounded-md bg-white/15 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                                        <span
+                                                            className={`w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-bold font-mono shrink-0 ${
+                                                                lightCard
+                                                                    ? 'bg-slate-900/8 text-slate-800 border border-slate-900/12'
+                                                                    : 'bg-white/15 text-white border border-white/15'
+                                                            }`}
+                                                        >
                                                             {appearance.mark}
                                                         </span>
                                                     )}
                                                     <div className="min-w-0">
-                                                        <div className="text-[14px] font-semibold truncate">{card.name}</div>
-                                                        <div className="text-[11px] text-white/70 truncate">
+                                                        <div className="text-[14.5px] font-semibold truncate">{card.name}</div>
+                                                        <div
+                                                            className={`text-[11px] truncate ${
+                                                                lightCard ? 'text-slate-600' : 'text-white/70'
+                                                            }`}
+                                                        >
                                                             {card.issuer || '自定义发行方'}
                                                             {card.region ? ` · ${card.region}` : ''}
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-white/10 text-white/80 shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setFlipped(prev => ({ ...prev, [card.id]: true }));
+                                                    }}
+                                                    aria-label={`翻转 ${card.name} 查看背面`}
+                                                    className={`text-[10.5px] px-2.5 py-1 rounded-md font-mono font-medium shrink-0 transition-colors cursor-pointer ${
+                                                        lightCard
+                                                            ? 'bg-slate-900/[0.07] hover:bg-slate-900/[0.13] text-slate-700 border border-slate-900/12'
+                                                            : 'bg-white/12 hover:bg-white/20 text-white/90 border border-white/15'
+                                                    }`}
+                                                >
                                                     点击翻转
-                                                </span>
+                                                </button>
                                             </div>
 
-                                            <div className="font-mono text-lg tracking-widest text-white/95">
-                                                •••• •••• •••• {displayLast4}
+                                            <div className="relative flex items-center justify-between gap-3">
+                                                <div
+                                                    className={`font-mono text-lg tracking-widest font-semibold ${
+                                                        lightCard ? 'text-slate-900' : 'text-white/95'
+                                                    }`}
+                                                >
+                                                    •••• •••• •••• {displayLast4}
+                                                </div>
+                                                {/* 像素风 EMV 芯片徽记 */}
+                                                <svg
+                                                    width="26"
+                                                    height="20"
+                                                    viewBox="0 0 13 10"
+                                                    shapeRendering="crispEdges"
+                                                    aria-hidden="true"
+                                                    className="shrink-0 opacity-85"
+                                                >
+                                                    <rect
+                                                        x="1"
+                                                        y="1"
+                                                        width="11"
+                                                        height="8"
+                                                        fill={lightCard ? '#d9a441' : '#e5b869'}
+                                                    />
+                                                    <rect
+                                                        x="2"
+                                                        y="0"
+                                                        width="9"
+                                                        height="1"
+                                                        fill={lightCard ? '#c38c28' : '#c99742'}
+                                                    />
+                                                    <rect
+                                                        x="2"
+                                                        y="9"
+                                                        width="9"
+                                                        height="1"
+                                                        fill={lightCard ? '#c38c28' : '#c99742'}
+                                                    />
+                                                    <rect
+                                                        x="4"
+                                                        y="1"
+                                                        width="1"
+                                                        height="8"
+                                                        fill={lightCard ? '#9a6b16' : '#8a601b'}
+                                                    />
+                                                    <rect
+                                                        x="8"
+                                                        y="1"
+                                                        width="1"
+                                                        height="8"
+                                                        fill={lightCard ? '#9a6b16' : '#8a601b'}
+                                                    />
+                                                    <rect
+                                                        x="1"
+                                                        y="4"
+                                                        width="3"
+                                                        height="1"
+                                                        fill={lightCard ? '#9a6b16' : '#8a601b'}
+                                                    />
+                                                    <rect
+                                                        x="9"
+                                                        y="4"
+                                                        width="3"
+                                                        height="1"
+                                                        fill={lightCard ? '#9a6b16' : '#8a601b'}
+                                                    />
+                                                </svg>
                                             </div>
 
-                                            <div className="flex items-end justify-between text-[11.5px] text-white/80">
-                                                <div className="space-x-3">
+                                            <div
+                                                className={`relative flex items-end justify-between text-[11.5px] ${
+                                                    lightCard ? 'text-slate-600' : 'text-white/80'
+                                                }`}
+                                            >
+                                                <div className="space-x-3 font-mono">
                                                     <span>有效期 {card.expiryMonth || '--/--'}</span>
                                                     {card.formFactor && <span>· {card.formFactor}</span>}
                                                 </div>
@@ -342,20 +490,27 @@ const CardsView = ({ onNotify, onCopy, onOverviewChanged }) => {
                                                     <img
                                                         src={appearance.networkIconUrl}
                                                         alt={card.network || ''}
-                                                        className="h-5 object-contain bg-white/90 rounded px-1.5 py-0.5"
+                                                        className={`h-5 object-contain rounded px-1.5 py-0.5 ${
+                                                            lightCard
+                                                                ? 'bg-white border border-slate-200/80'
+                                                                : 'bg-white/92'
+                                                        }`}
                                                     />
                                                 ) : (
-                                                    <span className="font-semibold">{card.network || ''}</span>
+                                                    <span className="font-semibold font-mono">{card.network || ''}</span>
                                                 )}
                                             </div>
                                         </div>
 
                                         {/* 背面（私密信息） */}
                                         <div
+                                            data-card-face="back"
                                             className="absolute inset-0 rounded-2xl p-4 flex flex-col justify-between bg-[var(--bg-elevated)] border border-[var(--border-strong)] shadow-lg"
                                             style={{
                                                 backfaceVisibility: 'hidden',
-                                                transform: 'rotateY(180deg)',
+                                                WebkitBackfaceVisibility: 'hidden',
+                                                transform: 'rotateY(180deg) translateZ(1px)',
+                                                zIndex: isFlipped ? 2 : 0,
                                             }}
                                         >
                                             <div className="flex items-center justify-between">
@@ -456,8 +611,13 @@ const CardsView = ({ onNotify, onCopy, onOverviewChanged }) => {
                                 <div className="flex items-center justify-between px-1 text-[11.5px] gm-text-3">
                                     <div className="flex items-center gap-2 truncate">
                                         {typeof card.billingAmount === 'number' && (
-                                            <span className="font-mono">
-                                                {formatMoney(card.billingAmount, card.billingCurrency)}
+                                            <span className="font-mono text-[var(--text-secondary)]">
+                                                {cnyFee !== null ? formatCnyAmount(cnyFee) : formatMoney(card.billingAmount, card.billingCurrency)}
+                                                {card.billingCurrency === 'USD' && (
+                                                    <span className="ml-1 text-[10.5px] gm-text-3">
+                                                        ({formatMoney(card.billingAmount, 'USD')})
+                                                    </span>
+                                                )}
                                             </span>
                                         )}
                                         {card.expiresAt && <span className="font-mono">到期 {card.expiresAt}</span>}
@@ -683,9 +843,11 @@ const CardsView = ({ onNotify, onCopy, onOverviewChanged }) => {
                                     <label className="text-[12px] gm-text-2">到期提醒日</label>
                                     <input
                                         type="date"
+                                        min={DATE_INPUT_MIN}
+                                        max={DATE_INPUT_MAX}
                                         className="gm-input w-full"
                                         value={form.expiresAt}
-                                        onChange={(e) => setForm(prev => ({ ...prev, expiresAt: e.target.value }))}
+                                        onChange={(e) => setForm(prev => ({ ...prev, expiresAt: clampDateInputValue(e.target.value) }))}
                                     />
                                 </div>
                             </div>

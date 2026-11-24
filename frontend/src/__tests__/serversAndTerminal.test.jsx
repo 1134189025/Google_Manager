@@ -309,4 +309,26 @@ describe('Phase 4: ServersView & TerminalView', () => {
         );
         expect(screen.getByText('Tokyo-Prod')).toBeInTheDocument();
     });
+
+    it('ServersView 限制到期日期为 4 位年份并在误贴 SSH 公钥时给出提醒', async () => {
+        const user = userEvent.setup();
+        render(<ServersView fxRate={7.2} onNotify={vi.fn()} />);
+        await screen.findByText('Tokyo-Prod');
+
+        await user.click(screen.getByRole('button', { name: /新增服务器/ }));
+        const dialog = await screen.findByRole('dialog', { name: '新增服务器' });
+
+        const dateInput = dialog.querySelector('input[type="date"]');
+        expect(dateInput).toHaveAttribute('min', '1970-01-01');
+        expect(dateInput).toHaveAttribute('max', '2099-12-31');
+        fireEvent.change(dateInput, { target: { value: '202612-12-04' } });
+        expect(dateInput).toHaveValue('2026-12-04');
+
+        // 切换到 OpenSSH 私钥认证并粘贴公钥，应显示提醒
+        const authSelect = within(dialog).getByDisplayValue('密码认证');
+        await user.selectOptions(authSelect, 'key');
+        const keyArea = within(dialog).getByPlaceholderText('-----BEGIN OPENSSH PRIVATE KEY-----');
+        fireEvent.change(keyArea, { target: { value: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 user@host' } });
+        expect(within(dialog).getByRole('alert')).toHaveTextContent(/SSH 公钥/);
+    });
 });
