@@ -33,11 +33,13 @@ const parseDbTimeMs = (value) => {
 const HomeView = ({
     accounts = [],
     browserStatuses = {},
+    overview = null,
     loading = false,
     onTriggerSearch,
     onTriggerImport,
     onTriggerExport,
     onNavigateList,
+    onNavigate,
     onOpenBrowser,
     onCopyEmail,
 }) => {
@@ -254,6 +256,71 @@ const HomeView = ({
                             </div>
                         )}
                     </section>
+
+                    {overview && (
+                        <section className="gm-home-section" aria-label="数字资产总览">
+                            <div className="gm-home-section-head">
+                                <h2 className="gm-home-section-title">数字资产工作区</h2>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate?.('renewals')}
+                                    className="gm-home-more-btn inline-flex items-center gap-1"
+                                >
+                                    <span>续费与备忘</span>
+                                    <ArrowRight size={12} />
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                                {[
+                                    { id: 'vault', label: '账号密钥', count: overview.vaultItemsCount ?? 0 },
+                                    { id: 'ai', label: 'AI 订阅', count: overview.aiSubscriptionsCount ?? 0 },
+                                    { id: 'cards', label: '支付卡', count: overview.paymentCardsCount ?? 0 },
+                                    { id: 'servers', label: '服务器', count: overview.serversCount ?? 0 },
+                                    { id: 'domains', label: '域名', count: overview.domainsCount ?? 0 },
+                                ].map(tile => (
+                                    <button
+                                        key={tile.id}
+                                        type="button"
+                                        onClick={() => onNavigate?.(tile.id)}
+                                        className="gm-card p-3 text-left hover:border-[var(--primary)] transition-colors"
+                                    >
+                                        <div className="text-[11px] gm-text-3">{tile.label}</div>
+                                        <div className="font-mono text-lg font-semibold gm-text-1 mt-0.5">
+                                            {tile.count}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            {(overview.upcomingRenewals?.length > 0 || overview.dueReminders?.length > 0) && (
+                                <div className="gm-home-list mt-1">
+                                    {(overview.upcomingRenewals || []).slice(0, 3).map(item => (
+                                        <button
+                                            key={`${item.kind}-${item.id}`}
+                                            type="button"
+                                            onClick={() => onNavigate?.('renewals')}
+                                            className="gm-home-row"
+                                        >
+                                            <span className="truncate text-[13px]">{item.name}</span>
+                                            <span className="font-mono text-[11.5px] gm-text-3 shrink-0">
+                                                {item.date} ({item.days < 0 ? `已过期 ${Math.abs(item.days)} 天` : `${item.days} 天后`})
+                                            </span>
+                                        </button>
+                                    ))}
+                                    {(overview.dueReminders || []).slice(0, 2).map(rem => (
+                                        <button
+                                            key={`rem-${rem.id}`}
+                                            type="button"
+                                            onClick={() => onNavigate?.('renewals')}
+                                            className="gm-home-row"
+                                        >
+                                            <span className="truncate text-[13px]">[备忘] {rem.title}</span>
+                                            <span className="font-mono text-[11.5px] gm-text-3 shrink-0">{rem.dueAt}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+                    )}
                 </div>
             </div>
 

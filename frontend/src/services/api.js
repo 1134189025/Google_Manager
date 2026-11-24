@@ -330,6 +330,746 @@ const api = {
             console.error('Failed to open browser profile dir:', error);
             return { success: false, message: getErrorMessage(error) };
         }
+    },
+
+    // ─── 工作区概览 / 续费 / 备忘提醒 ────────────────────────────
+
+    async getWorkspaceOverview() {
+        try {
+            const data = await adapter.getWorkspaceOverview();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get workspace overview:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getRenewalsSummary(withinDays = 90) {
+        try {
+            const data = await adapter.getRenewalsSummary(withinDays);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get renewals summary:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async advanceRenewal(kind, id) {
+        try {
+            const nextDate = await adapter.advanceRenewal(kind, id);
+            return { success: true, data: nextDate };
+        } catch (error) {
+            console.error('Failed to advance renewal:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getReminders() {
+        try {
+            const data = await adapter.getReminders();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get reminders:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createReminder(reminder) {
+        try {
+            const data = await adapter.createReminder(reminder);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create reminder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateReminder(id, reminder) {
+        try {
+            const data = await adapter.updateReminder(id, reminder);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update reminder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteReminder(id) {
+        try {
+            await adapter.deleteReminder(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete reminder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async completeReminder(id) {
+        try {
+            const data = await adapter.completeReminder(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to complete reminder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async writeTextFile(path, content) {
+        try {
+            const savedPath = await adapter.writeTextFile(path, content);
+            return { success: true, data: savedPath };
+        } catch (error) {
+            console.error('Failed to write text file:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async readTextFile(path) {
+        try {
+            const content = await adapter.readTextFile(path);
+            return { success: true, data: content };
+        } catch (error) {
+            console.error('Failed to read text file:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async openExternalUrl(url) {
+        try {
+            await adapter.openExternalUrl(url);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to open external url:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── 账号与密钥库 ──────────────────────────────────────────────
+
+    async getVaultFolders() {
+        try {
+            const data = await adapter.getVaultFolders();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get vault folders:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createVaultFolder(folder) {
+        try {
+            const data = await adapter.createVaultFolder(folder);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create vault folder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateVaultFolder(id, folder) {
+        try {
+            const data = await adapter.updateVaultFolder(id, folder);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update vault folder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteVaultFolder(id) {
+        try {
+            await adapter.deleteVaultFolder(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete vault folder:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getVaultItems(search = '') {
+        try {
+            const data = await adapter.getVaultItems(search || undefined);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get vault items:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createVaultItem(item) {
+        try {
+            const data = await adapter.createVaultItem(item);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create vault item:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateVaultItem(id, item) {
+        try {
+            const data = await adapter.updateVaultItem(id, item);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update vault item:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteVaultItem(id) {
+        try {
+            await adapter.deleteVaultItem(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete vault item:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async batchImportVaultItems(items) {
+        try {
+            const data = await adapter.batchImportVaultItems(items);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to batch import vault items:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── U 卡与支付卡 ──────────────────────────────────────────────
+
+    async getPaymentCards() {
+        try {
+            const data = await adapter.getPaymentCards();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get payment cards:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createPaymentCard(card) {
+        try {
+            const data = await adapter.createPaymentCard(card);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create payment card:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updatePaymentCard(id, card) {
+        try {
+            const data = await adapter.updatePaymentCard(id, card);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update payment card:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deletePaymentCard(id) {
+        try {
+            await adapter.deletePaymentCard(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete payment card:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── 域名管理与 Cloudflare DNS ────────────────────────────────
+
+    async getDomains() {
+        try {
+            const data = await adapter.getDomains();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get domains:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createDomain(domain) {
+        try {
+            const data = await adapter.createDomain(domain);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create domain:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateDomain(id, domain) {
+        try {
+            const data = await adapter.updateDomain(id, domain);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update domain:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteDomain(id) {
+        try {
+            await adapter.deleteDomain(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete domain:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async probeDomain(id) {
+        try {
+            const data = await adapter.probeDomain(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to probe domain:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getCloudflareConnections() {
+        try {
+            const data = await adapter.getCloudflareConnections();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get cloudflare connections:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async saveCloudflareConnection(id, connection) {
+        try {
+            const data = await adapter.saveCloudflareConnection(id, connection);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to save cloudflare connection:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteCloudflareConnection(id) {
+        try {
+            await adapter.deleteCloudflareConnection(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete cloudflare connection:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async listCloudflareZones(connectionId) {
+        try {
+            const data = await adapter.listCloudflareZones(connectionId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to list cloudflare zones:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async importCloudflareZones(connectionId, zones) {
+        try {
+            const count = await adapter.importCloudflareZones(connectionId, zones);
+            return { success: true, data: count };
+        } catch (error) {
+            console.error('Failed to import cloudflare zones:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async listDomainDnsRecords(domainId) {
+        try {
+            const data = await adapter.listDomainDnsRecords(domainId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to list domain DNS records:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async applyDomainDnsRecord(domainId, action, recordId = null, record = null) {
+        try {
+            const data = await adapter.applyDomainDnsRecord(domainId, action, recordId, record);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to apply domain DNS record:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── AI 订阅与 OAuth / CLI 额度 ──────────────────────────────
+
+    async getAiSubscriptions() {
+        try {
+            const data = await adapter.getAiSubscriptions();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get AI subscriptions:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createAiSubscription(subscription) {
+        try {
+            const data = await adapter.createAiSubscription(subscription);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create AI subscription:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateAiSubscription(id, subscription) {
+        try {
+            const data = await adapter.updateAiSubscription(id, subscription);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update AI subscription:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteAiSubscription(id) {
+        try {
+            await adapter.deleteAiSubscription(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete AI subscription:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async startAiOauth(provider, subscriptionId) {
+        try {
+            const data = await adapter.startAiOauth(provider, subscriptionId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to start AI OAuth:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getAiOauthStatus(sessionId) {
+        try {
+            const data = await adapter.getAiOauthStatus(sessionId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get AI OAuth status:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async completeAiOauth(sessionId, callbackInput) {
+        try {
+            const data = await adapter.completeAiOauth(sessionId, callbackInput);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to complete AI OAuth:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async cancelAiOauth(sessionId) {
+        try {
+            await adapter.cancelAiOauth(sessionId);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to cancel AI OAuth:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async disconnectAiOauth(id) {
+        try {
+            const data = await adapter.disconnectAiOauth(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to disconnect AI OAuth:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async refreshAiSubscriptionQuota(id) {
+        try {
+            const data = await adapter.refreshAiSubscriptionQuota(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to refresh AI subscription quota:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async readAntigravityCliQuota() {
+        try {
+            const data = await adapter.readAntigravityCliQuota();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to read Antigravity CLI quota:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── 服务器台账、SSH 终端与 SFTP ───────────────────────────────
+
+    async getServers(search = '') {
+        try {
+            const data = await adapter.getServers(search);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get servers:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async createServer(server) {
+        try {
+            const data = await adapter.createServer(server);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to create server:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async updateServer(id, server) {
+        try {
+            const data = await adapter.updateServer(id, server);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to update server:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async deleteServer(id) {
+        try {
+            await adapter.deleteServer(id);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to delete server:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async probeServer(id) {
+        try {
+            const data = await adapter.probeServer(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to probe server:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async resetServerHostFingerprint(id) {
+        try {
+            const data = await adapter.resetServerHostFingerprint(id);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to reset server host fingerprint:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getAppMonitorSettings() {
+        try {
+            const data = await adapter.getAppMonitorSettings();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get monitor settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async saveAppMonitorSettings(serverMonitorMinutes) {
+        try {
+            const data = await adapter.saveAppMonitorSettings(serverMonitorMinutes);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to save monitor settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sshOpenSession(serverId, cols = 100, rows = 30) {
+        try {
+            const data = await adapter.sshOpenSession(serverId, cols, rows);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to open SSH session:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sshWriteSession(sessionId, data) {
+        try {
+            await adapter.sshWriteSession(sessionId, data);
+            return { success: true };
+        } catch (error) {
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sshResizeSession(sessionId, cols, rows) {
+        try {
+            await adapter.sshResizeSession(sessionId, cols, rows);
+            return { success: true };
+        } catch (error) {
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sshCloseSession(sessionId) {
+        try {
+            await adapter.sshCloseSession(sessionId);
+            return { success: true };
+        } catch (error) {
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sshListSessions() {
+        try {
+            const data = await adapter.sshListSessions();
+            return { success: true, data };
+        } catch (error) {
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async sftpListDir(serverId, path = '.') {
+        try {
+            const data = await adapter.sftpListDir(serverId, path);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to list SFTP dir:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sftpDownloadFile(serverId, remotePath, localPath) {
+        try {
+            const bytes = await adapter.sftpDownloadFile(serverId, remotePath, localPath);
+            return { success: true, data: bytes };
+        } catch (error) {
+            console.error('Failed to download via SFTP:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sftpUploadFile(serverId, localPath, remotePath) {
+        try {
+            const bytes = await adapter.sftpUploadFile(serverId, localPath, remotePath);
+            return { success: true, data: bytes };
+        } catch (error) {
+            console.error('Failed to upload via SFTP:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sftpMkdir(serverId, remotePath) {
+        try {
+            await adapter.sftpMkdir(serverId, remotePath);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to mkdir via SFTP:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sftpRemove(serverId, remotePath, isDir) {
+        try {
+            await adapter.sftpRemove(serverId, remotePath, isDir);
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to remove via SFTP:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    // ─── AI 助手 ───────────────────────────────────────────────────
+
+    async getAgentSettings() {
+        try {
+            const data = await adapter.getAgentSettings();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get agent settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async saveAgentSettings(settings) {
+        try {
+            const data = await adapter.saveAgentSettings(settings);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to save agent settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async testAgentConnection(baseUrl = null, apiKey = null, model = null) {
+        try {
+            const data = await adapter.testAgentConnection(baseUrl, apiKey, model);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to test agent connection:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async getAgentMessages() {
+        try {
+            const data = await adapter.getAgentMessages();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get agent messages:', error);
+            return { success: false, data: [], message: getErrorMessage(error) };
+        }
+    },
+
+    async clearAgentMessages() {
+        try {
+            await adapter.clearAgentMessages();
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to clear agent messages:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async sendAgentMessage(message) {
+        try {
+            const data = await adapter.sendAgentMessage(message);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to send agent message:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async applyAgentProposal(messageId, proposalId) {
+        try {
+            const data = await adapter.applyAgentProposal(messageId, proposalId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to apply agent proposal:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async rejectAgentProposal(messageId, proposalId) {
+        try {
+            const data = await adapter.rejectAgentProposal(messageId, proposalId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to reject agent proposal:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
     }
 };
 

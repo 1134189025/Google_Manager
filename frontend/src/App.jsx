@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 // 导入服务和组件
@@ -9,10 +9,20 @@ import HomeView from './components/HomeView';
 import AccountListView from './components/AccountListView';
 import ImportView from './components/ImportView';
 import RecycleView from './components/RecycleView';
+import RenewalsView from './components/RenewalsView';
+import VaultView from './components/VaultView';
+import CardsView from './components/CardsView';
+import DomainsView from './components/DomainsView';
+import AiSubscriptionsView from './components/AiSubscriptionsView';
+import ServersView from './components/ServersView';
+import AgentView from './components/AgentView';
 import EditModal from './components/EditModal';
 import BrowserSettingsDialog from './components/BrowserSettingsDialog';
+import SystemSettingsDialog from './components/SystemSettingsDialog';
 import UpdateDialog from './components/UpdateDialog';
 import { PixelDitherBackdrop } from './components/PixelArt';
+
+const TerminalView = lazy(() => import('./components/TerminalView'));
 import useAppUpdater from './hooks/useAppUpdater';
 import useBrowserStatus from './hooks/useBrowserStatus';
 import { normalizePhoneNumber } from './utils/phoneUtils';
@@ -47,9 +57,28 @@ const App = () => {
 
     // Undo state
     const [deletedAccounts, setDeletedAccounts] = useState([]);
+    const [workspaceOverview, setWorkspaceOverview] = useState(null);
+    const [paymentCardsCache, setPaymentCardsCache] = useState([]);
+    const [serversCache, setServersCache] = useState([]);
+    const [terminalMounted, setTerminalMounted] = useState(false);
+    const [pendingTerminalTarget, setPendingTerminalTarget] = useState(null);
+    const terminalTargetSeqRef = useRef(0);
+
+    const refreshOverview = useCallback(async () => {
+        if (typeof api?.getWorkspaceOverview !== 'function') return;
+        try {
+            const res = await api.getWorkspaceOverview();
+            if (res?.success && res.data) {
+                setWorkspaceOverview(res.data);
+            }
+        } catch {
+            // 测试 mock 未提供扩展接口时静默跳过
+        }
+    }, []);
 
     // 账号浏览器设置弹窗；首次打开浏览器时由列表页/首页等待其结果（是否已保存）
     const [browserSettingsDialog, setBrowserSettingsDialog] = useState({ isOpen: false, firstRun: false });
+    const [systemSettingsDialog, setSystemSettingsDialog] = useState({ isOpen: false, tab: 'ai' });
     const browserSettingsResolveRef = useRef(null);
 
     const openBrowserSettings = useCallback(({ firstRun = false } = {}) => new Promise(resolve => {
@@ -100,6 +129,26 @@ const App = () => {
     useEffect(() => {
         loadAccounts(debouncedSearch);
     }, [debouncedSearch]);
+
+    useEffect(() => {
+        refreshOverview();
+    }, [refreshOverview, accounts.length]);
+
+    useEffect(() => {
+        if (view === 'ai' && typeof api?.getPaymentCards === 'function') {
+            api.getPaymentCards().then(res => {
+                if (res?.success && Array.isArray(res.data)) setPaymentCardsCache(res.data);
+            }).catch(() => {});
+        }
+        if ((view === 'domains' || view === 'servers' || view === 'terminal') && typeof api?.getServers === 'function') {
+            api.getServers().then(res => {
+                if (res?.success && Array.isArray(res.data)) setServersCache(res.data);
+            }).catch(() => {});
+        }
+        if (view === 'terminal') {
+            setTerminalMounted(true);
+        }
+    }, [view]);
 
     const loadAccounts = async (searchValue = search) => {
         const requestId = ++latestLoadRequestIdRef.current;
@@ -164,7 +213,22 @@ const App = () => {
     // 跨视图动作分发：写入一次性动作并在 AccountListView 消费后清除，避免重新挂载时重放旧动作
     const navigateToView = useCallback((nextView) => {
         setPendingListAction(null);
+        if (nextView === 'terminal') {
+            setTerminalMounted(true);
+        }
         setView(nextView);
+    }, []);
+
+    const handleOpenTerminalForServer = useCallback((server) => {
+        if (!server) return;
+        terminalTargetSeqRef.current += 1;
+        setPendingTerminalTarget({ server, serverId: server.id, seq: terminalTargetSeqRef.current });
+        setTerminalMounted(true);
+        setView('terminal');
+    }, []);
+
+    const consumePendingTerminalTarget = useCallback((seq) => {
+        setPendingTerminalTarget(prev => (prev && prev.seq === seq ? null : prev));
     }, []);
 
     const dispatchListAction = useCallback((type) => {
@@ -488,10 +552,12 @@ const App = () => {
                 <SideNav
                     view={view}
                     accountsCount={accounts.length}
+                    overview={workspaceOverview}
                     darkMode={darkMode}
                     updater={updater}
                     onNavigate={navigateToView}
                     onOpenBrowserSettings={() => openBrowserSettings()}
+                    onOpenSystemSettings={() => setSystemSettingsDialog({ isOpen: true, tab: 'ai' })}
                     onToggleDarkMode={() => setDarkMode(prev => !prev)}
                 />
 
@@ -500,15 +566,69 @@ const App = () => {
                         <HomeView
                             accounts={accounts}
                             browserStatuses={homeBrowserStatuses}
+                            overview={workspaceOverview}
                             loading={loading}
                             onTriggerSearch={triggerSearchAction}
                             onTriggerImport={triggerImportAction}
                             onTriggerExport={triggerExportAction}
                             onNavigateList={() => navigateToView('list')}
+                            onNavigate={navigateToView}
                             onOpenBrowser={handleHomeOpenBrowser}
                             onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
                         />
-                    ) : view === 'list' ? (
+                    ) : view === 'renewals' ? (
+                        <RenewalsView
+                            onNotify={showNotification}
+                            onNavigate={navigateToView}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'vault' ? (
+                        <VaultView
+                            googleAccounts={accounts}
+                            onNotify={showNotification}
+                            onCopy={copyToClipboard}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'cards' ? (
+                        <CardsView
+                            onNotify={showNotification}
+                            onCopy={copyToClipboard}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'domains' ? (
+                        <DomainsView
+                            servers={serversCache}
+                            onNotify={showNotification}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'ai' ? (
+                        <AiSubscriptionsView
+                            googleAccounts={accounts}
+                            paymentCards={paymentCardsCache}
+                            onNotify={showNotification}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'servers' ? (
+                        <ServersView
+                            onNotify={showNotification}
+                            onOverviewChanged={() => {
+                                refreshOverview();
+                                if (typeof api?.getServers === 'function') {
+                                    api.getServers().then(res => {
+                                        if (res?.success && Array.isArray(res.data)) setServersCache(res.data);
+                                    }).catch(() => {});
+                                }
+                            }}
+                            onOpenTerminal={handleOpenTerminalForServer}
+                            onOpenSystemSettings={(tab = 'monitor') => setSystemSettingsDialog({ isOpen: true, tab })}
+                        />
+                    ) : view === 'agent' ? (
+                        <AgentView
+                            onNotify={showNotification}
+                            onOpenSystemSettings={(tab = 'ai') => setSystemSettingsDialog({ isOpen: true, tab })}
+                            onOverviewChanged={refreshOverview}
+                        />
+                    ) : view === 'terminal' ? null : view === 'list' ? (
                         <AccountListView
                             accounts={filteredAccounts}
                             search={search}
@@ -536,8 +656,36 @@ const App = () => {
                             onNotify={showNotification}
                             onNavigateList={() => navigateToView('list')}
                         />
-                    ) : (
+                    ) : view === 'import' ? (
                         <ImportView onImport={handleImport} onCancel={() => navigateToView('list')} importing={importing} />
+                    ) : (
+                        <div className="max-w-3xl mx-auto gm-card p-8 text-center space-y-2 gm-view-enter">
+                            <h2 className="gm-title">模块建设中</h2>
+                            <p className="gm-subtitle">该工作区模块将在后续阶段接入。</p>
+                        </div>
+                    )}
+
+                    {/* 持久挂载懒加载终端，切换左侧视图不中断已连会话 */}
+                    {terminalMounted && (
+                        <div style={{ display: view === 'terminal' ? 'block' : 'none' }}>
+                            <Suspense
+                                fallback={
+                                    <div className="gm-card p-8 text-center text-xs text-[var(--text-secondary)]">
+                                        正在加载 SSH 终端组件...
+                                    </div>
+                                }
+                            >
+                                <TerminalView
+                                    servers={serversCache}
+                                    darkMode={darkMode}
+                                    isActiveView={view === 'terminal'}
+                                    pendingOpenServer={pendingTerminalTarget}
+                                    onConsumePendingOpen={consumePendingTerminalTarget}
+                                    onNotify={showNotification}
+                                    onNavigateServers={() => navigateToView('servers')}
+                                />
+                            </Suspense>
+                        </div>
                     )}
                 </main>
             </div>
@@ -573,6 +721,17 @@ const App = () => {
                 firstRun={browserSettingsDialog.firstRun}
                 onClose={closeBrowserSettings}
                 onNotify={showNotification}
+            />
+
+            <SystemSettingsDialog
+                isOpen={systemSettingsDialog.isOpen}
+                initialTab={systemSettingsDialog.tab}
+                onClose={() => setSystemSettingsDialog(prev => ({ ...prev, isOpen: false }))}
+                onNotify={showNotification}
+                onBackupRestored={() => {
+                    loadAccounts('');
+                    refreshOverview();
+                }}
             />
         </div>
     );

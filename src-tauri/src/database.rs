@@ -911,6 +911,8 @@ fn copy_from_attached_backup(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("恢复 account_history 失败: {}", e))?;
     }
 
+    crate::assets_db::restore_asset_tables_in_tx(&tx, conn)?;
+
     tx.commit().map_err(|e| format!("提交恢复事务失败: {}", e))
 }
 
@@ -1068,7 +1070,30 @@ fn init_database_at(db_path: &Path, backups: &Path) -> Result<Connection> {
         [],
     )?;
 
+    crate::assets_db::init_asset_tables(&conn)?;
+
     Ok(conn)
+}
+
+#[cfg(test)]
+pub(crate) fn init_database_at_for_test(db_path: &Path, backups: &Path) -> Result<Connection> {
+    init_database_at(db_path, backups)
+}
+
+#[cfg(test)]
+pub(crate) fn create_backup_in_dir_for_test(
+    conn: &Connection,
+    dir: &Path,
+) -> Result<PathBuf, String> {
+    create_backup_in(conn, dir, None)
+}
+
+#[cfg(test)]
+pub(crate) fn restore_from_file_for_test(
+    conn: &Connection,
+    backup_path: &Path,
+) -> Result<(), String> {
+    restore_from_file(conn, backup_path)
 }
 
 // ─── 导出功能 ─────────────────────────────────────────────────────

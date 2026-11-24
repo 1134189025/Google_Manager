@@ -1,8 +1,15 @@
+mod agent;
+mod ai_quota;
 mod app_paths;
+mod asset_commands;
+mod assets_db;
 mod browser;
+mod cloudflare;
 mod commands;
 mod database;
+mod domain_probe;
 mod sms;
+mod ssh_client;
 mod totp;
 
 pub use database::{init_database, Database};
@@ -24,6 +31,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(db)
         .manage(sms::SmsService::new())
+        .manage(ai_quota::AiOAuthManager::new())
+        .manage(ssh_client::SshSessionManager::new())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -63,6 +72,79 @@ pub fn run() {
             commands::save_browser_settings,
             commands::get_browser_usage,
             commands::open_browser_profile_dir,
+            asset_commands::get_workspace_overview,
+            asset_commands::get_renewals_summary,
+            asset_commands::advance_renewal,
+            asset_commands::get_reminders,
+            asset_commands::create_reminder,
+            asset_commands::update_reminder,
+            asset_commands::delete_reminder,
+            asset_commands::complete_reminder,
+            asset_commands::write_text_file,
+            asset_commands::read_text_file,
+            asset_commands::open_external_url,
+            asset_commands::get_vault_folders,
+            asset_commands::create_vault_folder,
+            asset_commands::update_vault_folder,
+            asset_commands::delete_vault_folder,
+            asset_commands::get_vault_items,
+            asset_commands::create_vault_item,
+            asset_commands::update_vault_item,
+            asset_commands::delete_vault_item,
+            asset_commands::batch_import_vault_items,
+            asset_commands::get_payment_cards,
+            asset_commands::create_payment_card,
+            asset_commands::update_payment_card,
+            asset_commands::delete_payment_card,
+            asset_commands::get_domains,
+            asset_commands::create_domain,
+            asset_commands::update_domain,
+            asset_commands::delete_domain,
+            asset_commands::probe_domain,
+            asset_commands::get_cloudflare_connections,
+            asset_commands::save_cloudflare_connection,
+            asset_commands::delete_cloudflare_connection,
+            asset_commands::list_cloudflare_zones,
+            asset_commands::import_cloudflare_zones,
+            asset_commands::list_domain_dns_records,
+            asset_commands::apply_domain_dns_record,
+            asset_commands::get_ai_subscriptions,
+            asset_commands::create_ai_subscription,
+            asset_commands::update_ai_subscription,
+            asset_commands::delete_ai_subscription,
+            asset_commands::start_ai_oauth,
+            asset_commands::get_ai_oauth_status,
+            asset_commands::complete_ai_oauth,
+            asset_commands::cancel_ai_oauth,
+            asset_commands::disconnect_ai_oauth,
+            asset_commands::refresh_ai_subscription_quota,
+            asset_commands::read_antigravity_cli_quota,
+            asset_commands::get_servers,
+            asset_commands::create_server,
+            asset_commands::update_server,
+            asset_commands::delete_server,
+            asset_commands::probe_server,
+            asset_commands::reset_server_host_fingerprint,
+            asset_commands::get_app_monitor_settings,
+            asset_commands::save_app_monitor_settings,
+            asset_commands::ssh_open_session,
+            asset_commands::ssh_write_session,
+            asset_commands::ssh_resize_session,
+            asset_commands::ssh_close_session,
+            asset_commands::ssh_list_sessions,
+            asset_commands::sftp_list_dir,
+            asset_commands::sftp_download_file,
+            asset_commands::sftp_upload_file,
+            asset_commands::sftp_mkdir,
+            asset_commands::sftp_remove,
+            asset_commands::get_agent_settings,
+            asset_commands::save_agent_settings,
+            asset_commands::test_agent_connection,
+            asset_commands::get_agent_messages,
+            asset_commands::clear_agent_messages,
+            asset_commands::send_agent_message,
+            asset_commands::apply_agent_proposal,
+            asset_commands::reject_agent_proposal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

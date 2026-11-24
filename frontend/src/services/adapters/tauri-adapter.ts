@@ -18,6 +18,39 @@ import type {
   DeleteBrowserProfilesResult,
   BrowserUsage,
   ExportFileResult,
+  WorkspaceOverview,
+  RenewalsSummary,
+  Reminder,
+  ReminderInput,
+  VaultFolder,
+  VaultFolderInput,
+  VaultItem,
+  VaultItemInput,
+  VaultBatchImportResult,
+  PaymentCard,
+  PaymentCardInput,
+  DomainItem,
+  DomainInput,
+  CloudflareConnectionView,
+  CloudflareConnectionInput,
+  CloudflareZone,
+  CloudflareDnsRecord,
+  DnsRecordInput,
+  AiSubscription,
+  AiSubscriptionInput,
+  AiOAuthProviderId,
+  OAuthStartInfo,
+  OAuthStatusInfo,
+  AntigravityQuotaResult,
+  ServerItem,
+  ServerInput,
+  AppMonitorSettings,
+  SshSessionInfo,
+  SftpDirListing,
+  AgentSettingsView,
+  AgentSettingsInput,
+  AgentConnectionTestResult,
+  AgentMessageItem,
 } from '../types';
 import { snakeToCamel, camelToSnake } from '../utils';
 
@@ -305,6 +338,410 @@ export class TauriAdapter implements ApiAdapter {
 
   async openBrowserProfileDir(accountId: number): Promise<void> {
     await this.invokeCommand('open_browser_profile_dir', { accountId });
+  }
+
+  // ─── 工作区概览 / 续费 / 备忘提醒 ──────────────────────────────
+
+  async getWorkspaceOverview(): Promise<WorkspaceOverview> {
+    const result = await this.invokeCommand<any>('get_workspace_overview');
+    return snakeToCamel<WorkspaceOverview>(result || {});
+  }
+
+  async getRenewalsSummary(withinDays?: number): Promise<RenewalsSummary> {
+    const result = await this.invokeCommand<any>('get_renewals_summary', {
+      withinDays: withinDays ?? null,
+    });
+    return snakeToCamel<RenewalsSummary>(result || { timeline: [], spend: {} });
+  }
+
+  async advanceRenewal(kind: string, id: number): Promise<string> {
+    return await this.invokeCommand<string>('advance_renewal', { kind, id });
+  }
+
+  async getReminders(): Promise<Reminder[]> {
+    const list = await this.invokeCommand<any[]>('get_reminders');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<Reminder>(item));
+  }
+
+  async createReminder(reminder: ReminderInput): Promise<Reminder> {
+    const result = await this.invokeCommand<any>('create_reminder', { reminder });
+    return snakeToCamel<Reminder>(result);
+  }
+
+  async updateReminder(id: number, reminder: ReminderInput): Promise<Reminder> {
+    const result = await this.invokeCommand<any>('update_reminder', { id, reminder });
+    return snakeToCamel<Reminder>(result);
+  }
+
+  async deleteReminder(id: number): Promise<void> {
+    await this.invokeCommand('delete_reminder', { id });
+  }
+
+  async completeReminder(id: number): Promise<Reminder> {
+    const result = await this.invokeCommand<any>('complete_reminder', { id });
+    return snakeToCamel<Reminder>(result);
+  }
+
+  async writeTextFile(path: string, content: string): Promise<string> {
+    return await this.invokeCommand<string>('write_text_file', { path, content });
+  }
+
+  async readTextFile(path: string): Promise<string> {
+    return await this.invokeCommand<string>('read_text_file', { path });
+  }
+
+  async openExternalUrl(url: string): Promise<void> {
+    await this.invokeCommand('open_external_url', { url });
+  }
+
+  // ─── 账号与密钥库 ─────────────────────────────────────────────
+
+  async getVaultFolders(): Promise<VaultFolder[]> {
+    const list = await this.invokeCommand<any[]>('get_vault_folders');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<VaultFolder>(item));
+  }
+
+  async createVaultFolder(folder: VaultFolderInput): Promise<VaultFolder> {
+    const result = await this.invokeCommand<any>('create_vault_folder', { folder });
+    return snakeToCamel<VaultFolder>(result);
+  }
+
+  async updateVaultFolder(id: number, folder: VaultFolderInput): Promise<VaultFolder> {
+    const result = await this.invokeCommand<any>('update_vault_folder', { id, folder });
+    return snakeToCamel<VaultFolder>(result);
+  }
+
+  async deleteVaultFolder(id: number): Promise<void> {
+    await this.invokeCommand('delete_vault_folder', { id });
+  }
+
+  async getVaultItems(search?: string): Promise<VaultItem[]> {
+    const list = await this.invokeCommand<any[]>('get_vault_items', { search: search || null });
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<VaultItem>(item));
+  }
+
+  async createVaultItem(item: VaultItemInput): Promise<VaultItem> {
+    const result = await this.invokeCommand<any>('create_vault_item', { item });
+    return snakeToCamel<VaultItem>(result);
+  }
+
+  async updateVaultItem(id: number, item: VaultItemInput): Promise<VaultItem> {
+    const result = await this.invokeCommand<any>('update_vault_item', { id, item });
+    return snakeToCamel<VaultItem>(result);
+  }
+
+  async deleteVaultItem(id: number): Promise<void> {
+    await this.invokeCommand('delete_vault_item', { id });
+  }
+
+  async batchImportVaultItems(items: VaultItemInput[]): Promise<VaultBatchImportResult> {
+    const result = await this.invokeCommand<any>('batch_import_vault_items', { items });
+    const data = snakeToCamel<Record<string, unknown>>((result || {}) as Record<string, unknown>);
+    return {
+      createdCount: Number(data.createdCount ?? 0),
+      skippedCount: Number(data.skippedCount ?? 0),
+    };
+  }
+
+  // ─── U 卡与支付卡 ─────────────────────────────────────────────
+
+  async getPaymentCards(): Promise<PaymentCard[]> {
+    const list = await this.invokeCommand<any[]>('get_payment_cards');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<PaymentCard>(item));
+  }
+
+  async createPaymentCard(card: PaymentCardInput): Promise<PaymentCard> {
+    const result = await this.invokeCommand<any>('create_payment_card', { card });
+    return snakeToCamel<PaymentCard>(result);
+  }
+
+  async updatePaymentCard(id: number, card: PaymentCardInput): Promise<PaymentCard> {
+    const result = await this.invokeCommand<any>('update_payment_card', { id, card });
+    return snakeToCamel<PaymentCard>(result);
+  }
+
+  async deletePaymentCard(id: number): Promise<void> {
+    await this.invokeCommand('delete_payment_card', { id });
+  }
+
+  // ─── 域名管理与 Cloudflare DNS ─────────────────────────────────
+
+  async getDomains(): Promise<DomainItem[]> {
+    const list = await this.invokeCommand<any[]>('get_domains');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<DomainItem>(item));
+  }
+
+  async createDomain(domain: DomainInput): Promise<DomainItem> {
+    const result = await this.invokeCommand<any>('create_domain', { domain });
+    return snakeToCamel<DomainItem>(result);
+  }
+
+  async updateDomain(id: number, domain: DomainInput): Promise<DomainItem> {
+    const result = await this.invokeCommand<any>('update_domain', { id, domain });
+    return snakeToCamel<DomainItem>(result);
+  }
+
+  async deleteDomain(id: number): Promise<void> {
+    await this.invokeCommand('delete_domain', { id });
+  }
+
+  async probeDomain(id: number): Promise<DomainItem> {
+    const result = await this.invokeCommand<any>('probe_domain', { id });
+    return snakeToCamel<DomainItem>(result);
+  }
+
+  async getCloudflareConnections(): Promise<CloudflareConnectionView[]> {
+    const list = await this.invokeCommand<any[]>('get_cloudflare_connections');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<CloudflareConnectionView>(item));
+  }
+
+  async saveCloudflareConnection(
+    id: number | null,
+    connection: CloudflareConnectionInput,
+  ): Promise<CloudflareConnectionView> {
+    const result = await this.invokeCommand<any>('save_cloudflare_connection', {
+      id: id ?? null,
+      connection,
+    });
+    return snakeToCamel<CloudflareConnectionView>(result);
+  }
+
+  async deleteCloudflareConnection(id: number): Promise<void> {
+    await this.invokeCommand('delete_cloudflare_connection', { id });
+  }
+
+  async listCloudflareZones(connectionId: number): Promise<CloudflareZone[]> {
+    const list = await this.invokeCommand<any[]>('list_cloudflare_zones', { connectionId });
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<CloudflareZone>(item));
+  }
+
+  async importCloudflareZones(connectionId: number, zones: CloudflareZone[]): Promise<number> {
+    return await this.invokeCommand<number>('import_cloudflare_zones', { connectionId, zones });
+  }
+
+  async listDomainDnsRecords(domainId: number): Promise<CloudflareDnsRecord[]> {
+    const list = await this.invokeCommand<any[]>('list_domain_dns_records', { domainId });
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<CloudflareDnsRecord>(item));
+  }
+
+  async applyDomainDnsRecord(
+    domainId: number,
+    action: 'create' | 'update' | 'delete',
+    recordId?: string | null,
+    record?: DnsRecordInput | null,
+  ): Promise<CloudflareDnsRecord | null> {
+    const result = await this.invokeCommand<any>('apply_domain_dns_record', {
+      domainId,
+      action,
+      recordId: recordId ?? null,
+      record: record ?? null,
+    });
+    return result ? snakeToCamel<CloudflareDnsRecord>(result) : null;
+  }
+
+  // ─── AI 订阅与 OAuth / CLI 额度 ──────────────────────────────
+
+  async getAiSubscriptions(): Promise<AiSubscription[]> {
+    const list = await this.invokeCommand<any[]>('get_ai_subscriptions');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AiSubscription>(item));
+  }
+
+  async createAiSubscription(subscription: AiSubscriptionInput): Promise<AiSubscription> {
+    const result = await this.invokeCommand<any>('create_ai_subscription', { subscription });
+    return snakeToCamel<AiSubscription>(result);
+  }
+
+  async updateAiSubscription(id: number, subscription: AiSubscriptionInput): Promise<AiSubscription> {
+    const result = await this.invokeCommand<any>('update_ai_subscription', { id, subscription });
+    return snakeToCamel<AiSubscription>(result);
+  }
+
+  async deleteAiSubscription(id: number): Promise<void> {
+    await this.invokeCommand('delete_ai_subscription', { id });
+  }
+
+  async startAiOauth(provider: AiOAuthProviderId, subscriptionId: number): Promise<OAuthStartInfo> {
+    const result = await this.invokeCommand<any>('start_ai_oauth', { provider, subscriptionId });
+    return snakeToCamel<OAuthStartInfo>(result);
+  }
+
+  async getAiOauthStatus(sessionId: string): Promise<OAuthStatusInfo> {
+    const result = await this.invokeCommand<any>('get_ai_oauth_status', { sessionId });
+    return snakeToCamel<OAuthStatusInfo>(result);
+  }
+
+  async completeAiOauth(sessionId: string, callbackInput: string): Promise<AiSubscription> {
+    const result = await this.invokeCommand<any>('complete_ai_oauth', { sessionId, callbackInput });
+    return snakeToCamel<AiSubscription>(result);
+  }
+
+  async cancelAiOauth(sessionId: string): Promise<void> {
+    await this.invokeCommand('cancel_ai_oauth', { sessionId });
+  }
+
+  async disconnectAiOauth(id: number): Promise<AiSubscription> {
+    const result = await this.invokeCommand<any>('disconnect_ai_oauth', { id });
+    return snakeToCamel<AiSubscription>(result);
+  }
+
+  async refreshAiSubscriptionQuota(id: number): Promise<AiSubscription> {
+    const result = await this.invokeCommand<any>('refresh_ai_subscription_quota', { id });
+    return snakeToCamel<AiSubscription>(result);
+  }
+
+  async readAntigravityCliQuota(): Promise<AntigravityQuotaResult> {
+    const result = await this.invokeCommand<any>('read_antigravity_cli_quota');
+    return snakeToCamel<AntigravityQuotaResult>(result);
+  }
+
+  // ─── 服务器台账、SSH 终端与 SFTP ───────────────────────────────
+
+  async getServers(search?: string): Promise<ServerItem[]> {
+    const list = await this.invokeCommand<any[]>('get_servers', { search: search ?? '' });
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<ServerItem>(item));
+  }
+
+  async createServer(server: ServerInput): Promise<ServerItem> {
+    const result = await this.invokeCommand<any>('create_server', { server });
+    return snakeToCamel<ServerItem>(result);
+  }
+
+  async updateServer(id: number, server: ServerInput): Promise<ServerItem> {
+    const result = await this.invokeCommand<any>('update_server', { id, server });
+    return snakeToCamel<ServerItem>(result);
+  }
+
+  async deleteServer(id: number): Promise<void> {
+    await this.invokeCommand('delete_server', { id });
+  }
+
+  async probeServer(id: number): Promise<ServerItem> {
+    const result = await this.invokeCommand<any>('probe_server', { id });
+    return snakeToCamel<ServerItem>(result);
+  }
+
+  async resetServerHostFingerprint(id: number): Promise<ServerItem> {
+    const result = await this.invokeCommand<any>('reset_server_host_fingerprint', { id });
+    return snakeToCamel<ServerItem>(result);
+  }
+
+  async getAppMonitorSettings(): Promise<AppMonitorSettings> {
+    const result = await this.invokeCommand<any>('get_app_monitor_settings');
+    return snakeToCamel<AppMonitorSettings>(result);
+  }
+
+  async saveAppMonitorSettings(serverMonitorMinutes: number): Promise<AppMonitorSettings> {
+    const result = await this.invokeCommand<any>('save_app_monitor_settings', {
+      serverMonitorMinutes,
+    });
+    return snakeToCamel<AppMonitorSettings>(result);
+  }
+
+  async sshOpenSession(serverId: number, cols?: number, rows?: number): Promise<SshSessionInfo> {
+    const result = await this.invokeCommand<any>('ssh_open_session', {
+      serverId,
+      cols: cols ?? 100,
+      rows: rows ?? 30,
+    });
+    return snakeToCamel<SshSessionInfo>(result);
+  }
+
+  async sshWriteSession(sessionId: string, data: string): Promise<void> {
+    await this.invokeCommand('ssh_write_session', { sessionId, data });
+  }
+
+  async sshResizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
+    await this.invokeCommand('ssh_resize_session', { sessionId, cols, rows });
+  }
+
+  async sshCloseSession(sessionId: string): Promise<void> {
+    await this.invokeCommand('ssh_close_session', { sessionId });
+  }
+
+  async sshListSessions(): Promise<SshSessionInfo[]> {
+    const list = await this.invokeCommand<any[]>('ssh_list_sessions');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<SshSessionInfo>(item));
+  }
+
+  async sftpListDir(serverId: number, path?: string): Promise<SftpDirListing> {
+    const result = await this.invokeCommand<any>('sftp_list_dir', {
+      serverId,
+      path: path ?? '.',
+    });
+    return snakeToCamel<SftpDirListing>(result);
+  }
+
+  async sftpDownloadFile(serverId: number, remotePath: string, localPath: string): Promise<number> {
+    return await this.invokeCommand<number>('sftp_download_file', {
+      serverId,
+      remotePath,
+      localPath,
+    });
+  }
+
+  async sftpUploadFile(serverId: number, localPath: string, remotePath: string): Promise<number> {
+    return await this.invokeCommand<number>('sftp_upload_file', {
+      serverId,
+      localPath,
+      remotePath,
+    });
+  }
+
+  async sftpMkdir(serverId: number, remotePath: string): Promise<void> {
+    await this.invokeCommand('sftp_mkdir', { serverId, remotePath });
+  }
+
+  async sftpRemove(serverId: number, remotePath: string, isDir: boolean): Promise<void> {
+    await this.invokeCommand('sftp_remove', { serverId, remotePath, isDir });
+  }
+
+  // ─── AI 助手 ───────────────────────────────────────────────────
+
+  async getAgentSettings(): Promise<AgentSettingsView> {
+    const result = await this.invokeCommand<any>('get_agent_settings');
+    return snakeToCamel<AgentSettingsView>(result);
+  }
+
+  async saveAgentSettings(settings: AgentSettingsInput): Promise<AgentSettingsView> {
+    const result = await this.invokeCommand<any>('save_agent_settings', { settings });
+    return snakeToCamel<AgentSettingsView>(result);
+  }
+
+  async testAgentConnection(
+    baseUrl?: string | null,
+    apiKey?: string | null,
+    model?: string | null,
+  ): Promise<AgentConnectionTestResult> {
+    const result = await this.invokeCommand<any>('test_agent_connection', {
+      baseUrl: baseUrl ?? null,
+      apiKey: apiKey ?? null,
+      model: model ?? null,
+    });
+    return snakeToCamel<AgentConnectionTestResult>(result);
+  }
+
+  async getAgentMessages(): Promise<AgentMessageItem[]> {
+    const list = await this.invokeCommand<any[]>('get_agent_messages');
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AgentMessageItem>(item));
+  }
+
+  async clearAgentMessages(): Promise<void> {
+    await this.invokeCommand('clear_agent_messages');
+  }
+
+  async sendAgentMessage(message: string): Promise<AgentMessageItem[]> {
+    const list = await this.invokeCommand<any[]>('send_agent_message', { message });
+    return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AgentMessageItem>(item));
+  }
+
+  async applyAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem> {
+    const result = await this.invokeCommand<any>('apply_agent_proposal', { messageId, proposalId });
+    return snakeToCamel<AgentMessageItem>(result);
+  }
+
+  async rejectAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem> {
+    const result = await this.invokeCommand<any>('reject_agent_proposal', { messageId, proposalId });
+    return snakeToCamel<AgentMessageItem>(result);
   }
 }
 

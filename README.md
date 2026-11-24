@@ -3,11 +3,11 @@
 <p>
   <img src="https://img.shields.io/badge/React-18.x-61DAFB?style=for-the-badge&logo=react" alt="React">
   <img src="https://img.shields.io/badge/Tauri-2.x-FFC131?style=for-the-badge&logo=tauri" alt="Tauri">
-  <img src="https://img.shields.io/badge/Rust-1.77+-000000?style=for-the-badge&logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/Rust-1.89+-000000?style=for-the-badge&logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite" alt="SQLite">
 </p>
 
-一个**本地自用**的谷歌账号管理器，支持 **Windows 与 macOS**。基于 Tauri + Rust + React 构建，支持批量导入、2FA 验证码生成、字段变更历史、回收站与本地备份。
+一个**本地自用**的个人数字资产工作区桌面应用，支持 **Windows 与 macOS**。基于 Tauri + Rust + React 构建，以谷歌账号管理为核心，并集成费用续费、账号密钥库、U 卡与支付卡、域名 DNS、AI 订阅与额度直连、服务器监控、多标签 SSH 终端 / SFTP 以及严格脱敏的 AI 助手。
 
 > 本版本为个人自用精简版：**无登录门禁、无加密层、无 HTTP 服务**，只面向单机本地使用，打开即用。
 >
@@ -30,6 +30,13 @@
 - 🔄 **在线更新** - 启动时自动检查 GitHub 上的新版本，一键下载安装并重启（更新前自动备份；更新包带签名校验）
 - 📱 **手机验证码** - 账号绑定「手机号 + 接码地址」，列表内实时获取短信验证码（只查当前页、失败退避、验证码不落库）
 - 🌐 **账号独立浏览器** - 每个账号一个独立的 Chrome / Edge 配置，登录状态互不干扰且长期保留；点一下打开，已打开则切到该窗口。支持缓存清理与占用统计（只做会话隔离，不做指纹伪装）
+- 📅 **费用与续费中心** - 汇总服务器、域名、AI 订阅与支付卡的 CNY/USD 月年支出与续费时间线，支持一键顺延周期、自定义循环提醒与 `.ics` 日历导出
+- 🔑 **账号与密钥库** - 分组管理通用账号、API Key、SSH/Token/密码条目，实时 2FA TOTP、Chrome/Edge CSV 导入导出及可选谷歌账号关联
+- 💳 **U 卡与支付卡** - 正反 3D 翻转卡片展示，国内银行 BIN 自动识别与卡品牌图标，年费/到期自动联动续费中心
+- 🌍 **域名与 Cloudflare DNS** - WHOIS / DoH NS 自动探测、Cloudflare API Token 批量导入域名及强制 Diff 预览确认的 DNS 记录管理
+- ✨ **AI 订阅与额度直连** - OpenAI / Claude / Grok / Gemini OAuth PKCE 授权与额度刷新、Antigravity CLI 用量读取及关联支付卡/谷歌账号
+- 🖥️ **服务器台账、多标签 SSH 与 SFTP** - 纯 Rust `russh` TOFU 主机指纹校验、CPU/内存/磁盘/监听端口/Docker 容器只读探测、`@xterm/xterm` 持久多标签终端与 SFTP 文件浏览器
+- 🤖 **AI 助手与系统设置** - OpenAI 兼容模型对话、严格白名单脱敏（敏感凭据绝不发往模型）、可确认写入 Diff 提案以及统一系统设置（AI 模型 / 监控周期 / 备份恢复）
 
 ## 环境要求
 
@@ -131,12 +138,19 @@ Google_Manager/
 │       └── utils/                # importParser / phoneUtils / multiValueField / smsUtils / browserUtils / timeUtils
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
-│   │   ├── lib.rs                # Tauri 应用入口与命令注册
-│   │   ├── commands.rs           # #[tauri::command] 命令层
+│   │   ├── lib.rs                # Tauri 应用入口与 101 个命令注册
+│   │   ├── commands.rs           # 谷歌账号/备份/浏览器 #[tauri::command] 层
+│   │   ├── asset_commands.rs     # 扩展数字资产工作区 #[tauri::command] 层
 │   │   ├── database.rs           # SQLite 仓储 / 迁移 / 备份 / 导出渲染
+│   │   ├── assets_db.rs          # 9 张扩展表 Schema / CRUD / 续费聚合
 │   │   ├── browser.rs            # 账号独立浏览器（配置目录、启动/聚焦、缓存清理）
 │   │   ├── sms.rs                # 接码地址取短信验证码
 │   │   ├── totp.rs               # TOTP 生成
+│   │   ├── domain_probe.rs       # WHOIS 与 Cloudflare DoH 域名探测
+│   │   ├── cloudflare.rs         # Cloudflare Zone 与 DNS 记录变更
+│   │   ├── ai_quota.rs           # AI OAuth PKCE 与 Antigravity CLI 额度
+│   │   ├── ssh_client.rs         # 纯 Rust SSH 探针 / 多标签 PTY / SFTP / TOFU
+│   │   ├── agent.rs              # 严格脱敏 AI 助手与可确认写提案
 │   │   └── app_paths.rs          # 数据目录解析
 │   └── tauri.conf.json
 └── package.json                  # 根脚本（dev / build / test）

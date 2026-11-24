@@ -1,0 +1,188 @@
+/**
+ * 品牌 / 银行 / 卡组织图标映射（对应 frontend/public/brands/ 静态资源）
+ */
+export const BRAND_FILES = {
+    '1password': '1password.svg',
+    alibabacloud: 'alibabacloud.svg',
+    almalinux: 'almalinux.svg',
+    americanexpress: 'americanexpress.svg',
+    aws: 'aws.svg',
+    azure: 'azure.svg',
+    'bank-abc': 'bank-abc.png',
+    'bank-bjbank': 'bank-bjbank.png',
+    'bank-boc': 'bank-boc.png',
+    'bank-bohaib': 'bank-bohaib.png',
+    'bank-ccb': 'bank-ccb.png',
+    'bank-cdcb': 'bank-cdcb.png',
+    'bank-ceb': 'bank-ceb.png',
+    'bank-cib': 'bank-cib.png',
+    'bank-citic': 'bank-citic.png',
+    'bank-cmb': 'bank-cmb.png',
+    'bank-cmbc': 'bank-cmbc.png',
+    'bank-comm': 'bank-comm.png',
+    'bank-cqbank': 'bank-cqbank.png',
+    'bank-cscb': 'bank-cscb.png',
+    'bank-czbank': 'bank-czbank.png',
+    'bank-dlb': 'bank-dlb.png',
+    'bank-egbank': 'bank-egbank.png',
+    'bank-gcb': 'bank-gcb.png',
+    'bank-gdb': 'bank-gdb.png',
+    'bank-hsbank': 'bank-hsbank.png',
+    'bank-hxbank': 'bank-hxbank.png',
+    'bank-hzcb': 'bank-hzcb.png',
+    'bank-icbc': 'bank-icbc.png',
+    'bank-jsbank': 'bank-jsbank.png',
+    'bank-nbbank': 'bank-nbbank.png',
+    'bank-njcb': 'bank-njcb.png',
+    'bank-psbc': 'bank-psbc.png',
+    'bank-shbank': 'bank-shbank.png',
+    'bank-spabank': 'bank-spabank.png',
+    'bank-spdb': 'bank-spdb.png',
+    bitwarden: 'bitwarden.svg',
+    caddy: 'caddy.svg',
+    centos: 'centos.svg',
+    claude: 'claude.svg',
+    cloudflare: 'cloudflare.svg',
+    copilot: 'copilot.svg',
+    cursor: 'cursor.svg',
+    debian: 'debian.svg',
+    deepseek: 'deepseek.svg',
+    digitalocean: 'digitalocean.svg',
+    discord: 'discord.svg',
+    discover: 'discover.svg',
+    docker: 'docker.svg',
+    doubao: 'doubao.svg',
+    dropbox: 'dropbox.svg',
+    gemini: 'gemini.svg',
+    github: 'github.svg',
+    githubcopilot: 'githubcopilot.svg',
+    gitlab: 'gitlab.svg',
+    gmail: 'gmail.svg',
+    godaddy: 'godaddy.svg',
+    google: 'google.svg',
+    googlecloud: 'googlecloud.svg',
+    grok: 'grok.svg',
+    hetzner: 'hetzner.svg',
+    huawei: 'huawei.svg',
+    huggingface: 'huggingface.svg',
+    icloud: 'icloud.svg',
+    jcb: 'jcb.svg',
+    kimi: 'kimi.svg',
+    letsencrypt: 'letsencrypt.svg',
+    mastercard: 'mastercard.svg',
+    microsoft: 'microsoft.svg',
+    minimax: 'minimax.svg',
+    mistral: 'mistral.svg',
+    moonshot: 'moonshot.svg',
+    namecheap: 'namecheap.svg',
+    netflix: 'netflix.svg',
+    netlify: 'netlify.svg',
+    nginx: 'nginx.svg',
+    notion: 'notion.svg',
+    ollama: 'ollama.svg',
+    openai: 'openai.svg',
+    openrouter: 'openrouter.svg',
+    ovh: 'ovh.svg',
+    paypal: 'paypal.svg',
+    perplexity: 'perplexity.svg',
+    porkbun: 'porkbun.svg',
+    protonmail: 'protonmail.svg',
+    qwen: 'qwen.svg',
+    railway: 'railway.svg',
+    render: 'render.svg',
+    revolut: 'revolut.svg',
+    rockylinux: 'rockylinux.svg',
+    spotify: 'spotify.svg',
+    telegram: 'telegram.svg',
+    tencentcloud: 'tencentcloud.svg',
+    ubuntu: 'ubuntu.svg',
+    unionpay: 'unionpay.svg',
+    vercel: 'vercel.svg',
+    visa: 'visa.svg',
+    volcengine: 'volcengine.svg',
+    vultr: 'vultr.svg',
+    wise: 'wise.svg',
+    youtube: 'youtube.svg',
+    zhipu: 'zhipu.svg',
+};
+
+const BRANDS = [
+    ['openai', ['OpenAI', 'OpenAI / ChatGPT', 'ChatGPT', 'ChatGPT Plus', 'ChatGPT Pro', 'Codex'], ['openai.com', 'chatgpt.com']],
+    ['claude', ['Claude', 'Anthropic', 'Anthropic / Claude', 'Claude Code', 'Claude Pro', 'Claude Max'], ['claude.ai', 'anthropic.com']],
+    ['grok', ['Grok', 'xAI', 'xAI / Grok', 'Grok CLI', 'SuperGrok'], ['grok.com', 'x.ai']],
+    ['gemini', ['Gemini', 'Google Gemini', 'Google / Gemini', 'Google AI', 'Gemini Code Assist'], ['gemini.google.com', 'aistudio.google.com']],
+    ['deepseek', ['DeepSeek', '深度求索'], ['deepseek.com']],
+    ['qwen', ['Qwen', '通义千问', '千问'], ['qwen.ai', 'tongyi.aliyun.com']],
+    ['doubao', ['Doubao', '豆包'], ['doubao.com']],
+    ['minimax', ['MiniMax', '海螺'], ['minimax.io', 'minimaxi.com']],
+    ['kimi', ['Kimi', '月之暗面'], ['kimi.com', 'kimi.ai']],
+    ['moonshot', ['Moonshot'], ['moonshot.cn']],
+    ['zhipu', ['Zhipu', '智谱', '智谱清言', 'GLM', 'Z.AI'], ['z.ai', 'bigmodel.cn', 'zhipuai.cn']],
+    ['perplexity', ['Perplexity', 'Perplexity Pro'], ['perplexity.ai']],
+    ['cursor', ['Cursor', 'Cursor Pro'], ['cursor.com', 'cursor.sh']],
+    ['copilot', ['Copilot', 'Microsoft Copilot'], ['copilot.microsoft.com']],
+    ['githubcopilot', ['GitHub Copilot'], ['github.com/features/copilot']],
+    ['mistral', ['Mistral', 'Mistral AI', 'Le Chat'], ['mistral.ai']],
+    ['ollama', ['Ollama'], ['ollama.com']],
+    ['openrouter', ['OpenRouter'], ['openrouter.ai']],
+    ['huggingface', ['Hugging Face', 'HuggingFace'], ['huggingface.co']],
+    ['cloudflare', ['Cloudflare', 'CF'], ['cloudflare.com']],
+    ['github', ['GitHub'], ['github.com']],
+    ['gitlab', ['GitLab'], ['gitlab.com']],
+    ['digitalocean', ['DigitalOcean'], ['digitalocean.com']],
+    ['vultr', ['Vultr'], ['vultr.com']],
+    ['hetzner', ['Hetzner'], ['hetzner.com', 'hetzner.cloud']],
+    ['ovh', ['OVH', 'OVHcloud'], ['ovh.com', 'ovhcloud.com']],
+    ['googlecloud', ['Google Cloud', 'GCP'], ['cloud.google.com']],
+    ['aws', ['AWS', 'Amazon Web Services', '亚马逊云'], ['aws.amazon.com']],
+    ['azure', ['Azure', 'Microsoft Azure', '微软云'], ['azure.com', 'azure.microsoft.com']],
+    ['tencentcloud', ['Tencent Cloud', '腾讯云'], ['cloud.tencent.com']],
+    ['volcengine', ['Volcengine', '火山引擎', '火山方舟'], ['volcengine.com']],
+    ['microsoft', ['Microsoft', '微软', 'Outlook'], ['microsoft.com', 'outlook.com']],
+    ['google', ['Google', 'Google One', 'Google Workspace'], ['google.com']],
+    ['alibabacloud', ['Alibaba Cloud', 'Aliyun', '阿里云'], ['aliyun.com', 'alibabacloud.com']],
+    ['huawei', ['Huawei', 'Huawei Cloud', '华为云'], ['huaweicloud.com']],
+    ['namecheap', ['Namecheap'], ['namecheap.com']],
+    ['godaddy', ['GoDaddy'], ['godaddy.com']],
+    ['porkbun', ['Porkbun'], ['porkbun.com']],
+    ['vercel', ['Vercel'], ['vercel.com']],
+    ['netlify', ['Netlify'], ['netlify.com']],
+    ['paypal', ['PayPal'], ['paypal.com']],
+    ['wise', ['Wise', 'TransferWise'], ['wise.com']],
+    ['revolut', ['Revolut'], ['revolut.com']],
+    ['visa', ['Visa'], []],
+    ['mastercard', ['Mastercard', 'Master Card', '万事达'], []],
+    ['unionpay', ['UnionPay', '银联', '中国银联'], []],
+    ['americanexpress', ['American Express', 'Amex', '美国运通'], []],
+    ['jcb', ['JCB'], []],
+    ['discover', ['Discover'], []],
+];
+
+const normalizeKey = (value) =>
+    String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s._-]+/g, '');
+
+export function resolveBrandIconUrl(hints = []) {
+    const list = Array.isArray(hints) ? hints : [hints];
+    for (const raw of list) {
+        if (!raw || typeof raw !== 'string') continue;
+        const norm = normalizeKey(raw);
+        if (!norm) continue;
+        if (BRAND_FILES[`bank-${norm}`]) {
+            return `/brands/${BRAND_FILES[`bank-${norm}`]}`;
+        }
+        if (BRAND_FILES[norm]) {
+            return `/brands/${BRAND_FILES[norm]}`;
+        }
+        const match = BRANDS.find(([, aliases, domains]) =>
+            aliases.some(a => normalizeKey(a) === norm) ||
+            domains.some(d => raw.toLowerCase().includes(d)),
+        );
+        if (match && BRAND_FILES[match[0]]) {
+            return `/brands/${BRAND_FILES[match[0]]}`;
+        }
+    }
+    return null;
+}

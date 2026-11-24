@@ -20,6 +20,14 @@ const VIEW_LABELS = {
     list: '账号列表',
     import: '导入账号',
     recycle: '回收站',
+    renewals: '费用与续费',
+    agent: 'AI 助手',
+    vault: '账号与密钥',
+    ai: 'AI 订阅',
+    cards: 'U 卡与支付卡',
+    servers: '服务器',
+    terminal: 'SSH 终端',
+    domains: '域名管理',
 };
 
 /**

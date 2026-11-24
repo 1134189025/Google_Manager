@@ -1,24 +1,25 @@
 # AGENTS.md — Google Manager 代码库文档（自用桌面版）
 
-> 自用精简版 · 最后更新 2026-11-10
+> 自用精简扩展版 · 最后更新 2026-11-24
 
 ## 项目定位
 
-**Google Manager** — 本地自用的谷歌账号管理器。Tauri 2 桌面应用。
+**Google Manager** — 本地自用的个人数字资产管理桌面应用（Tauri 2）。以谷歌账号管理为核心，扩展集成费用续费、账号密钥库、U 卡与支付卡、域名与 Cloudflare DNS、AI 订阅与额度直连、服务器台账与监控、多标签 SSH 终端 / SFTP 以及严格脱敏的 AI 助手。
 
-本版本已按自用需求精简：
+本版本保持单机自用设计哲学：
 
-- **无登录门禁**：删除了 `auth.rs` 与登录页，打开即用
-- **无加密层**：删除了 `crypto.rs` / `key_manager.rs` / `master.key`，密码与 2FA 密钥**明文**存于本地 SQLite
-- **无 HTTP 服务**：删除了 `http_server.rs` 与 `test-server` feature，不再依赖 actix-web；应用不监听任何端口
-  （短信取码用 `reqwest` 发出站请求，`tokio` 只启用 `time` / `sync` 特性）
+- **无登录门禁**：无登录页，打开即用
+- **无加密层**：敏感字段**明文**存于本地 SQLite（请自行保障本机账户与磁盘安全）
+- **无常驻 HTTP 服务**：不使用 actix-web / Express，不长期监听服务端口
+  （短信取码、Cloudflare API、AI 模型与出站 OAuth 额度查询均通过 `reqwest` 发起出站请求；OAuth 登录仅在授权窗口期间于本机随机/回调端口临时监听；SSH/SFTP 使用纯 Rust `russh` + `russh-sftp`）
 
 ## 架构总览
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│              React 18 前端 (Vite 4/5)                   │
-│   App.jsx → AccountListView / ImportView / EditModal   │
+│              React 18 前端 (Vite 5)                     │
+│   App.jsx → Home / Renewals / Agent / Accounts /       │
+│   Vault / Cards / Domains / AiSubs / Servers / Terminal│
 │                     ↓ services/api.js (Facade)         │
 │              adapters/index.ts (Factory)               │
 │                        ↓                               │
@@ -28,9 +29,11 @@
                          ▼
 ┌────────────────────────────────────────────────────────┐
 │                  Tauri/Rust (src-tauri/)               │
-│      lib.rs (Builder + 28 个命令注册)                   │
-│              commands.rs（薄包装层）                     │
-│   database.rs（仓储/迁移/备份/导出）+ browser.rs / sms.rs │
+│      lib.rs (Builder + 101 个命令注册)                  │
+│   commands.rs (28) + asset_commands.rs (73)            │
+│   database.rs + assets_db.rs + browser.rs / sms.rs /   │
+│   domain_probe.rs / cloudflare.rs / ai_quota.rs /      │
+│   ssh_client.rs / agent.rs / totp.rs                   │
 │                      ↓                                 │
 │                  SQLite (WAL)                          │
 │  Windows: %APPDATA%\googlemanager\data.db              │
@@ -46,11 +49,13 @@
 ```
 /
 ├── frontend/src/
-│   ├── App.jsx               # 根组件：全局状态、视图路由、搜索防抖、2FA
-│   ├── components/           # AccountListView / AccountTable / BatchToolbar /
-│   │                         # ImportView / ExportDialog / HistoryDrawer /
-│   │                         # EditModal / Pagination / SmsCodeCell / BrowserSettingsDialog /
-│   │                         # PromptDialog / UpdateDialog
+│   ├── App.jsx               # 根组件：全局状态、视图路由、懒加载持久终端、搜索防抖、2FA
+│   ├── components/           # HomeView / AccountListView / AccountTable / BatchToolbar /
+│   │                         # ImportView / ExportDialog / HistoryDrawer / EditModal /
+│   │                         # Pagination / SmsCodeCell / BrowserSettingsDialog /
+│   │                         # PromptDialog / UpdateDialog / RenewalsView / VaultView /
+│   │                         # CardsView / DomainsView / AiSubscriptionsView / ServersView /
+│   │                         # TerminalView (@xterm/xterm) / AgentView / SystemSettingsDialog
 │   ├── hooks/                # useTwoFA / useInlineEdit / useAccountSelection / usePagination /
 │   │                         # useSmsCodes / useBrowserStatus / useAppUpdater
 │   ├── services/
@@ -61,22 +66,31 @@
 │   │       ├── index.ts          # 工厂（只有 TauriAdapter）
 │   │       └── tauri-adapter.ts  # invoke 封装 + 参数命名转换
 │   ├── utils/                # importParser / phoneUtils / multiValueField / buildInfo /
-│   │                         # smsUtils / browserUtils / timeUtils / tauriRuntime / dialogs
+│   │                         # smsUtils / browserUtils / timeUtils / tauriRuntime / dialogs /
+│   │                         # renewalUtils / cardBankBins / brandIcons / cardUtils / passwordCsv
 │   └── __tests__/            # Vitest 单元测试
+├── frontend/public/brands/   # 银行与服务商 SVG/PNG 品牌图标
 │
 ├── src-tauri/
-│   ├── Cargo.toml
+│   ├── Cargo.toml            # rust-version = "1.89" (russh 0.65 ring + russh-sftp 4.0)
 │   ├── build.rs              # tauri_build::build()
 │   ├── tauri.conf.json       # frontendDist: ../static
 │   ├── capabilities/default.json
 │   └── src/
 │       ├── main.rs           # 入口：app_lib::run()
-│       ├── lib.rs            # Tauri builder + 命令注册
-│       ├── commands.rs       # #[tauri::command] 命令层
-│       ├── database.rs       # Database struct + 仓储/迁移/备份/导出
+│       ├── lib.rs            # Tauri builder + 状态管理 + 101 个命令注册
+│       ├── commands.rs       # 谷歌账号/备份/浏览器的 #[tauri::command] 层
+│       ├── asset_commands.rs # 8 个扩展模块的 #[tauri::command] 层（73 个命令）
+│       ├── database.rs       # 账号仓储/迁移/VACUUM INTO 备份/恢复/导出
+│       ├── assets_db.rs      # 9 张扩展表 Schema、CRUD、续费聚合与升级恢复兼容
 │       ├── browser.rs        # 账号独立浏览器：配置目录、启动/聚焦、缓存清理
 │       ├── sms.rs            # 接码地址取短信验证码（出站请求）
 │       ├── totp.rs           # TOTP 生成（SHA1/6位/30秒）
+│       ├── domain_probe.rs   # WHOIS 2 跳 + Cloudflare DoH NS 探测
+│       ├── cloudflare.rs     # Cloudflare Zone 导入与 DNS 记录预览/变更
+│       ├── ai_quota.rs       # OpenAI/Claude/Grok/Gemini OAuth PKCE + Antigravity CLI 额度
+│       ├── ssh_client.rs     # russh TOFU 校验、指标/端口/Docker 探针、PTY 会话、SFTP
+│       ├── agent.rs          # OpenAI 兼容 AI 助手：严格白名单脱敏 + 可确认写提案
 │       └── app_paths.rs      # 数据目录解析
 │
 ├── static/                   # Vite 构建输出（被 tauri.conf.json 引用）
@@ -116,6 +130,23 @@
 | `save_browser_settings` | 校验并保存浏览器设置 |
 | `get_browser_usage` | 统计配置目录数量与总占用 |
 | `open_browser_profile_dir` | 用系统文件管理器（资源管理器 / 访达）打开账号的配置目录 |
+
+## 扩展命令清单（`asset_commands.rs`，73 个）
+
+- **工作台与续费/备忘**：`get_workspace_overview` / `get_renewals_summary` / `advance_renewal` / `get_reminders` / `create_reminder` / `update_reminder` / `delete_reminder` / `complete_reminder` / `write_text_file` / `read_text_file` / `open_external_url`
+- **账号与密钥库**：`get_vault_folders` / `create_vault_folder` / `update_vault_folder` / `delete_vault_folder` / `get_vault_items` / `create_vault_item` / `update_vault_item` / `delete_vault_item` / `batch_import_vault_items`
+- **U 卡与支付卡**：`get_payment_cards` / `create_payment_card` / `update_payment_card` / `delete_payment_card`
+- **域名与 Cloudflare DNS**：`get_domains` / `create_domain` / `update_domain` / `delete_domain` / `probe_domain` / `get_cloudflare_connections` / `save_cloudflare_connection` / `delete_cloudflare_connection` / `list_cloudflare_zones` / `import_cloudflare_zones` / `list_domain_dns_records` / `apply_domain_dns_record`
+- **AI 订阅与额度直连**：`get_ai_subscriptions` / `create_ai_subscription` / `update_ai_subscription` / `delete_ai_subscription` / `start_ai_oauth` / `get_ai_oauth_status` / `complete_ai_oauth` / `cancel_ai_oauth` / `disconnect_ai_oauth` / `refresh_ai_subscription_quota` / `read_antigravity_cli_quota`
+- **服务器、SSH 终端与 SFTP**：`get_servers` / `create_server` / `update_server` / `delete_server` / `probe_server` / `reset_server_host_fingerprint` / `get_app_monitor_settings` / `save_app_monitor_settings` / `ssh_open_session` / `ssh_write_session` / `ssh_resize_session` / `ssh_close_session` / `ssh_list_sessions` / `sftp_list_dir` / `sftp_download_file` / `sftp_upload_file` / `sftp_mkdir` / `sftp_remove`
+- **AI 助手**：`get_agent_settings` / `save_agent_settings` / `test_agent_connection` / `get_agent_messages` / `clear_agent_messages` / `send_agent_message` / `apply_agent_proposal` / `reject_agent_proposal`
+
+## 扩展模块架构要点
+
+- **9 张扩展 SQLite 表**（`assets_db::init_asset_tables`）：`vault_folders`、`vault_items`、`payment_cards`、`ai_subscriptions`、`servers`、`cloudflare_connections`、`domains`、`reminders`、`agent_messages`。`restore_backup` 通过 `assets_db::restore_asset_tables_in_tx` 按外键拓扑序清空/恢复，并自动兼容不包含扩展表的旧版备份。
+- **扩展 `app_settings` 键**：`server.monitor_minutes`（默认 `5`，仅允许 `0/1/5/15/30/60`）、`agent.base_url`、`agent.api_key`、`agent.model`、`agent.max_tokens`。
+- **SSH / SFTP 与 TOFU**：使用纯 Rust `russh`（`ring` 加密后端）与 `russh-sftp`，首次连接钉扎 `SHA256:...` 公钥指纹至 `servers.host_fingerprint`，不一致时返回 `HOST_KEY_CHANGED:<expected>:<actual>` 并要求用户输入 `host:port` 后才能重置；`TerminalView` 经 `React.lazy` 懒加载并在首次打开后保持挂载，切换工作区视图不断开会话；快捷运维命令只插入文本而不追加回车。
+- **AI 助手隐私边界与提案机制**：`agent.rs` 仅允许通过 `Sanitized*` 白名单结构体向模型提供脱敏元数据与用量摘要，绝对禁止传递任何密码、2FA、接码 URL、卡号/CVV、OAuth 令牌、SSH 凭据或 API Token；任何写操作均生成待审 Diff 提案存库，须用户在前端点击「确认写入」后才在事务内更新白名单字段。
 
 ## 数据库 Schema
 
