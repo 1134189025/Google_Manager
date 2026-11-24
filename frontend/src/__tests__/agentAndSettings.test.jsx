@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import AgentView from '../components/AgentView';
 import SystemSettingsDialog from '../components/SystemSettingsDialog';
+import CloseConfirmDialog from '../components/CloseConfirmDialog';
+import TitleBar from '../components/TitleBar';
 
 const { mockApi } = vi.hoisted(() => ({
     mockApi: {
@@ -17,6 +19,9 @@ const { mockApi } = vi.hoisted(() => ({
         rejectAgentProposal: vi.fn(),
         getAppMonitorSettings: vi.fn(),
         saveAppMonitorSettings: vi.fn(),
+        getWindowCloseSettings: vi.fn(),
+        saveWindowCloseSettings: vi.fn(),
+        handleWindowClose: vi.fn(),
         listBackups: vi.fn(),
         createBackup: vi.fn(),
         restoreBackup: vi.fn(),
@@ -135,6 +140,15 @@ describe('Phase 5: AgentView & SystemSettingsDialog', () => {
             success: true,
             data: { serverMonitorMinutes: 15 },
         });
+        mockApi.getWindowCloseSettings.mockResolvedValue({
+            success: true,
+            data: { closeBehavior: 'ask' },
+        });
+        mockApi.saveWindowCloseSettings.mockResolvedValue({
+            success: true,
+            data: { closeBehavior: 'minimize' },
+        });
+        mockApi.handleWindowClose.mockResolvedValue({ success: true });
         mockApi.listBackups.mockResolvedValue({
             success: true,
             data: [{ name: 'manual_2026-11-24.db', size: 102400, createdAt: '2026-11-24 10:00:00' }],
@@ -310,5 +324,48 @@ describe('Phase 5: AgentView & SystemSettingsDialog', () => {
         expect(container.querySelector('.gm-md-callout')).toHaveTextContent('本月固定支出合计 ¥205.00');
         expect(container.querySelector('.gm-md-table')).toHaveTextContent('讯猫');
         expect(container.querySelector('.gm-md-hr')).not.toBeNull();
+    });
+
+    it('点击标题栏关闭按钮弹出最小化至托盘/直接退出选择窗，且支持在系统设置调整默认关闭行为', async () => {
+        const user = userEvent.setup();
+        const onRequestClose = vi.fn();
+        render(<TitleBar view="home" onRequestClose={onRequestClose} />);
+        await user.click(screen.getByRole('button', { name: '关闭窗口' }));
+        expect(onRequestClose).toHaveBeenCalledTimes(1);
+
+        const onClose = vi.fn();
+        render(<CloseConfirmDialog isOpen={true} onClose={onClose} onNotify={vi.fn()} />);
+        const closeDialog = await screen.findByRole('dialog', { name: '关闭窗口确认' });
+        await user.click(within(closeDialog).getByRole('button', { name: /最小化至托盘/ }));
+        await waitFor(() => {
+            expect(mockApi.handleWindowClose).toHaveBeenCalledWith('minimize', false);
+            expect(onClose).toHaveBeenCalled();
+        });
+
+        const onClose2 = vi.fn();
+        render(<CloseConfirmDialog isOpen={true} onClose={onClose2} onNotify={vi.fn()} />);
+        const dialogs = await screen.findAllByRole('dialog', { name: '关闭窗口确认' });
+        const secondDialog = dialogs[dialogs.length - 1];
+        await user.click(within(secondDialog).getByLabelText(/记住我的选择/));
+        await user.click(within(secondDialog).getByRole('button', { name: /直接退出/ }));
+        await waitFor(() => {
+            expect(mockApi.handleWindowClose).toHaveBeenCalledWith('quit', true);
+        });
+
+        render(
+            <SystemSettingsDialog
+                isOpen={true}
+                initialTab="general"
+                onClose={vi.fn()}
+                onNotify={vi.fn()}
+                onBackupRestored={vi.fn()}
+            />,
+        );
+        const sysDialog = await screen.findByRole('dialog', { name: '系统设置' });
+        await user.click(within(sysDialog).getByLabelText(/最小化至系统托盘/));
+        await user.click(within(sysDialog).getByRole('button', { name: /保存窗口设置/ }));
+        await waitFor(() => {
+            expect(mockApi.saveWindowCloseSettings).toHaveBeenCalledWith('minimize');
+        });
     });
 });

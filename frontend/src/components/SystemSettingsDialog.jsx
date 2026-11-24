@@ -4,6 +4,7 @@ import {
     Bot,
     Activity,
     Database,
+    Monitor,
     X,
     Check,
     RotateCcw,
@@ -22,6 +23,24 @@ const MONITOR_OPTIONS = [
     { value: 15, label: '每 15 分钟' },
     { value: 30, label: '每 30 分钟' },
     { value: 60, label: '每 60 分钟' },
+];
+
+const CLOSE_BEHAVIOR_OPTIONS = [
+    {
+        value: 'ask',
+        label: '每次关闭时询问（推荐）',
+        desc: '点击右上角关闭按钮时弹窗选择「最小化至托盘」或「直接退出」',
+    },
+    {
+        value: 'minimize',
+        label: '最小化至系统托盘',
+        desc: '隐藏主窗口到系统托盘后台运行，单击托盘图标随时恢复',
+    },
+    {
+        value: 'quit',
+        label: '直接退出应用',
+        desc: '点击关闭按钮后立即彻底退出 GoogleManager',
+    },
 ];
 
 const SystemSettingsDialog = ({
@@ -48,6 +67,10 @@ const SystemSettingsDialog = ({
     const [monitorMinutes, setMonitorMinutes] = useState(5);
     const [savingMonitor, setSavingMonitor] = useState(false);
 
+    // 常规与系统托盘关闭行为
+    const [closeBehavior, setCloseBehavior] = useState('ask');
+    const [savingCloseBehavior, setSavingCloseBehavior] = useState(false);
+
     // 数据备份与恢复
     const [backups, setBackups] = useState([]);
     const [loadingBackups, setLoadingBackups] = useState(false);
@@ -56,9 +79,12 @@ const SystemSettingsDialog = ({
 
     const loadAll = useCallback(async () => {
         try {
-            const [aiRes, monRes] = await Promise.all([
+            const [aiRes, monRes, closeRes] = await Promise.all([
                 api.getAgentSettings(),
                 api.getAppMonitorSettings(),
+                typeof api?.getWindowCloseSettings === 'function'
+                    ? api.getWindowCloseSettings()
+                    : Promise.resolve(null),
             ]);
             if (aiRes.success && aiRes.data) {
                 setBaseUrl(aiRes.data.baseUrl || '');
@@ -74,6 +100,9 @@ const SystemSettingsDialog = ({
             }
             if (monRes.success && monRes.data) {
                 setMonitorMinutes(monRes.data.serverMonitorMinutes ?? 5);
+            }
+            if (closeRes?.success && closeRes.data?.closeBehavior) {
+                setCloseBehavior(closeRes.data.closeBehavior);
             }
         } catch {
             // 忽略初始化错误
@@ -171,6 +200,23 @@ const SystemSettingsDialog = ({
         }
     };
 
+    const handleSaveCloseBehavior = async (e) => {
+        e.preventDefault();
+        if (typeof api?.saveWindowCloseSettings !== 'function') return;
+        setSavingCloseBehavior(true);
+        try {
+            const res = await api.saveWindowCloseSettings(closeBehavior);
+            if (!res.success || !res.data) {
+                onNotify?.(res.message || '保存窗口关闭行为失败', 'error');
+                return;
+            }
+            setCloseBehavior(res.data.closeBehavior);
+            onNotify?.('窗口关闭行为已保存');
+        } finally {
+            setSavingCloseBehavior(false);
+        }
+    };
+
     const handleCreateBackup = async () => {
         setCreatingBackup(true);
         try {
@@ -221,9 +267,10 @@ const SystemSettingsDialog = ({
                 </div>
 
                 {/* 分区 Tab */}
-                <div className="flex items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2">
+                <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2">
                     {[
                         { id: 'ai', label: 'AI 模型配置', icon: Bot },
+                        { id: 'general', label: '常规与托盘', icon: Monitor },
                         { id: 'monitor', label: '服务器监控', icon: Activity },
                         { id: 'backup', label: '数据备份与恢复', icon: Database },
                     ].map(item => {
@@ -357,6 +404,57 @@ const SystemSettingsDialog = ({
                                 <button type="submit" className="gm-btn gm-btn-primary" disabled={savingAi}>
                                     <Check size={14} />
                                     {savingAi ? '保存中...' : '保存 AI 设置'}
+                                </button>
+                            </div>
+                        </form>
+                    )}
+
+                    {tab === 'general' && (
+                        <form onSubmit={handleSaveCloseBehavior} className="space-y-4">
+                            <p className="text-[var(--text-secondary)] leading-relaxed">
+                                设置点击主窗口右上角关闭按钮（或按 Alt+F4）时的默认操作。最小化至系统托盘后，可在任务栏托盘单击图标恢复窗口或右键退出。
+                            </p>
+                            <div className="space-y-2">
+                                {CLOSE_BEHAVIOR_OPTIONS.map((opt) => (
+                                    <label
+                                        key={opt.value}
+                                        className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+                                        style={{
+                                            background: closeBehavior === opt.value
+                                                ? 'var(--primary-light)'
+                                                : 'var(--bg-elevated)',
+                                            borderColor: closeBehavior === opt.value
+                                                ? 'var(--primary)'
+                                                : 'var(--border-subtle)',
+                                        }}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="windowCloseBehavior"
+                                            value={opt.value}
+                                            checked={closeBehavior === opt.value}
+                                            onChange={() => setCloseBehavior(opt.value)}
+                                            className="mt-0.5"
+                                        />
+                                        <div className="space-y-0.5">
+                                            <div className="font-semibold text-[var(--text-primary)]">
+                                                {opt.label}
+                                            </div>
+                                            <div className="text-[11.5px] text-[var(--text-secondary)]">
+                                                {opt.desc}
+                                            </div>
+                                        </div>
+                                    </label>
+                                ))}
+                            </div>
+                            <div className="flex justify-end">
+                                <button
+                                    type="submit"
+                                    className="gm-btn gm-btn-primary"
+                                    disabled={savingCloseBehavior}
+                                >
+                                    <Check size={14} />
+                                    {savingCloseBehavior ? '保存中...' : '保存窗口设置'}
                                 </button>
                             </div>
                         </form>

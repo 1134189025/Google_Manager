@@ -19,8 +19,10 @@ import AgentView from './components/AgentView';
 import EditModal from './components/EditModal';
 import BrowserSettingsDialog from './components/BrowserSettingsDialog';
 import SystemSettingsDialog from './components/SystemSettingsDialog';
+import CloseConfirmDialog from './components/CloseConfirmDialog';
 import UpdateDialog from './components/UpdateDialog';
 import { PixelDitherBackdrop } from './components/PixelArt';
+import { isTauriRuntime } from './utils/tauriRuntime';
 
 const TerminalView = lazy(() => import('./components/TerminalView'));
 import useAppUpdater from './hooks/useAppUpdater';
@@ -108,6 +110,7 @@ const App = () => {
     // 账号浏览器设置弹窗；首次打开浏览器时由列表页/首页等待其结果（是否已保存）
     const [browserSettingsDialog, setBrowserSettingsDialog] = useState({ isOpen: false, firstRun: false });
     const [systemSettingsDialog, setSystemSettingsDialog] = useState({ isOpen: false, tab: 'ai' });
+    const [closeDialogOpen, setCloseDialogOpen] = useState(false);
     const browserSettingsResolveRef = useRef(null);
 
     const openBrowserSettings = useCallback(({ firstRun = false } = {}) => new Promise(resolve => {
@@ -307,6 +310,33 @@ const App = () => {
         return () => {
             window.removeEventListener('contextmenu', handleContextMenu);
             window.removeEventListener('keydown', handleRefreshBlock);
+        };
+    }, []);
+
+    // 监听 Tauri 主窗口关闭拦截事件（弹出最小化至托盘 / 直接退出选择窗）
+    useEffect(() => {
+        if (!isTauriRuntime()) return undefined;
+        let active = true;
+        let unlisten = null;
+        (async () => {
+            try {
+                const mod = await import('@tauri-apps/api/event');
+                if (typeof mod?.listen !== 'function' || !active) return;
+                const stop = await mod.listen('window-close-requested', () => {
+                    if (active) setCloseDialogOpen(true);
+                });
+                if (active) {
+                    unlisten = stop;
+                } else if (typeof stop === 'function') {
+                    stop();
+                }
+            } catch {
+                // 非桌面或测试环境静默忽略
+            }
+        })();
+        return () => {
+            active = false;
+            if (typeof unlisten === 'function') unlisten();
         };
     }, []);
 
@@ -603,7 +633,7 @@ const App = () => {
     return (
         <div className="app-container">
             <PixelDitherBackdrop />
-            <TitleBar view={view} />
+            <TitleBar view={view} onRequestClose={() => setCloseDialogOpen(true)} />
 
             <div className="app-workspace">
                 <SideNav
@@ -798,6 +828,12 @@ const App = () => {
                     loadAccounts('');
                     refreshOverview();
                 }}
+            />
+
+            <CloseConfirmDialog
+                isOpen={closeDialogOpen}
+                onClose={() => setCloseDialogOpen(false)}
+                onNotify={showNotification}
             />
         </div>
     );

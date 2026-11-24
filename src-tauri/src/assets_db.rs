@@ -3208,6 +3208,9 @@ mod tests {
             account_id: "acct-1".to_string(),
             email: Some("ai@example.com".to_string()),
             plan: Some("max".to_string()),
+            oauth_client_id: None,
+            project_id: None,
+            is_gcp_tos: None,
         };
         let connected = save_ai_oauth_tokens(&conn, sub.id, "claude", &tokens).unwrap();
         assert!(connected.oauth_connected);

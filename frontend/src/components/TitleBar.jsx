@@ -35,7 +35,7 @@ const VIEW_LABELS = {
  * - 独占顶部 38px 空间，与下方内容区严格分离，滚动列表绝不遮挡窗口按钮
  * - 质感与悬浮侧栏保持一致（半透明石墨磨砂 + 极细底分割线 + 统一圆角窗口按钮）
  */
-const TitleBar = ({ view = 'home' }) => {
+const TitleBar = ({ view = 'home', onRequestClose }) => {
     const [maximized, setMaximized] = useState(false);
 
     const syncMaximized = useCallback(async () => {
@@ -99,11 +99,14 @@ const TitleBar = ({ view = 'home' }) => {
 
     const handleClose = async () => {
         const win = await getSafeWindow();
-        if (!win) return;
+        if (!win) {
+            onRequestClose?.();
+            return;
+        }
         try {
             await win.close();
         } catch {
-            // 静默兜底
+            onRequestClose?.();
         }
     };
 

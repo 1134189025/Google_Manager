@@ -17,6 +17,7 @@ use crate::cloudflare::{CloudflareDnsRecord, CloudflareZone, DnsRecordInput};
 use crate::database::Database;
 use crate::fx::{self, ExchangeRateInfo};
 use crate::ssh_client::{self, SftpDirListing, SshSessionInfo, SshSessionManager};
+use crate::tray::{self, WindowCloseSettings};
 use std::path::Path;
 use tauri::{AppHandle, State};
 
@@ -1003,4 +1004,44 @@ pub fn reject_agent_proposal(
 ) -> Result<AgentMessageItem, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     agent::reject_agent_proposal(&conn, message_id, &proposal_id)
+}
+
+// ─── 系统托盘与窗口关闭行为 ──────────────────────────────────────
+
+#[tauri::command]
+pub fn get_window_close_settings(db: State<Database>) -> Result<WindowCloseSettings, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    tray::get_window_close_settings(&conn)
+}
+
+#[tauri::command]
+pub fn save_window_close_settings(
+    db: State<Database>,
+    close_behavior: String,
+) -> Result<WindowCloseSettings, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    tray::save_window_close_settings(&conn, &close_behavior)
+}
+
+#[tauri::command]
+pub fn handle_window_close(
+    app: AppHandle,
+    db: State<Database>,
+    action: String,
+    remember: bool,
+) -> Result<(), String> {
+    let normalized = action.trim().to_ascii_lowercase();
+    if normalized != tray::CLOSE_BEHAVIOR_MINIMIZE && normalized != tray::CLOSE_BEHAVIOR_QUIT {
+        return Err("无效的关闭操作，仅允许 minimize 或 quit".to_string());
+    }
+    if remember {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        tray::save_window_close_settings(&conn, &normalized)?;
+    }
+    if normalized == tray::CLOSE_BEHAVIOR_MINIMIZE {
+        tray::hide_main_window(&app);
+    } else {
+        tray::quit_app(&app);
+    }
+    Ok(())
 }

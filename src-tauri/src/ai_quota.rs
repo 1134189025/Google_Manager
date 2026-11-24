@@ -18,6 +18,20 @@ use crate::database;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const OAUTH_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
 
+const CLOUD_CODE_DAILY_BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com";
+const CLOUD_CODE_PROD_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
+const LOAD_CODE_ASSIST_PATH: &str = "v1internal:loadCodeAssist";
+const ONBOARD_USER_PATH: &str = "v1internal:onboardUser";
+const FETCH_AVAILABLE_MODELS_PATH: &str = "v1internal:fetchAvailableModels";
+const RETRIEVE_USER_QUOTA_SUMMARY_PATH: &str = "v1internal:retrieveUserQuotaSummary";
+const DEFAULT_CLOUD_CODE_IDE_VERSION: &str = "2.25.0";
+const DEFAULT_CLOUD_CODE_CL: &str = "1003475615";
+const DEFAULT_GOOGLE_API_NODEJS_CLIENT_VERSION: &str = "10.3.0";
+const DEFAULT_X_GOOG_API_CLIENT_NODE_VERSION: &str = "22.21.1";
+const NATIVE_OAUTH_USER_AGENT: &str = "vscode/1.X.X (Antigravity/4.3.0)";
+const ONBOARD_POLL_DELAY_MS: u64 = 500;
+const ONBOARD_MAX_POLLS: usize = 12;
+
 pub const SETTING_GEMINI_CLIENT_ID: &str = "oauth.gemini.client_id";
 pub const SETTING_GEMINI_CLIENT_SECRET: &str = "oauth.gemini.client_secret";
 
@@ -295,6 +309,7 @@ pub struct AiOAuthProvider {
     pub userinfo_url: Option<&'static str>,
     pub usage_url: &'static str,
     pub monthly_usage_url: Option<&'static str>,
+    #[allow(dead_code)]
     pub profile_url: Option<&'static str>,
 }
 
@@ -372,11 +387,11 @@ pub fn get_provider_with_override(
                 authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
                 token_url: "https://oauth2.googleapis.com/token",
                 redirect_uri: "http://localhost:0/oauth2callback",
-                scope: "openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+                scope: "openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs https://www.googleapis.com/auth/aicode",
                 userinfo_url: Some("https://openidconnect.googleapis.com/v1/userinfo"),
-                usage_url: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+                usage_url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
                 monthly_usage_url: None,
-                profile_url: Some("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"),
+                profile_url: Some("https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"),
             })
         }
         _ => Err("不支持的 AI 授权服务商".to_string()),
@@ -423,6 +438,12 @@ pub struct StoredOAuthTokens {
     pub email: Option<String>,
     #[serde(default)]
     pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_gcp_tos: Option<bool>,
 }
 
 fn scope_meta(provider: &str) -> (&'static str, &'static str, &'static str) {
@@ -443,9 +464,9 @@ fn scope_meta(provider: &str) -> (&'static str, &'static str, &'static str) {
             "此处为 Grok CLI 周额度、产品额度与月度账单，不等同于 Grok 网页所有功能权益。",
         ),
         "gemini" => (
-            "google-code-assist",
-            "code-assist",
-            "此处为 Gemini CLI / Code Assist 模型额度，不包含 Gemini 网页或 Google One 全部权益。",
+            "google-cloud-code",
+            "antigravity-cloud-code",
+            "此处为 Antigravity / Google Cloud Code 返回的 5 小时、周额度及各模型剩余配额。",
         ),
         _ => ("unknown", "unknown", ""),
     }
@@ -654,6 +675,120 @@ pub fn normalize_usage(
             }
         }
         "gemini" => {
+            // 1. 优先解析新版 Cloud Code `retrieveUserQuotaSummary` 的 5 小时 / 周额度窗口
+            let mut summary_entries: Vec<(u8, String, QuotaWindow)> = Vec::new();
+            if let Some(groups) = value
+                .get("quota_summary")
+                .and_then(|s| s.get("groups"))
+                .or_else(|| value.get("groups"))
+                .and_then(|v| v.as_array())
+            {
+                for group in groups {
+                    let Some(buckets) = group.get("buckets").and_then(|v| v.as_array()) else {
+                        continue;
+                    };
+                    for bucket in buckets {
+                        let bucket_id = bucket
+                            .get("bucketId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim();
+                        let frac = bucket
+                            .get("remainingFraction")
+                            .and_then(|v| v.as_f64())
+                            .filter(|f| f.is_finite() && (0.0..=1.0).contains(f));
+                        if bucket_id.is_empty() || frac.is_none() {
+                            continue;
+                        }
+                        let display_name = bucket
+                            .get("displayName")
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty());
+                        let (label, window_seconds, rank) =
+                            format_gemini_summary_bucket(bucket_id, display_name);
+                        summary_entries.push((
+                            rank,
+                            bucket_id.to_string(),
+                            QuotaWindow {
+                                label,
+                                used_percent: frac.map(|f| ((1.0 - f) * 10000.0).round() / 100.0),
+                                remaining: None,
+                                used: None,
+                                limit: None,
+                                unit: None,
+                                model: Some(bucket_id.to_string()),
+                                resets_at: iso_from_value(bucket.get("resetTime")),
+                                window_seconds,
+                                stale: false,
+                            },
+                        ));
+                    }
+                }
+            }
+            summary_entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            let mut seen_labels: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for (_, _, w) in summary_entries {
+                if seen_labels.insert(w.label.clone()) {
+                    windows.push(w);
+                }
+            }
+
+            // 2. 解析新版 `fetchAvailableModels` 分模型剩余配额
+            if let Some(models_map) = value.get("models").and_then(|v| v.as_object()) {
+                let mut model_entries: Vec<(String, QuotaWindow)> = Vec::new();
+                for (model_id, info) in models_map {
+                    let lower = model_id.to_ascii_lowercase();
+                    if !(lower.contains("gemini")
+                        || lower.contains("claude")
+                        || lower.contains("argon")
+                        || lower.contains("carbon")
+                        || lower.contains("gpt"))
+                    {
+                        continue;
+                    }
+                    let Some(qinfo) = info.get("quotaInfo") else {
+                        continue;
+                    };
+                    let Some(frac) = qinfo
+                        .get("remainingFraction")
+                        .and_then(|v| v.as_f64())
+                        .filter(|f| f.is_finite() && (0.0..=1.0).contains(f))
+                    else {
+                        continue;
+                    };
+                    let display_name = info
+                        .get("displayName")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(model_id.as_str());
+                    model_entries.push((
+                        model_id.clone(),
+                        QuotaWindow {
+                            label: display_name.to_string(),
+                            used_percent: Some(((1.0 - frac) * 10000.0).round() / 100.0),
+                            remaining: None,
+                            used: None,
+                            limit: None,
+                            unit: None,
+                            model: Some(model_id.clone()),
+                            resets_at: iso_from_value(qinfo.get("resetTime")),
+                            window_seconds: None,
+                            stale: false,
+                        },
+                    ));
+                }
+                model_entries.sort_by(|a, b| a.0.cmp(&b.0));
+                for (_, w) in model_entries {
+                    if seen_labels.insert(w.label.clone()) {
+                        windows.push(w);
+                    }
+                }
+            }
+
+            // 3. 兼容旧版 `retrieveUserQuota` 的 buckets 格式
             if let Some(buckets) = value.get("buckets").and_then(|v| v.as_array()) {
                 for entry in buckets {
                     let frac = entry
@@ -675,12 +810,16 @@ pub fn normalize_usage(
                         .unwrap_or("")
                         .trim();
                     let label = format!("{} {}", model_id, token_type).trim().to_string();
+                    let final_label = if label.is_empty() {
+                        "gemini".to_string()
+                    } else {
+                        label
+                    };
+                    if !seen_labels.insert(final_label.clone()) {
+                        continue;
+                    }
                     windows.push(QuotaWindow {
-                        label: if label.is_empty() {
-                            "gemini".to_string()
-                        } else {
-                            label
-                        },
+                        label: final_label,
                         used_percent: frac.map(|f| ((1.0 - f) * 10000.0).round() / 100.0),
                         remaining,
                         used: None,
@@ -693,6 +832,8 @@ pub fn normalize_usage(
                     });
                 }
             }
+
+            // 4. AI 积分信息（来自 loadCodeAssist paidTier.availableCredits）
             if let Some(credits) = value.get("availableCredits").and_then(|v| v.as_array()) {
                 for entry in credits {
                     if let Some(rem) = num_from_value(entry.get("creditAmount")) {
@@ -1114,16 +1255,22 @@ fn extract_identity(provider: &str, tokens: &serde_json::Value) -> (String, Opti
     (account_id, email, plan)
 }
 
+struct TokenExchangeError {
+    error_code: Option<String>,
+    message: String,
+}
+
 async fn exchange_token(
     client: &reqwest::Client,
+    provider_id: &str,
     p: &AiOAuthProvider,
     params: Vec<(&str, String)>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, TokenExchangeError> {
     let mut body_pairs = params;
     if let Some(ref secret) = p.client_secret {
         body_pairs.push(("client_secret", secret.clone()));
     }
-    let req = if p.mode == "loopback" {
+    let mut req = if p.mode == "loopback" {
         client
             .post(p.token_url)
             .form(&body_pairs)
@@ -1138,26 +1285,50 @@ async fn exchange_token(
             .json(&serde_json::Value::Object(map))
             .header("Accept", "application/json")
     };
+    if provider_id == "gemini" {
+        req = req.header(reqwest::header::USER_AGENT, NATIVE_OAUTH_USER_AGENT);
+    }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|_| "无法连接授权服务，请检查网络或重试".to_string())?;
+    let resp = req.send().await.map_err(|_| TokenExchangeError {
+        error_code: None,
+        message: "无法连接授权服务，请检查网络或重试".to_string(),
+    })?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!("授权令牌交换失败 (HTTP {})", status.as_u16()));
+        let raw_body = resp.text().await.unwrap_or_default();
+        let error_code = serde_json::from_str::<serde_json::Value>(&raw_body)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string));
+        let message = match error_code.as_deref() {
+            Some("unauthorized_client") | Some("invalid_client") => {
+                "当前授权令牌与最新 OAuth 客户端不匹配，请点击「断开」后重新进行 OAuth 授权"
+                    .to_string()
+            }
+            Some("invalid_grant") => {
+                "登录凭据已失效或被撤销（invalid_grant），请点击「断开」后重新进行 OAuth 授权"
+                    .to_string()
+            }
+            _ => format!("授权令牌交换失败 (HTTP {})", status.as_u16()),
+        };
+        return Err(TokenExchangeError {
+            error_code,
+            message,
+        });
     }
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|_| "授权服务未返回有效 JSON".to_string())?;
+    let json: serde_json::Value = resp.json().await.map_err(|_| TokenExchangeError {
+        error_code: None,
+        message: "授权服务未返回有效 JSON".to_string(),
+    })?;
     if json
         .get("access_token")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .is_none()
     {
-        return Err("授权服务返回的令牌不完整".to_string());
+        return Err(TokenExchangeError {
+            error_code: None,
+            message: "授权服务返回的令牌不完整".to_string(),
+        });
     }
     Ok(json)
 }
@@ -1187,7 +1358,9 @@ async fn complete_code_exchange(
         params.push(("state", state.to_string()));
     }
 
-    let tokens = exchange_token(&client, p, params).await?;
+    let tokens = exchange_token(&client, provider_id, p, params)
+        .await
+        .map_err(|e| e.message)?;
     let access_token = tokens["access_token"].as_str().unwrap_or("").to_string();
     let refresh_token = tokens
         .get("refresh_token")
@@ -1237,6 +1410,9 @@ async fn complete_code_exchange(
         account_id,
         email,
         plan,
+        oauth_client_id: Some(p.client_id.clone()),
+        project_id: None,
+        is_gcp_tos: None,
     })
 }
 
@@ -1295,6 +1471,7 @@ pub async fn start_oauth_session(
         } else if provider_id == "gemini" {
             qp.append_pair("access_type", "offline");
             qp.append_pair("prompt", "consent");
+            qp.append_pair("include_granted_scopes", "true");
         }
     }
 
@@ -1523,6 +1700,776 @@ async fn send_usage_request(
     Ok(json)
 }
 
+// ─── Gemini / Antigravity Cloud Code 协议适配（对齐 cockpit-tools）────
+
+fn valid_cloud_code_project_id(project_id: Option<&str>) -> Option<&str> {
+    project_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "aicode-consumers")
+}
+
+fn parse_semver_tuple(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version
+        .trim()
+        .trim_start_matches('v')
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+fn resolve_cloud_code_ide_version(detected: Option<&str>) -> String {
+    if let Some(raw) = detected.map(str::trim).filter(|s| !s.is_empty()) {
+        if let (Some(det), Some(min_req)) = (
+            parse_semver_tuple(raw),
+            parse_semver_tuple(DEFAULT_CLOUD_CODE_IDE_VERSION),
+        ) {
+            if det >= min_req {
+                return raw.to_string();
+            }
+        }
+    }
+    DEFAULT_CLOUD_CODE_IDE_VERSION.to_string()
+}
+
+fn read_json_version_field(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn detect_local_antigravity_version() -> Option<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
+        candidates.push(
+            PathBuf::from(&local_app)
+                .join("Programs")
+                .join("Antigravity")
+                .join("resources")
+                .join("app")
+                .join("package.json"),
+        );
+    }
+    if let Ok(prog) = std::env::var("PROGRAMFILES") {
+        candidates.push(
+            PathBuf::from(&prog)
+                .join("Antigravity")
+                .join("resources")
+                .join("app")
+                .join("package.json"),
+        );
+    }
+    candidates.push(PathBuf::from(
+        "/Applications/Antigravity.app/Contents/Resources/app/package.json",
+    ));
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(
+            home.join("Applications")
+                .join("Antigravity.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app")
+                .join("package.json"),
+        );
+    }
+    for path in candidates {
+        if let Some(ver) = read_json_version_field(&path) {
+            return Some(ver);
+        }
+    }
+    None
+}
+
+fn cloud_code_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        "linux" => "linux",
+        _ => "windows",
+    }
+}
+
+fn cloud_code_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        _ => "amd64",
+    }
+}
+
+fn cloud_code_platform_name() -> &'static str {
+    match (cloud_code_os(), cloud_code_arch()) {
+        ("darwin", "amd64") => "DARWIN_AMD64",
+        ("darwin", "arm64") => "DARWIN_ARM64",
+        ("linux", "amd64") => "LINUX_AMD64",
+        ("linux", "arm64") => "LINUX_ARM64",
+        ("windows", "amd64") => "WINDOWS_AMD64",
+        _ => "PLATFORM_UNSPECIFIED",
+    }
+}
+
+fn build_load_code_assist_user_agent(ide_version: &str) -> String {
+    format!(
+        "antigravity/{} {}/{} google-api-nodejs-client/{}",
+        ide_version,
+        cloud_code_os(),
+        cloud_code_arch(),
+        DEFAULT_GOOGLE_API_NODEJS_CLIENT_VERSION
+    )
+}
+
+fn build_cloud_code_user_agent(ide_version: &str) -> String {
+    format!(
+        "antigravity/{} (aidev_client; os_type={}; arch={}; cl={})",
+        ide_version,
+        cloud_code_os(),
+        cloud_code_arch(),
+        DEFAULT_CLOUD_CODE_CL
+    )
+}
+
+fn load_code_assist_x_goog_api_client() -> String {
+    if let Ok(raw) = std::env::var("AG_LOAD_CODE_ASSIST_NODE_VERSION") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return format!("gl-node/{}", trimmed);
+        }
+    }
+    format!("gl-node/{}", DEFAULT_X_GOOG_API_CLIENT_NODE_VERSION)
+}
+
+fn build_cloud_code_metadata(ide_version: &str, duet_project: Option<&str>) -> serde_json::Value {
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "ideName".to_string(),
+        serde_json::Value::String("antigravity".to_string()),
+    );
+    metadata.insert(
+        "ideType".to_string(),
+        serde_json::Value::String("ANTIGRAVITY".to_string()),
+    );
+    metadata.insert(
+        "ideVersion".to_string(),
+        serde_json::Value::String(ide_version.to_string()),
+    );
+    metadata.insert(
+        "pluginVersion".to_string(),
+        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
+    );
+    metadata.insert(
+        "platform".to_string(),
+        serde_json::Value::String(cloud_code_platform_name().to_string()),
+    );
+    metadata.insert(
+        "updateChannel".to_string(),
+        serde_json::Value::String("stable".to_string()),
+    );
+    metadata.insert(
+        "pluginType".to_string(),
+        serde_json::Value::String("GEMINI".to_string()),
+    );
+    if let Some(proj) = valid_cloud_code_project_id(duet_project) {
+        metadata.insert(
+            "duetProject".to_string(),
+            serde_json::Value::String(proj.to_string()),
+        );
+    }
+    serde_json::Value::Object(metadata)
+}
+
+fn build_load_code_assist_payload(
+    ide_version: &str,
+    project_id: Option<&str>,
+) -> serde_json::Value {
+    let clean_proj = valid_cloud_code_project_id(project_id);
+    let mut payload = serde_json::json!({
+        "metadata": build_cloud_code_metadata(ide_version, clean_proj),
+        "mode": "FULL_ELIGIBILITY_CHECK"
+    });
+    if let Some(proj) = clean_proj {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "cloudaicompanionProject".to_string(),
+                serde_json::Value::String(proj.to_string()),
+            );
+        }
+    }
+    payload
+}
+
+fn select_cloud_code_base_url(
+    project_id: Option<&str>,
+    is_gcp_tos: bool,
+    override_url: Option<&str>,
+) -> String {
+    if let Some(url) = override_url.map(str::trim).filter(|s| !s.is_empty()) {
+        return url.trim_end_matches('/').to_string();
+    }
+    if is_gcp_tos && valid_cloud_code_project_id(project_id).is_some() {
+        return CLOUD_CODE_PROD_BASE_URL.to_string();
+    }
+    CLOUD_CODE_DAILY_BASE_URL.to_string()
+}
+
+fn extract_cloud_code_project_id(value: Option<&serde_json::Value>) -> Option<String> {
+    let val = value?;
+    if let Some(s) = val.as_str() {
+        return valid_cloud_code_project_id(Some(s)).map(str::to_string);
+    }
+    if let Some(id) = val.get("id").and_then(|v| v.as_str()) {
+        return valid_cloud_code_project_id(Some(id)).map(str::to_string);
+    }
+    None
+}
+
+fn extract_uses_gcp_tos(profile: &serde_json::Value) -> Option<bool> {
+    let current = profile.get("currentTier")?;
+    if let Some(flag) = current.get("usesGcpTos").and_then(|v| v.as_bool()) {
+        return Some(flag);
+    }
+    let current_id = current.get("id").and_then(|v| v.as_str())?;
+    profile
+        .get("allowedTiers")
+        .and_then(|v| v.as_array())?
+        .iter()
+        .find_map(|tier| {
+            (tier.get("id").and_then(|v| v.as_str()) == Some(current_id))
+                .then(|| tier.get("usesGcpTos").and_then(|v| v.as_bool()))
+                .flatten()
+        })
+}
+
+fn pick_onboard_tier(profile: &serde_json::Value, fallback_tier: Option<&str>) -> Option<String> {
+    if let Some(allowed) = profile.get("allowedTiers").and_then(|v| v.as_array()) {
+        if let Some(default_id) = allowed
+            .iter()
+            .find(|t| t.get("isDefault").and_then(|v| v.as_bool()) == Some(true))
+            .and_then(|t| t.get("id").and_then(|v| v.as_str()))
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(default_id.to_string());
+        }
+        if let Some(first_id) = allowed
+            .iter()
+            .find_map(|t| t.get("id").and_then(|v| v.as_str()))
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(first_id.to_string());
+        }
+        if !allowed.is_empty() {
+            return Some("LEGACY".to_string());
+        }
+    }
+    fallback_tier
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn format_gemini_summary_bucket(
+    bucket_id: &str,
+    display_name: Option<&str>,
+) -> (String, Option<i64>, u8) {
+    let normalized = bucket_id.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "gemini-5h" | "gemini:5h" => ("Gemini 5小时额度".to_string(), Some(18000), 10),
+        "gemini-weekly" | "gemini:weekly" => ("Gemini 周额度".to_string(), Some(604800), 11),
+        "3p-5h" | "claude:5h" => ("Claude 5小时额度".to_string(), Some(18000), 20),
+        "3p-weekly" | "claude:weekly" => ("Claude 周额度".to_string(), Some(604800), 21),
+        "argon:5h" => ("Gemini 4 Argon 5小时额度".to_string(), Some(18000), 30),
+        "argon:weekly" => ("Gemini 4 Argon 周额度".to_string(), Some(604800), 31),
+        "carbon:weekly" | "gemini-carbon-wtu-weekly" => {
+            ("Gemini 4 Carbon 周额度".to_string(), Some(604800), 40)
+        }
+        other if other.starts_with("gemini-argon-") && other.ends_with("-5h") => {
+            ("Gemini 4 Argon 5小时额度".to_string(), Some(18000), 30)
+        }
+        other if other.starts_with("gemini-argon-") && other.ends_with("-weekly") => {
+            ("Gemini 4 Argon 周额度".to_string(), Some(604800), 31)
+        }
+        other => {
+            let secs = if other.ends_with("5h") || other.contains("five_hour") {
+                Some(18000)
+            } else if other.ends_with("weekly") || other.contains("seven_day") {
+                Some(604800)
+            } else {
+                None
+            };
+            let label = display_name
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(bucket_id)
+                .to_string();
+            (label, secs, 50)
+        }
+    }
+}
+
+pub fn format_google_validation_url(raw_url: &str, email: &str) -> String {
+    let email = email.trim();
+    if raw_url.trim().is_empty() || email.is_empty() {
+        return raw_url.to_string();
+    }
+    let Ok(mut parsed) = Url::parse(raw_url) else {
+        return raw_url.to_string();
+    };
+    let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
+        return raw_url.to_string();
+    };
+    let is_google_host =
+        host == "accounts.google.com" || host == "google.com" || host.ends_with(".google.com");
+    if !is_google_host {
+        return raw_url.to_string();
+    }
+
+    let mut pairs: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
+    let has_valid_authuser = pairs.iter().any(|(k, v)| {
+        k == "authuser" && !v.trim().is_empty() && !v.trim().chars().all(|c| c.is_ascii_digit())
+    });
+    let has_login_hint = pairs
+        .iter()
+        .any(|(k, v)| k == "login_hint" && !v.trim().is_empty());
+    let has_email = pairs
+        .iter()
+        .any(|(k, v)| k == "Email" && !v.trim().is_empty());
+
+    if !has_valid_authuser {
+        pairs.retain(|(k, _)| k != "authuser");
+        pairs.push(("authuser".to_string(), email.to_string()));
+    }
+    if !has_login_hint {
+        pairs.retain(|(k, _)| k != "login_hint");
+        pairs.push(("login_hint".to_string(), email.to_string()));
+    }
+    if !has_email {
+        pairs.retain(|(k, _)| k != "Email");
+        pairs.push(("Email".to_string(), email.to_string()));
+    }
+
+    parsed.query_pairs_mut().clear().extend_pairs(pairs);
+    parsed.to_string()
+}
+
+#[derive(Debug, Clone)]
+struct GoogleApiError {
+    code: u16,
+    message: String,
+    reason: Option<String>,
+    validation_url: Option<String>,
+}
+
+fn parse_google_api_error(status: u16, text: &str, email: Option<&str>) -> GoogleApiError {
+    let mut message = if text.trim().is_empty() {
+        format!("Google 接口返回 HTTP {}", status)
+    } else {
+        text.trim().chars().take(240).collect()
+    };
+    let mut reason: Option<String> = None;
+    let mut validation_url: Option<String> = None;
+
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
+        if let Some(err_obj) = val.get("error") {
+            if let Some(msg) = err_obj.get("message").and_then(|v| v.as_str()) {
+                message = msg.to_string();
+            }
+            if let Some(details) = err_obj.get("details").and_then(|v| v.as_array()) {
+                for detail in details {
+                    if reason.is_none() {
+                        if let Some(r) = detail.get("reason").and_then(|v| v.as_str()) {
+                            reason = Some(r.to_string());
+                        }
+                    }
+                    if validation_url.is_none() {
+                        if let Some(url) = detail
+                            .get("metadata")
+                            .and_then(|m| m.get("validation_url"))
+                            .and_then(|v| v.as_str())
+                        {
+                            validation_url = Some(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if reason.is_none() {
+        if message.contains("Verify your account") {
+            reason = Some("VALIDATION_REQUIRED".to_string());
+        } else if message.contains("Subscription required") {
+            reason = Some("SUBSCRIPTION_REQUIRED".to_string());
+        }
+    }
+
+    if let (Some(url), Some(em)) = (validation_url.as_ref(), email) {
+        validation_url = Some(format_google_validation_url(url, em));
+    }
+
+    GoogleApiError {
+        code: status,
+        message,
+        reason,
+        validation_url,
+    }
+}
+
+fn is_explicit_quota_denial(err: &GoogleApiError) -> bool {
+    matches!(
+        err.reason.as_deref(),
+        Some("VALIDATION_REQUIRED" | "SUBSCRIPTION_REQUIRED")
+    ) || err
+        .validation_url
+        .as_deref()
+        .is_some_and(|u| !u.trim().is_empty())
+}
+
+fn format_google_api_error_message(err: &GoogleApiError) -> String {
+    if let Some(ref url) = err.validation_url {
+        return format!("Google 需要验证此账号后才能查询额度：{}", url);
+    }
+    match err.reason.as_deref() {
+        Some("VALIDATION_REQUIRED") => {
+            format!("Google 需要验证此账号后才能查询额度（{}）", err.message)
+        }
+        Some("SUBSCRIPTION_REQUIRED") => {
+            format!("当前 Google 账号暂无可用订阅配额（{}）", err.message)
+        }
+        _ => format!("Google 配额接口返回 HTTP {}：{}", err.code, err.message),
+    }
+}
+
+async fn try_onboard_user(
+    client: &reqwest::Client,
+    base_url: &str,
+    access_token: &str,
+    ide_version: &str,
+    load_ua: &str,
+    tier_id: &str,
+    project_id: Option<&str>,
+) -> Option<String> {
+    let clean_proj = valid_cloud_code_project_id(project_id);
+    let mut payload = serde_json::json!({
+        "tierId": tier_id,
+        "metadata": build_cloud_code_metadata(ide_version, clean_proj)
+    });
+    if let Some(proj) = clean_proj {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "cloudaicompanionProject".to_string(),
+                serde_json::Value::String(proj.to_string()),
+            );
+        }
+    }
+
+    let resp = client
+        .post(format!("{}/{}", base_url, ONBOARD_USER_PATH))
+        .bearer_auth(access_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, load_ua)
+        .json(&payload)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let mut data: serde_json::Value = resp.json().await.ok()?;
+
+    for _ in 0..ONBOARD_MAX_POLLS {
+        if data.get("done").and_then(|v| v.as_bool()) == Some(true) {
+            return extract_cloud_code_project_id(
+                data.get("response")
+                    .and_then(|r| r.get("cloudaicompanionProject")),
+            );
+        }
+        let op_name = data
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?;
+        tokio::time::sleep(Duration::from_millis(ONBOARD_POLL_DELAY_MS)).await;
+        let poll = client
+            .get(format!("{}/v1internal/{}", base_url, op_name))
+            .bearer_auth(access_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::USER_AGENT, load_ua)
+            .send()
+            .await
+            .ok()?;
+        if !poll.status().is_success() {
+            return None;
+        }
+        data = poll.json().await.ok()?;
+    }
+    None
+}
+
+async fn fetch_gemini_cloud_code_usage(
+    client: &reqwest::Client,
+    p: &AiOAuthProvider,
+    current: &mut StoredOAuthTokens,
+    checked_at: &str,
+) -> Result<NormalizedUsage, String> {
+    let ide_version = resolve_cloud_code_ide_version(detect_local_antigravity_version().as_deref());
+    let load_ua = build_load_code_assist_user_agent(&ide_version);
+    let cloud_ua = build_cloud_code_user_agent(&ide_version);
+    let x_goog = load_code_assist_x_goog_api_client();
+    let url_override = std::env::var("ANTIGRAVITY_CLOUD_CODE_URL_OVERRIDE").ok();
+    let email_hint = current.email.clone();
+
+    let initial_proj = valid_cloud_code_project_id(current.project_id.as_deref()).map(str::to_string);
+    let initial_gcp_tos = current.is_gcp_tos.unwrap_or(false);
+    let initial_base = select_cloud_code_base_url(
+        initial_proj.as_deref(),
+        initial_gcp_tos,
+        url_override.as_deref(),
+    );
+
+    // Step 1: loadCodeAssist（解析订阅档位、积分、GCP ToS 路由和项目 ID；免费/个人号无项目 ID 也继续查询）
+    let load_payload = build_load_code_assist_payload(&ide_version, initial_proj.as_deref());
+    let mut resolved_project_id: Option<String> = None;
+    let mut resolved_is_gcp_tos: Option<bool> = None;
+    let mut detected_plan: Option<String> = None;
+    let mut available_credits: Option<serde_json::Value> = None;
+    let mut unsupported_client_seen = false;
+
+    for load_try in 0..2 {
+        let resp_res = client
+            .post(format!("{}/{}", initial_base, LOAD_CODE_ASSIST_PATH))
+            .bearer_auth(&current.access_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::USER_AGENT, &load_ua)
+            .header("x-goog-api-client", &x_goog)
+            .header(reqwest::header::ACCEPT, "*/*")
+            .json(&load_payload)
+            .send()
+            .await;
+
+        let Ok(resp) = resp_res else {
+            break;
+        };
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED
+            && load_try == 0
+            && current.refresh_token.is_some()
+        {
+            match refresh_oauth_tokens(client, "gemini", p, current).await {
+                Ok(updated) => {
+                    *current = updated;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        if status.is_success() {
+            if let Ok(profile) = resp.json::<serde_json::Value>().await {
+                let tier = profile
+                    .get("paidTier")
+                    .or_else(|| profile.get("currentTier"));
+                if let Some(pname) = tier
+                    .and_then(|t| t.get("name").or_else(|| t.get("id")))
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    detected_plan = Some(pname.to_string());
+                    current.plan = Some(pname.to_string());
+                }
+                if let Some(ac) = profile
+                    .get("paidTier")
+                    .and_then(|t| t.get("availableCredits"))
+                    .or_else(|| {
+                        profile
+                            .get("currentTier")
+                            .and_then(|t| t.get("availableCredits"))
+                    })
+                {
+                    available_credits = Some(ac.clone());
+                }
+                resolved_is_gcp_tos = extract_uses_gcp_tos(&profile);
+                if let Some(flag) = resolved_is_gcp_tos {
+                    current.is_gcp_tos = Some(flag);
+                }
+
+                unsupported_client_seen = profile
+                    .get("ineligibleTiers")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter().any(|t| {
+                            t.get("reasonCode").and_then(|r| r.as_str())
+                                == Some("UNSUPPORTED_CLIENT")
+                        })
+                    })
+                    .unwrap_or(false);
+
+                resolved_project_id =
+                    extract_cloud_code_project_id(profile.get("cloudaicompanionProject"));
+                if resolved_project_id.is_none() {
+                    if let Some(tier_id) = pick_onboard_tier(&profile, detected_plan.as_deref()) {
+                        resolved_project_id = try_onboard_user(
+                            client,
+                            &initial_base,
+                            &current.access_token,
+                            &ide_version,
+                            &load_ua,
+                            &tier_id,
+                            initial_proj.as_deref(),
+                        )
+                        .await;
+                    }
+                }
+                if let Some(ref pid) = resolved_project_id {
+                    current.project_id = Some(pid.clone());
+                }
+            }
+        }
+        break;
+    }
+
+    let effective_project_id = resolved_project_id
+        .or(initial_proj)
+        .filter(|id| valid_cloud_code_project_id(Some(id)).is_some());
+    let effective_gcp_tos = resolved_is_gcp_tos.unwrap_or(initial_gcp_tos);
+    let effective_base = select_cloud_code_base_url(
+        effective_project_id.as_deref(),
+        effective_gcp_tos,
+        url_override.as_deref(),
+    );
+    let quota_payload = effective_project_id
+        .as_ref()
+        .map(|id| serde_json::json!({ "project": id }))
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    // Step 2: fetchAvailableModels（返回分模型剩余配额；遇到非明确封禁的 403 继续查 retrieveUserQuotaSummary）
+    let mut combined = serde_json::json!({ "models": {} });
+    let mut models_error: Option<GoogleApiError> = None;
+
+    for attempt in 0..2 {
+        let resp = client
+            .post(format!("{}/{}", effective_base, FETCH_AVAILABLE_MODELS_PATH))
+            .bearer_auth(&current.access_token)
+            .header(reqwest::header::USER_AGENT, &cloud_ua)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .json(&quota_payload)
+            .send()
+            .await
+            .map_err(|_| "无法连接 Google Cloud Code 配额接口，请检查网络".to_string())?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED
+            && attempt == 0
+            && current.refresh_token.is_some()
+        {
+            match refresh_oauth_tokens(client, "gemini", p, current).await {
+                Ok(updated) => {
+                    *current = updated;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let err_text = resp.text().await.unwrap_or_default();
+            let parsed = parse_google_api_error(status.as_u16(), &err_text, email_hint.as_deref());
+            if is_explicit_quota_denial(&parsed) {
+                return Err(format_google_api_error_message(&parsed));
+            }
+            models_error = Some(parsed);
+            break;
+        }
+        if status.is_success() {
+            if let Ok(val) = resp.json::<serde_json::Value>().await {
+                combined = val;
+            }
+            break;
+        }
+        if (status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.as_u16() >= 500)
+            && attempt == 0
+        {
+            tokio::time::sleep(Duration::from_millis(800)).await;
+            continue;
+        }
+        let err_text = resp.text().await.unwrap_or_default();
+        models_error = Some(parse_google_api_error(
+            status.as_u16(),
+            &err_text,
+            email_hint.as_deref(),
+        ));
+        break;
+    }
+
+    // Step 3: retrieveUserQuotaSummary（获取 5 小时与周维度汇总配额桶）
+    let mut summary_error: Option<GoogleApiError> = None;
+    if let Ok(res) = client
+        .post(format!(
+            "{}/{}",
+            effective_base, RETRIEVE_USER_QUOTA_SUMMARY_PATH
+        ))
+        .bearer_auth(&current.access_token)
+        .header(reqwest::header::USER_AGENT, &cloud_ua)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .json(&quota_payload)
+        .send()
+        .await
+    {
+        let status = res.status();
+        if status.is_success() {
+            if let Ok(summary_val) = res.json::<serde_json::Value>().await {
+                if let Some(obj) = combined.as_object_mut() {
+                    obj.insert("quota_summary".to_string(), summary_val);
+                }
+            }
+        } else {
+            let err_text = res.text().await.unwrap_or_default();
+            let parsed = parse_google_api_error(status.as_u16(), &err_text, email_hint.as_deref());
+            let explicitly_denied = if models_error.is_some() {
+                is_explicit_quota_denial(&parsed)
+            } else {
+                parsed.reason.as_deref() == Some("VALIDATION_REQUIRED")
+                    || parsed.validation_url.is_some()
+                    || parsed.message.contains("Verify your account")
+            };
+            if explicitly_denied {
+                summary_error = Some(parsed);
+            }
+        }
+    }
+
+    if let Some(err) = summary_error {
+        return Err(format_google_api_error_message(&err));
+    }
+
+    if let Some(ac) = available_credits {
+        if let Some(obj) = combined.as_object_mut() {
+            obj.insert("availableCredits".to_string(), ac);
+        }
+    }
+
+    let mut norm = normalize_usage("gemini", &combined, checked_at);
+    if norm.plan.is_none() {
+        norm.plan = detected_plan.or_else(|| current.plan.clone());
+    }
+
+    if norm.windows.is_empty() {
+        let client_mismatch = current.oauth_client_id.as_deref() != Some(p.client_id.as_str());
+        if client_mismatch || unsupported_client_seen {
+            return Err("当前授权令牌来自旧版 OAuth 客户端或权限不足，请先点击「断开」再重新「OAuth 授权」以使用新版 Gemini 额度刷新。".to_string());
+        }
+        if let Some(err) = models_error {
+            return Err(format_google_api_error_message(&err));
+        }
+    }
+
+    Ok(norm)
+}
+
 async fn refresh_oauth_tokens(
     client: &reqwest::Client,
     provider_id: &str,
@@ -1534,16 +2481,36 @@ async fn refresh_oauth_tokens(
         .as_deref()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "登录已过期，请重新授权".to_string())?;
-    let new_tokens = exchange_token(
-        client,
-        p,
-        vec![
-            ("grant_type", "refresh_token".to_string()),
-            ("client_id", p.client_id.to_string()),
-            ("refresh_token", refresh_token.to_string()),
-        ],
-    )
-    .await?;
+    let mut last_err = String::new();
+    let mut refreshed: Option<serde_json::Value> = None;
+    for attempt in 0..2 {
+        match exchange_token(
+            client,
+            provider_id,
+            p,
+            vec![
+                ("grant_type", "refresh_token".to_string()),
+                ("client_id", p.client_id.to_string()),
+                ("refresh_token", refresh_token.to_string()),
+            ],
+        )
+        .await
+        {
+            Ok(val) => {
+                refreshed = Some(val);
+                break;
+            }
+            Err(err) => {
+                if attempt == 0 && err.error_code.as_deref() == Some("invalid_grant") {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+                last_err = err.message;
+                break;
+            }
+        }
+    }
+    let new_tokens = refreshed.ok_or(last_err)?;
 
     let (aid, email, plan) = extract_identity(provider_id, &new_tokens);
     if !aid.is_empty() && aid != current.account_id {
@@ -1571,6 +2538,9 @@ async fn refresh_oauth_tokens(
         account_id: current.account_id.clone(),
         email: email.or_else(|| current.email.clone()),
         plan: plan.or_else(|| current.plan.clone()),
+        oauth_client_id: Some(p.client_id.clone()),
+        project_id: current.project_id.clone(),
+        is_gcp_tos: current.is_gcp_tos,
     })
 }
 
@@ -1607,104 +2577,7 @@ pub async fn fetch_provider_usage(
 
     let checked_at = Utc::now().to_rfc3339();
     let res = if provider_id == "gemini" {
-        let profile_url = p.profile_url.unwrap_or("");
-        let profile_body = serde_json::json!({
-            "metadata": {
-                "ideType": "IDE_UNSPECIFIED",
-                "platform": "PLATFORM_UNSPECIFIED",
-                "pluginType": "GEMINI"
-            }
-        });
-        let prof_res = match send_usage_request(
-            &client,
-            provider_id,
-            &current,
-            profile_url,
-            reqwest::Method::POST,
-            Some(profile_body.clone()),
-        )
-        .await
-        {
-            Ok(v) => Ok(v),
-            Err((401, _)) if current.refresh_token.is_some() => {
-                match refresh_oauth_tokens(&client, provider_id, &p, &current).await {
-                    Ok(updated) => {
-                        current = updated;
-                        send_usage_request(
-                            &client,
-                            provider_id,
-                            &current,
-                            profile_url,
-                            reqwest::Method::POST,
-                            Some(profile_body),
-                        )
-                        .await
-                        .map_err(|(_, m)| m)
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            Err((_, m)) => Err(m),
-        };
-        match prof_res {
-            Err(e) => Err(e),
-            Ok(profile) => {
-                let tier = profile.get("paidTier").or_else(|| profile.get("currentTier"));
-                if let Some(pname) = tier
-                    .and_then(|t| t.get("name").or_else(|| t.get("id")))
-                    .and_then(|v| v.as_str())
-                {
-                    if !pname.is_empty() {
-                        current.plan = Some(pname.to_string());
-                    }
-                }
-                let proj = profile
-                    .get("cloudaicompanionProject")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty());
-                match proj {
-                    None => {
-                        let unsupported = profile
-                            .get("ineligibleTiers")
-                            .and_then(|v| v.as_array())
-                            .map(|arr| {
-                                arr.iter().any(|t| {
-                                    t.get("reasonCode").and_then(|r| r.as_str())
-                                        == Some("UNSUPPORTED_CLIENT")
-                                })
-                            })
-                            .unwrap_or(false);
-                        if unsupported {
-                            Err("Google 不再通过此授权提供个人账号的 Gemini Code Assist 额度，可使用 Antigravity CLI 查看额度。".to_string())
-                        } else {
-                            Err("Google 未返回 Gemini Code Assist 项目，请确认当前账号有可用席位。".to_string())
-                        }
-                    }
-                    Some(project_id) => {
-                        let usage_res = send_usage_request(
-                            &client,
-                            provider_id,
-                            &current,
-                            p.usage_url,
-                            reqwest::Method::POST,
-                            Some(serde_json::json!({ "project": project_id })),
-                        )
-                        .await;
-                        match usage_res {
-                            Ok(mut val) => {
-                                if let Some(ac) = tier.and_then(|t| t.get("availableCredits")) {
-                                    if let Some(obj) = val.as_object_mut() {
-                                        obj.insert("availableCredits".to_string(), ac.clone());
-                                    }
-                                }
-                                Ok(normalize_usage(provider_id, &val, &checked_at))
-                            }
-                            Err((_, m)) => Err(m),
-                        }
-                    }
-                }
-            }
-        }
+        fetch_gemini_cloud_code_usage(&client, &p, &mut current, &checked_at).await
     } else if provider_id == "grok" && p.monthly_usage_url.is_some() {
         let mut all_windows: Vec<QuotaWindow> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
@@ -1948,5 +2821,101 @@ mod tests {
         .unwrap();
         assert!(load_gemini_oauth_override(&conn).is_none());
         let _ = cleared;
+    }
+
+    #[test]
+    fn test_gemini_cloud_code_routing_ua_and_summary_merge() {
+        assert_eq!(
+            select_cloud_code_base_url(None, false, None),
+            CLOUD_CODE_DAILY_BASE_URL
+        );
+        assert_eq!(
+            select_cloud_code_base_url(Some("aicode-consumers"), true, None),
+            CLOUD_CODE_DAILY_BASE_URL
+        );
+        assert_eq!(
+            select_cloud_code_base_url(Some("my-enterprise-proj"), true, None),
+            CLOUD_CODE_PROD_BASE_URL
+        );
+        assert_eq!(
+            select_cloud_code_base_url(None, false, Some("https://custom.example/")),
+            "https://custom.example"
+        );
+
+        assert_eq!(resolve_cloud_code_ide_version(Some("2.10.0")), DEFAULT_CLOUD_CODE_IDE_VERSION);
+        assert_eq!(resolve_cloud_code_ide_version(Some("2.28.1")), "2.28.1");
+        let cloud_ua = build_cloud_code_user_agent("2.25.0");
+        assert!(cloud_ua.contains("aidev_client"));
+        assert!(cloud_ua.contains("cl=1003475615"));
+        let load_ua = build_load_code_assist_user_agent("2.25.0");
+        assert!(load_ua.contains("google-api-nodejs-client/10.3.0"));
+
+        // 验证 retrieveUserQuotaSummary + fetchAvailableModels + availableCredits 合并
+        let combined = serde_json::json!({
+            "models": {
+                "gemini-2.5-pro": {
+                    "displayName": "Gemini 2.5 Pro",
+                    "quotaInfo": { "remainingFraction": 0.8, "resetTime": "2026-11-25T00:00:00Z" }
+                },
+                "claude-sonnet-4-5": {
+                    "displayName": "Claude Sonnet 4.5",
+                    "quotaInfo": { "remainingFraction": 0.65 }
+                },
+                "unrelated-model": {
+                    "quotaInfo": { "remainingFraction": 0.5 }
+                }
+            },
+            "quota_summary": {
+                "groups": [{
+                    "buckets": [
+                        { "bucketId": "gemini-5h", "remainingFraction": 0.9, "resetTime": "2026-11-24T23:00:00Z" },
+                        { "bucketId": "gemini-weekly", "remainingFraction": 0.75 },
+                        { "bucketId": "3p-5h", "remainingFraction": 0.5 },
+                        { "bucketId": "gemini-argon-wtu-weekly", "remainingFraction": 0.92 }
+                    ]
+                }]
+            },
+            "availableCredits": [
+                { "creditType": "AI", "creditAmount": "25" }
+            ]
+        });
+        let norm = normalize_usage("gemini", &combined, "2026-11-24T21:00:00Z");
+        assert_eq!(norm.status, "available");
+        assert_eq!(norm.windows[0].label, "Gemini 5小时额度");
+        assert_eq!(norm.windows[0].used_percent, Some(10.0));
+        assert_eq!(norm.windows[0].window_seconds, Some(18000));
+        assert_eq!(norm.windows[1].label, "Gemini 周额度");
+        assert_eq!(norm.windows[1].used_percent, Some(25.0));
+        assert_eq!(norm.windows[1].window_seconds, Some(604800));
+        assert_eq!(norm.windows[2].label, "Claude 5小时额度");
+        assert_eq!(norm.windows[3].label, "Gemini 4 Argon 周额度");
+        assert!(norm.windows.iter().any(|w| w.label == "Gemini 2.5 Pro" && w.used_percent == Some(20.0)));
+        assert!(norm.windows.iter().any(|w| w.label == "Claude Sonnet 4.5" && w.used_percent == Some(35.0)));
+        assert!(!norm.windows.iter().any(|w| w.label == "unrelated-model"));
+        assert!(norm.windows.iter().any(|w| w.label == "credits/AI" && w.remaining == Some(25.0)));
+
+        // 验证 Google 验证链接邮箱注入与安全域名白名单
+        let formatted = format_google_validation_url(
+            "https://accounts.google.com/signin/continue?authuser=0&continue=https%3A%2F%2Fdevelopers.google.com",
+            "user@gmail.com",
+        );
+        assert!(formatted.contains("authuser=user%40gmail.com"));
+        assert!(formatted.contains("login_hint=user%40gmail.com"));
+        assert_eq!(
+            format_google_validation_url("https://evil-google.com/verify", "user@gmail.com"),
+            "https://evil-google.com/verify"
+        );
+
+        let err = parse_google_api_error(
+            403,
+            r#"{"error":{"message":"Verify your account","details":[{"reason":"VALIDATION_REQUIRED","metadata":{"validation_url":"https://accounts.google.com/verify?authuser"}} ]}}"#,
+            Some("user@gmail.com"),
+        );
+        assert!(is_explicit_quota_denial(&err));
+        assert!(err
+            .validation_url
+            .as_deref()
+            .unwrap_or("")
+            .contains("authuser=user%40gmail.com"));
     }
 }

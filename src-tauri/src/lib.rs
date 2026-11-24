@@ -12,6 +12,7 @@ mod fx;
 mod sms;
 mod ssh_client;
 mod totp;
+mod tray;
 
 pub use database::{init_database, Database};
 
@@ -25,7 +26,7 @@ pub fn run() {
     }
     let db = Database(Mutex::new(conn));
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // 在线更新：从 GitHub Releases 的 latest.json 检查新版本，安装包须带签名（公钥在 tauri.conf.json）
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -35,6 +36,7 @@ pub fn run() {
         .manage(ai_quota::AiOAuthManager::new())
         .manage(ssh_client::SshSessionManager::new())
         .manage(agent::AgentStreamManager::new())
+        .manage(tray::AppCloseState::new())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -43,7 +45,15 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            if let Err(err) = tray::setup_tray(app.handle()) {
+                log::warn!("初始化系统托盘失败: {}", err);
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                tray::handle_window_close_requested(window, api);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_accounts,
@@ -151,7 +161,19 @@ pub fn run() {
             asset_commands::cancel_agent_stream,
             asset_commands::apply_agent_proposal,
             asset_commands::reject_agent_proposal,
+            asset_commands::get_window_close_settings,
+            asset_commands::save_window_close_settings,
+            asset_commands::handle_window_close,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            tray::show_main_window(app_handle);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app_handle, event);
+    });
 }

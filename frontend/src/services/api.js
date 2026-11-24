@@ -1110,6 +1110,38 @@ const api = {
             console.error('Failed to reject agent proposal:', error);
             return { success: false, message: getErrorMessage(error) };
         }
+    },
+
+    // ─── 系统托盘与窗口关闭行为 ──────────────────────────────────
+
+    async getWindowCloseSettings() {
+        try {
+            const data = await adapter.getWindowCloseSettings();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get window close settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async saveWindowCloseSettings(closeBehavior) {
+        try {
+            const data = await adapter.saveWindowCloseSettings(closeBehavior);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to save window close settings:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async handleWindowClose(action, remember = false) {
+        try {
+            await adapter.handleWindowClose(action, Boolean(remember));
+            return { success: true };
+        } catch (error) {
+            console.error('Failed to handle window close:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
     }
 };
 

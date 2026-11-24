@@ -20,6 +20,7 @@ const { mockApi } = vi.hoisted(() => ({
         cancelAiOauth: vi.fn(),
         refreshAiSubscriptionQuota: vi.fn(),
         readAntigravityCliQuota: vi.fn(),
+        openExternalUrl: vi.fn(),
     },
 }));
 
@@ -249,5 +250,31 @@ describe('Phase 3: DomainsView & AiSubscriptionsView', () => {
             );
             expect(mockApi.startAiOauth).toHaveBeenCalledTimes(2);
         });
+    });
+
+    it('AiSubscriptionsView 展示 Gemini 验证链接按钮并可打开外部验证页', async () => {
+        const user = userEvent.setup();
+        mockApi.openExternalUrl.mockResolvedValue({ success: true });
+        mockApi.getAiSubscriptions.mockResolvedValueOnce({
+            success: true,
+            data: [
+                {
+                    id: 12,
+                    name: 'Gemini Ultra',
+                    provider: 'Google',
+                    plan: 'g1-ultra-tier',
+                    oauthProvider: 'gemini',
+                    oauthConnected: true,
+                    usageError: 'Google 需要验证此账号后才能查询额度：https://accounts.google.com/signin/continue?authuser=u%40gmail.com',
+                },
+            ],
+        });
+
+        render(<AiSubscriptionsView onNotify={vi.fn()} />);
+        await screen.findByText('Gemini Ultra');
+        await user.click(screen.getByRole('button', { name: /打开 Google 验证页面/ }));
+        expect(mockApi.openExternalUrl).toHaveBeenCalledWith(
+            'https://accounts.google.com/signin/continue?authuser=u%40gmail.com',
+        );
     });
 });

@@ -648,6 +648,12 @@ export interface AppMonitorSettings {
   serverMonitorMinutes: number;
 }
 
+export type WindowCloseBehavior = 'ask' | 'minimize' | 'quit';
+
+export interface WindowCloseSettings {
+  closeBehavior: WindowCloseBehavior;
+}
+
 export interface SshSessionInfo {
   sessionId: string;
   serverId: number;
@@ -838,4 +844,7 @@ export interface ApiAdapter {
   cancelAgentStream(streamId?: string | null): Promise<boolean>;
   applyAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem>;
   rejectAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem>;
+  getWindowCloseSettings(): Promise<WindowCloseSettings>;
+  saveWindowCloseSettings(closeBehavior: WindowCloseBehavior): Promise<WindowCloseSettings>;
+  handleWindowClose(action: 'minimize' | 'quit', remember: boolean): Promise<void>;
 }

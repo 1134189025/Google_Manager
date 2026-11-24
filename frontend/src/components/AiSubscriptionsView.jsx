@@ -61,6 +61,12 @@ const formatResetTime = (iso) => {
     return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
+const extractGoogleValidationUrl = (text) => {
+    if (!text) return null;
+    const match = String(text).match(/https:\/\/(?:accounts\.)?google\.com\/[^\s]+/i);
+    return match ? match[0] : null;
+};
+
 const AiSubscriptionsView = ({
     googleAccounts = [],
     paymentCards = [],
@@ -621,38 +627,58 @@ const AiSubscriptionsView = ({
                                         </div>
                                     </div>
 
-                                    {sub.usageError && (
-                                        <div className="text-[11.5px]" style={{ color: 'var(--warning)' }}>
-                                            {sub.usageError}
-                                        </div>
-                                    )}
+                                    {sub.usageError && (() => {
+                                        const validationUrl = extractGoogleValidationUrl(sub.usageError);
+                                        return (
+                                            <div className="space-y-1.5">
+                                                <div className="text-[11.5px] break-all" style={{ color: 'var(--warning)' }}>
+                                                    {sub.usageError}
+                                                </div>
+                                                {validationUrl && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => api.openExternalUrl(validationUrl)}
+                                                        className="gm-btn gm-btn-secondary gm-btn-sm"
+                                                    >
+                                                        <ExternalLink size={12} />
+                                                        <span>打开 Google 验证页面</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
 
                                     {usage?.windows?.length > 0 && (
                                         <div className="space-y-2">
-                                            {usage.windows.map(w => (
-                                                <div key={w.label} className="space-y-1">
-                                                    <div className="flex items-center justify-between text-[11.5px]">
-                                                        <span className="font-mono gm-text-1 truncate">{w.label}</span>
-                                                        <span className="font-mono gm-text-2 shrink-0">
-                                                            {w.usedPercent != null && `已用 ${w.usedPercent.toFixed(1)}%`}
-                                                            {w.remaining != null && ` 剩余 ${w.remaining} ${w.unit || ''}`}
-                                                            {w.used != null && w.limit != null && ` ${w.used.toFixed(2)}/${w.limit.toFixed(2)} ${w.unit || ''}`}
-                                                            {w.resetsAt ? ` · 重置 ${formatResetTime(w.resetsAt)}` : ''}
-                                                        </span>
-                                                    </div>
-                                                    {w.usedPercent != null && (
-                                                        <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
-                                                            <div
-                                                                className="h-full rounded-full transition-all"
-                                                                style={{
-                                                                    width: `${Math.min(100, Math.max(0, w.usedPercent))}%`,
-                                                                    background: w.usedPercent > 85 ? 'var(--danger)' : 'var(--primary)',
-                                                                }}
-                                                            />
+                                            {usage.windows.map(w => {
+                                                const remainingPct = w.usedPercent != null
+                                                    ? Math.max(0, Math.min(100, 100 - w.usedPercent))
+                                                    : null;
+                                                return (
+                                                    <div key={w.label} className="space-y-1">
+                                                        <div className="flex items-center justify-between gap-2 text-[11.5px]">
+                                                            <span className="font-mono gm-text-1 truncate">{w.label}</span>
+                                                            <span className="font-mono gm-text-2 shrink-0">
+                                                                {w.usedPercent != null && `剩余 ${remainingPct.toFixed(0)}% · 已用 ${w.usedPercent.toFixed(1)}%`}
+                                                                {w.remaining != null && ` 剩余 ${w.remaining} ${w.unit || ''}`}
+                                                                {w.used != null && w.limit != null && ` ${w.used.toFixed(2)}/${w.limit.toFixed(2)} ${w.unit || ''}`}
+                                                                {w.resetsAt ? ` · 重置 ${formatResetTime(w.resetsAt)}` : ''}
+                                                            </span>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            ))}
+                                                        {w.usedPercent != null && (
+                                                            <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
+                                                                <div
+                                                                    className="h-full rounded-full transition-all"
+                                                                    style={{
+                                                                        width: `${Math.min(100, Math.max(0, w.usedPercent))}%`,
+                                                                        background: w.usedPercent > 85 ? 'var(--danger)' : 'var(--primary)',
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
                                             {usage.scopeNote && (
                                                 <div className="text-[10.5px] gm-text-3">{usage.scopeNote}</div>
                                             )}
@@ -940,7 +966,7 @@ const AiSubscriptionsView = ({
                                 </div>
                             )}
                             <p className="text-[11.5px] gm-text-3 pt-1 leading-relaxed">
-                                支持直接导入/粘贴 Google Cloud Console 下载的「桌面应用」OAuth JSON，或手动填写 Client ID 与 Client Secret（仅保存在本机 SQLite）。如本机已安装 <span className="font-mono">@google/gemini-cli</span> 会自动识别。
+                                支持内置 Antigravity Cloud Code 通道（获取 5 小时 / 周窗口与分模型额度），也可导入/粘贴自定义 Google OAuth JSON 覆盖（仅保存在本机 SQLite）。更新客户端后如旧令牌报错，先点「断开」再重新授权即可。
                             </p>
                         </div>
 

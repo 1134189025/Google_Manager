@@ -48,6 +48,8 @@ import type {
   ServerItem,
   ServerInput,
   AppMonitorSettings,
+  WindowCloseBehavior,
+  WindowCloseSettings,
   SshSessionInfo,
   SftpDirListing,
   AgentSettingsView,
@@ -768,6 +770,22 @@ export class TauriAdapter implements ApiAdapter {
   async rejectAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem> {
     const result = await this.invokeCommand<any>('reject_agent_proposal', { messageId, proposalId });
     return snakeToCamel<AgentMessageItem>(result);
+  }
+
+  // ─── 系统托盘与窗口关闭行为 ──────────────────────────────────────
+
+  async getWindowCloseSettings(): Promise<WindowCloseSettings> {
+    const result = await this.invokeCommand<any>('get_window_close_settings');
+    return snakeToCamel<WindowCloseSettings>(result || { close_behavior: 'ask' });
+  }
+
+  async saveWindowCloseSettings(closeBehavior: WindowCloseBehavior): Promise<WindowCloseSettings> {
+    const result = await this.invokeCommand<any>('save_window_close_settings', { closeBehavior });
+    return snakeToCamel<WindowCloseSettings>(result || { close_behavior: closeBehavior });
+  }
+
+  async handleWindowClose(action: 'minimize' | 'quit', remember: boolean): Promise<void> {
+    await this.invokeCommand('handle_window_close', { action, remember });
   }
 }
 
