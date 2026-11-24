@@ -535,6 +535,20 @@ export interface AntigravityQuotaResult {
   windows: QuotaWindow[];
 }
 
+export interface GeminiOAuthConfigView {
+  configured: boolean;
+  source: string;
+  clientIdHint: string | null;
+  hasClientSecret: boolean;
+}
+
+export interface GeminiOAuthConfigInput {
+  clientId?: string | null;
+  clientSecret?: string | null;
+  rawJson?: string | null;
+  clear?: boolean;
+}
+
 export interface ServerListeningPort {
   proto: 'tcp' | 'udp';
   port: number;
@@ -788,6 +802,8 @@ export interface ApiAdapter {
   createAiSubscription(subscription: AiSubscriptionInput): Promise<AiSubscription>;
   updateAiSubscription(id: number, subscription: AiSubscriptionInput): Promise<AiSubscription>;
   deleteAiSubscription(id: number): Promise<void>;
+  getGeminiOauthConfig(): Promise<GeminiOAuthConfigView>;
+  saveGeminiOauthConfig(config: GeminiOAuthConfigInput): Promise<GeminiOAuthConfigView>;
   startAiOauth(provider: AiOAuthProviderId, subscriptionId: number): Promise<OAuthStartInfo>;
   getAiOauthStatus(sessionId: string): Promise<OAuthStatusInfo>;
   completeAiOauth(sessionId: string, callbackInput: string): Promise<AiSubscription>;
@@ -819,6 +835,7 @@ export interface ApiAdapter {
   getAgentMessages(): Promise<AgentMessageItem[]>;
   clearAgentMessages(): Promise<void>;
   sendAgentMessage(message: string): Promise<AgentMessageItem[]>;
+  cancelAgentStream(streamId?: string | null): Promise<boolean>;
   applyAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem>;
   rejectAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem>;
 }

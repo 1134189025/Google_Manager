@@ -1,23 +1,79 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use tauri::{AppHandle, Emitter};
 use url::Url;
 
 use crate::assets_db;
 use crate::database;
+use crate::fx;
 
 pub const SETTING_AGENT_BASE_URL: &str = "agent.base_url";
 pub const SETTING_AGENT_API_KEY: &str = "agent.api_key";
 pub const SETTING_AGENT_MODEL: &str = "agent.model";
 pub const SETTING_AGENT_MAX_TOKENS: &str = "agent.max_tokens";
 
-const DEFAULT_MAX_TOKENS: u32 = 2048;
-const MAX_TOOL_STEPS: usize = 4;
-const AGENT_HTTP_TIMEOUT_SECS: u64 = 60;
-const HISTORY_CONTEXT_LIMIT: usize = 12;
+pub const DEFAULT_MAX_TOKENS: u32 = 16384;
+pub const MIN_EXPLICIT_MAX_TOKENS: u32 = 256;
+pub const MAX_TOKENS_UPPER: u32 = 1_000_000;
+const MAX_TOOL_STEPS: usize = 6;
+const AGENT_HTTP_TIMEOUT_SECS: u64 = 300;
+const HISTORY_CONTEXT_LIMIT: usize = 20;
+
+/// 0 表示不显式传 max_tokens（交由服务端/推理模型自动使用默认上限）；否则约束在 256..=1_000_000
+pub fn normalize_max_tokens(raw: u32) -> u32 {
+    if raw == 0 {
+        0
+    } else {
+        raw.clamp(MIN_EXPLICIT_MAX_TOKENS, MAX_TOKENS_UPPER)
+    }
+}
+
+pub struct AgentStreamManager {
+    active: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl AgentStreamManager {
+    pub fn new() -> Self {
+        Self {
+            active: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn register(&self, stream_id: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut guard = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(stream_id.to_string(), flag.clone());
+        flag
+    }
+
+    pub fn remove(&self, stream_id: &str) {
+        let mut guard = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        guard.remove(stream_id);
+    }
+
+    pub fn cancel(&self, stream_id: Option<&str>) -> bool {
+        let guard = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(id) = stream_id {
+            if let Some(flag) = guard.get(id) {
+                flag.store(true, Ordering::SeqCst);
+                return true;
+            }
+            return false;
+        }
+        let mut any = false;
+        for flag in guard.values() {
+            flag.store(true, Ordering::SeqCst);
+            any = true;
+        }
+        any
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSettingsView {
@@ -129,7 +185,7 @@ pub fn get_agent_settings(conn: &Connection) -> Result<AgentSettingsView, String
     let model = database::get_setting(conn, SETTING_AGENT_MODEL)?.unwrap_or_default();
     let max_tokens = database::get_setting(conn, SETTING_AGENT_MAX_TOKENS)?
         .and_then(|s| s.trim().parse::<u32>().ok())
-        .map(|v| v.clamp(256, 16384))
+        .map(normalize_max_tokens)
         .unwrap_or(DEFAULT_MAX_TOKENS);
     let key_raw = database::get_setting(conn, SETTING_AGENT_API_KEY)?
         .map(|s| s.trim().to_string())
@@ -183,7 +239,7 @@ pub fn save_agent_settings(
         database::set_setting(conn, SETTING_AGENT_MODEL, Some(&model_capped))?;
     }
 
-    let max_tokens = input.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS).clamp(256, 16384);
+    let max_tokens = normalize_max_tokens(input.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS));
     database::set_setting(
         conn,
         SETTING_AGENT_MAX_TOKENS,
@@ -399,12 +455,25 @@ fn sanitize_server(srv: &assets_db::ServerItem) -> SanitizedServer {
     }
 }
 
+fn current_usd_cny_rate(conn: &Connection) -> f64 {
+    fx::read_cached_rate(conn)
+        .map(|r| r.rate)
+        .unwrap_or(fx::DEFAULT_USD_CNY_RATE)
+}
+
 pub fn execute_get_workspace_summary(conn: &Connection) -> Result<Value, String> {
     let overview = assets_db::get_workspace_overview(conn, assets_db::today_local())?;
-    let spend = assets_db::get_renewals_summary(conn, 30, assets_db::today_local())?;
+    let spend = assets_db::get_renewals_summary(conn, 90, assets_db::today_local())?;
+    let rate = current_usd_cny_rate(conn);
+    let unified_cny_monthly = ((spend.spend.cny.monthly + spend.spend.usd.monthly * rate) * 100.0).round() / 100.0;
+    let unified_cny_yearly = ((spend.spend.cny.yearly + spend.spend.usd.yearly * rate) * 100.0).round() / 100.0;
     Ok(json!({
+        "today": assets_db::today_local().format("%Y-%m-%d").to_string(),
+        "usd_cny_rate": rate,
+        "unified_cny_monthly": unified_cny_monthly,
+        "unified_cny_yearly": unified_cny_yearly,
         "overview": overview,
-        "upcoming_30d_count": spend.timeline.len(),
+        "upcoming_90d_count": spend.timeline.len(),
         "spend": spend.spend,
     }))
 }
@@ -715,9 +784,20 @@ pub fn execute_get_renewals_and_spend(
     conn: &Connection,
     within_days: Option<i64>,
 ) -> Result<Value, String> {
-    let days = within_days.unwrap_or(30).clamp(1, 365);
+    let days = within_days.unwrap_or(90).clamp(1, 365);
     let summary = assets_db::get_renewals_summary(conn, days, assets_db::today_local())?;
-    serde_json::to_value(summary).map_err(|e| e.to_string())
+    let rate = current_usd_cny_rate(conn);
+    let unified_cny_monthly = ((summary.spend.cny.monthly + summary.spend.usd.monthly * rate) * 100.0).round() / 100.0;
+    let unified_cny_yearly = ((summary.spend.cny.yearly + summary.spend.usd.yearly * rate) * 100.0).round() / 100.0;
+    Ok(json!({
+        "today": assets_db::today_local().format("%Y-%m-%d").to_string(),
+        "within_days": days,
+        "usd_cny_rate": rate,
+        "unified_cny_monthly": unified_cny_monthly,
+        "unified_cny_yearly": unified_cny_yearly,
+        "timeline": summary.timeline,
+        "spend": summary.spend,
+    }))
 }
 
 pub fn execute_get_server_status(
@@ -1301,14 +1381,36 @@ pub fn reject_agent_proposal(
     load_message_with_proposals(conn, message_id)
 }
 
-// ─── OpenAI 兼容 Tool-Calling 循环与测试连接 ────────────────────────
+// ─── Pi Agent 风格精炼提示词、SSE 流式 Tool-Calling 循环与测试连接 ────────
 
-pub fn agent_system_prompt() -> &'static str {
-    "你是 GoogleManager 个人数字资产工作区的本地 AI 助手，请始终使用中文回复。
-安全与隐私硬边界：
-1. 你只能访问经过严格脱敏的白名单元数据和统计工具，永远无法读取密码、2FA 密钥、短信接码地址、银行卡号/CVV、OAuth Token、SSH 凭据或 API Token。若用户索要上述敏感值，请明确说明隐私隔离限制，提示其在对应管理页本地查看。
-2. 所有写入（新增备忘提醒、修改资产非敏感元数据）都必须调用 propose_create_reminder 或 propose_update_asset 生成待审核提案，绝不假装已经直接保存，需提示用户在对话卡片上点击「确认写入」后才生效。
-3. 只陈述工具返回中真实存在的事实、数字和资产名称，不编造未知信息。"
+pub fn build_agent_system_prompt(today: &str, usd_cny_rate: f64) -> String {
+    format!(
+        "你是 GoogleManager 的本地数字资产代理（Pi-Agent 极简务实风格），始终使用中文回答。
+当前环境：本地日期 {today} | 结算汇率 1 USD = ¥{usd_cny_rate:.4}（默认统一以人民币 CNY 汇报费用）。
+
+工作准则：
+1. **先查后答**：任何涉及资产数量、费用、续费、服务器负载、域名、提醒的问题，先调用只读工具获取实时数据再作答，绝不猜测或编造。
+2. **桌面客户端原生排版**：
+   - 结论先行：开头先用一句引用块 `> ...` 概括核心结论或人民币总计。
+   - 多条目对比（服务器、域名、到期续费、费用明细）优先使用紧凑标准 Markdown 表格（列数 <= 5），单条要点用简洁 `- ` 列表，分区用 `## ` / `### ` 标题。
+   - **严禁**使用 `*****`、`=====`、`-----`、`~~~~~` 等连续字符分隔线，也不要用过多星号修饰整段文字；日期、金额、IP、域名用反引号标注。
+   - 保持高信噪比：不寒暄、不赘述、不重复隐私声明。
+3. **统一人民币结算**：统计总支出时优先给出折算后的人民币月/年总额，美元项可在括号内注明原价。
+4. **严格隐私边界**：你只能访问脱敏白名单元数据，无法读取密码、2FA 密钥、接码链接、卡号/CVV、OAuth 令牌、SSH 私钥或 Cloudflare Token。仅当用户明确索要这些敏感值时，用一句话说明本地隔离限制并告知对应管理页。
+5. **变更走提案确认**：新增备忘或更新资产非敏感字段（费用/周期/到期日/备注/标签），必须先查清目标 ID，再调用 `propose_create_reminder` 或 `propose_update_asset` 生成待审提案，并提示用户在下方卡片点击「确认写入」后生效。"
+    )
+}
+
+fn tool_display_label(tool_name: &str) -> &'static str {
+    match tool_name {
+        "get_workspace_summary" => "读取工作区总览",
+        "search_assets" => "检索脱敏资产",
+        "get_renewals_and_spend" => "统计续费与支出",
+        "get_server_status" => "检查服务器状态",
+        "propose_create_reminder" => "生成提醒提案",
+        "propose_update_asset" => "生成变更提案",
+        _ => "调用工具",
+    }
 }
 
 pub fn agent_tool_definitions() -> Value {
@@ -1493,6 +1595,31 @@ pub fn recent_history_messages(conn: &Connection) -> Result<Vec<Value>, String> 
         .collect())
 }
 
+fn build_chat_request_body(
+    cfg: &LoadedAgentConfig,
+    messages: &[Value],
+    with_tools: bool,
+    max_tokens_override: Option<u32>,
+    stream: bool,
+) -> Value {
+    let effective_max = max_tokens_override.unwrap_or(cfg.max_tokens);
+    let mut obj = Map::new();
+    obj.insert("model".to_string(), json!(cfg.model));
+    obj.insert("messages".to_string(), json!(messages));
+    obj.insert("temperature".to_string(), json!(0.2));
+    if stream {
+        obj.insert("stream".to_string(), json!(true));
+    }
+    if effective_max > 0 {
+        obj.insert("max_tokens".to_string(), json!(effective_max));
+    }
+    if with_tools {
+        obj.insert("tools".to_string(), agent_tool_definitions());
+        obj.insert("tool_choice".to_string(), json!("auto"));
+    }
+    Value::Object(obj)
+}
+
 async fn call_chat_completions(
     client: &reqwest::Client,
     cfg: &LoadedAgentConfig,
@@ -1501,18 +1628,7 @@ async fn call_chat_completions(
     max_tokens_override: Option<u32>,
 ) -> Result<Value, String> {
     let endpoint = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let mut body = json!({
-        "model": cfg.model,
-        "messages": messages,
-        "max_tokens": max_tokens_override.unwrap_or(cfg.max_tokens),
-        "temperature": 0.2,
-    });
-    if with_tools {
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("tools".to_string(), agent_tool_definitions());
-            obj.insert("tool_choice".to_string(), json!("auto"));
-        }
-    }
+    let body = build_chat_request_body(cfg, messages, with_tools, max_tokens_override, false);
 
     let mut req = client.post(&endpoint).json(&body);
     if !cfg.api_key.is_empty() {
@@ -1535,17 +1651,339 @@ async fn call_chat_completions(
     serde_json::from_str::<Value>(&text).map_err(|e| format!("解析模型响应 JSON 失败: {}", e))
 }
 
+#[derive(Debug, Default)]
+struct StreamToolCallAcc {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Default)]
+pub struct StreamedTurnOutcome {
+    pub content: String,
+    #[allow(dead_code)]
+    pub reasoning: String,
+    pub tool_calls: Vec<Value>,
+    pub cancelled: bool,
+}
+
+fn extract_delta_reasoning(delta: &Value) -> Option<&str> {
+    delta
+        .get("reasoning_content")
+        .or_else(|| delta.get("reasoning"))
+        .or_else(|| delta.get("thinking"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+}
+
+fn extract_delta_content(delta: &Value) -> Option<String> {
+    let val = delta.get("content")?;
+    if let Some(s) = val.as_str() {
+        return (!s.is_empty()).then(|| s.to_string());
+    }
+    if let Some(arr) = val.as_array() {
+        let mut out = String::new();
+        for part in arr {
+            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+                out.push_str(t);
+            }
+        }
+        return (!out.is_empty()).then_some(out);
+    }
+    None
+}
+
+fn apply_sse_json_chunk(
+    chunk: &Value,
+    content_acc: &mut String,
+    reasoning_acc: &mut String,
+    tool_acc: &mut BTreeMap<usize, StreamToolCallAcc>,
+    emit_event: &mut impl FnMut(&str, &str),
+) {
+    let Some(choice) = chunk.pointer("/choices/0") else {
+        return;
+    };
+
+    // 兼容部分服务端忽略 stream:true 直接返回非流式 choices[0].message
+    if let Some(msg) = choice.get("message") {
+        if let Some(r) = extract_delta_reasoning(msg) {
+            reasoning_acc.push_str(r);
+            emit_event("reasoning", r);
+        }
+        if let Some(c) = extract_delta_content(msg) {
+            content_acc.push_str(&c);
+            emit_event("delta", &c);
+        }
+        if let Some(tcs) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+            for (idx, tc) in tcs.iter().enumerate() {
+                let entry = tool_acc.entry(idx).or_default();
+                if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                    entry.id = id.to_string();
+                }
+                if let Some(name) = tc.pointer("/function/name").and_then(|v| v.as_str()) {
+                    entry.name = name.to_string();
+                }
+                if let Some(args) = tc.pointer("/function/arguments").and_then(|v| v.as_str()) {
+                    entry.arguments = args.to_string();
+                }
+            }
+        }
+        return;
+    }
+
+    let Some(delta) = choice.get("delta") else {
+        return;
+    };
+
+    if let Some(r) = extract_delta_reasoning(delta) {
+        reasoning_acc.push_str(r);
+        emit_event("reasoning", r);
+    }
+    if let Some(c) = extract_delta_content(delta) {
+        content_acc.push_str(&c);
+        emit_event("delta", &c);
+    }
+    if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+        for (fallback_idx, tc) in tcs.iter().enumerate() {
+            let idx = tc
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(fallback_idx);
+            let entry = tool_acc.entry(idx).or_default();
+            if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                if !id.is_empty() {
+                    entry.id = id.to_string();
+                }
+            }
+            if let Some(name) = tc.pointer("/function/name").and_then(|v| v.as_str()) {
+                entry.name.push_str(name);
+            }
+            if let Some(args) = tc.pointer("/function/arguments").and_then(|v| v.as_str()) {
+                entry.arguments.push_str(args);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn parse_sse_stream_text_for_test(raw_sse: &str) -> StreamedTurnOutcome {
+    let mut content = String::new();
+    let mut reasoning = String::new();
+    let mut tool_acc: BTreeMap<usize, StreamToolCallAcc> = BTreeMap::new();
+    let mut noop = |_: &str, _: &str| {};
+
+    for line in raw_sse.lines() {
+        let trimmed = line.trim();
+        let Some(payload) = trimmed.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<Value>(payload) {
+            apply_sse_json_chunk(&val, &mut content, &mut reasoning, &mut tool_acc, &mut noop);
+        }
+    }
+    let tool_calls = tool_acc
+        .into_iter()
+        .filter(|(_, tc)| !tc.name.is_empty())
+        .map(|(idx, tc)| {
+            json!({
+                "id": if tc.id.is_empty() { format!("call_{}", idx) } else { tc.id },
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": if tc.arguments.is_empty() { "{}".to_string() } else { tc.arguments },
+                }
+            })
+        })
+        .collect();
+    StreamedTurnOutcome {
+        content,
+        reasoning,
+        tool_calls,
+        cancelled: false,
+    }
+}
+
+async fn call_chat_completions_streaming(
+    client: &reqwest::Client,
+    cfg: &LoadedAgentConfig,
+    messages: &[Value],
+    with_tools: bool,
+    cancel_flag: &AtomicBool,
+    mut on_chunk: impl FnMut(&str, &str),
+) -> Result<StreamedTurnOutcome, String> {
+    let endpoint = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+    let body = build_chat_request_body(cfg, messages, with_tools, None, true);
+
+    let mut req = client
+        .post(&endpoint)
+        .header("Accept", "text/event-stream")
+        .json(&body);
+    if !cfg.api_key.is_empty() {
+        req = req.bearer_auth(&cfg.api_key);
+    }
+
+    let mut resp = req
+        .send()
+        .await
+        .map_err(|e| format!("请求 AI 模型接口失败: {}", e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        let snippet: String = text.chars().take(240).collect();
+        return Err(format!("AI 接口返回错误 ({}): {}", status.as_u16(), snippet));
+    }
+
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let mut content_acc = String::new();
+    let mut reasoning_acc = String::new();
+    let mut tool_acc: BTreeMap<usize, StreamToolCallAcc> = BTreeMap::new();
+
+    // 兼容服务端忽略 stream:true 返回 application/json 的场景
+    if content_type.contains("application/json") {
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| format!("读取模型响应失败: {}", e))?;
+        let val = serde_json::from_str::<Value>(&text)
+            .map_err(|e| format!("解析模型响应 JSON 失败: {}", e))?;
+        apply_sse_json_chunk(
+            &val,
+            &mut content_acc,
+            &mut reasoning_acc,
+            &mut tool_acc,
+            &mut on_chunk,
+        );
+    } else {
+        let mut pending_bytes: Vec<u8> = Vec::new();
+        let mut raw_fallback: Vec<u8> = Vec::new();
+        let mut saw_sse_data = false;
+
+        loop {
+            if cancel_flag.load(Ordering::SeqCst) {
+                return Ok(StreamedTurnOutcome {
+                    content: content_acc,
+                    reasoning: reasoning_acc,
+                    tool_calls: Vec::new(),
+                    cancelled: true,
+                });
+            }
+            let next_chunk = tokio::time::timeout(Duration::from_secs(90), resp.chunk())
+                .await
+                .map_err(|_| "模型流式响应超时".to_string())?
+                .map_err(|e| format!("读取流式响应失败: {}", e))?;
+            let Some(bytes) = next_chunk else {
+                break;
+            };
+            pending_bytes.extend_from_slice(&bytes);
+            if !saw_sse_data && raw_fallback.len() < 256 * 1024 {
+                raw_fallback.extend_from_slice(&bytes);
+            }
+
+            while let Some(pos) = pending_bytes.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = pending_bytes.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(&line_bytes);
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with(':') {
+                    continue;
+                }
+                if let Some(payload) = trimmed.strip_prefix("data:") {
+                    saw_sse_data = true;
+                    let payload = payload.trim();
+                    if payload == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(val) = serde_json::from_str::<Value>(payload) {
+                        apply_sse_json_chunk(
+                            &val,
+                            &mut content_acc,
+                            &mut reasoning_acc,
+                            &mut tool_acc,
+                            &mut on_chunk,
+                        );
+                    }
+                }
+            }
+        }
+
+        // 处理末尾未带换行的残留行，或无 Content-Type 但实际返回纯 JSON 的网关
+        if !pending_bytes.is_empty() {
+            let line = String::from_utf8_lossy(&pending_bytes);
+            let trimmed = line.trim();
+            if let Some(payload) = trimmed.strip_prefix("data:") {
+                saw_sse_data = true;
+                let payload = payload.trim();
+                if !payload.is_empty() && payload != "[DONE]" {
+                    if let Ok(val) = serde_json::from_str::<Value>(payload) {
+                        apply_sse_json_chunk(
+                            &val,
+                            &mut content_acc,
+                            &mut reasoning_acc,
+                            &mut tool_acc,
+                            &mut on_chunk,
+                        );
+                    }
+                }
+            }
+        }
+
+        if !saw_sse_data && !raw_fallback.is_empty() {
+            if let Ok(val) = serde_json::from_slice::<Value>(&raw_fallback) {
+                apply_sse_json_chunk(
+                    &val,
+                    &mut content_acc,
+                    &mut reasoning_acc,
+                    &mut tool_acc,
+                    &mut on_chunk,
+                );
+            }
+        }
+    }
+
+    let tool_calls = tool_acc
+        .into_iter()
+        .filter(|(_, tc)| !tc.name.is_empty())
+        .map(|(idx, tc)| {
+            json!({
+                "id": if tc.id.is_empty() { format!("call_{}", idx) } else { tc.id },
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": if tc.arguments.is_empty() { "{}".to_string() } else { tc.arguments },
+                }
+            })
+        })
+        .collect();
+
+    Ok(StreamedTurnOutcome {
+        content: content_acc,
+        reasoning: reasoning_acc,
+        tool_calls,
+        cancelled: cancel_flag.load(Ordering::SeqCst),
+    })
+}
+
 pub async fn test_agent_connection(
     cfg: &LoadedAgentConfig,
 ) -> Result<AgentConnectionTestResult, String> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
     let start = Instant::now();
     let messages = vec![json!({ "role": "user", "content": "请回复 OK" })];
-    let resp = call_chat_completions(&client, cfg, &messages, false, Some(16)).await?;
+    let resp = call_chat_completions(&client, cfg, &messages, false, Some(64)).await?;
     let model = resp
         .get("model")
         .and_then(|v| v.as_str())
@@ -1561,10 +1999,13 @@ pub async fn test_agent_connection(
 }
 
 pub async fn run_agent_chat_turn(
+    app: Option<&AppHandle>,
     db: &crate::database::Database,
     cfg: LoadedAgentConfig,
     history_before_user: Vec<Value>,
     user_text: &str,
+    stream_id: &str,
+    cancel_flag: &AtomicBool,
 ) -> Result<AgentMessageItem, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AGENT_HTTP_TIMEOUT_SECS))
@@ -1572,49 +2013,112 @@ pub async fn run_agent_chat_turn(
         .build()
         .map_err(|e| e.to_string())?;
 
+    let (today_str, fx_rate) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        (
+            assets_db::today_local().format("%Y-%m-%d").to_string(),
+            current_usd_cny_rate(&conn),
+        )
+    };
+
     let mut messages: Vec<Value> = Vec::new();
-    messages.push(json!({ "role": "system", "content": agent_system_prompt() }));
+    messages.push(json!({
+        "role": "system",
+        "content": build_agent_system_prompt(&today_str, fx_rate),
+    }));
     messages.extend(history_before_user);
     messages.push(json!({ "role": "user", "content": user_text }));
 
     let mut proposals: Vec<AgentProposal> = Vec::new();
     let mut final_text = String::new();
+    let mut was_cancelled = false;
 
     for step in 0..=MAX_TOOL_STEPS {
+        if cancel_flag.load(Ordering::SeqCst) {
+            was_cancelled = true;
+            break;
+        }
         let allow_tools = step < MAX_TOOL_STEPS;
-        let response = call_chat_completions(&client, &cfg, &messages, allow_tools, None).await?;
-        let choice_msg = response
-            .pointer("/choices/0/message")
-            .ok_or_else(|| "模型未返回 choices[0].message".to_string())?;
+        let outcome = call_chat_completions_streaming(
+            &client,
+            &cfg,
+            &messages,
+            allow_tools,
+            cancel_flag,
+            |kind, chunk_text| {
+                if let Some(handle) = app {
+                    let _ = handle.emit(
+                        "agent-stream",
+                        json!({
+                            "stream_id": stream_id,
+                            "type": kind,
+                            "text": chunk_text,
+                        }),
+                    );
+                }
+            },
+        )
+        .await?;
 
-        let content_str = choice_msg
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        if outcome.cancelled {
+            was_cancelled = true;
+            let trimmed = outcome.content.trim();
+            final_text = if trimmed.is_empty() {
+                "已停止生成。".to_string()
+            } else {
+                format!("{}\n\n*（已手动停止生成）*", trimmed)
+            };
+            break;
+        }
 
-        let tool_calls = choice_msg
-            .get("tool_calls")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let content_str = outcome.content.trim().to_string();
+        let tool_calls = outcome.tool_calls;
 
         if tool_calls.is_empty() || !allow_tools {
             final_text = if !content_str.is_empty() {
                 content_str
             } else if !proposals.is_empty() {
-                "已为您生成以下变更提案，请核对差异并确认写入。".to_string()
+                "已为您生成以下变更提案，请核对差异并点击「确认写入」。".to_string()
             } else {
                 "模型未返回文本内容。".to_string()
             };
             break;
         }
 
-        messages.push(choice_msg.clone());
+        let mut assistant_msg = Map::new();
+        assistant_msg.insert("role".to_string(), json!("assistant"));
+        assistant_msg.insert(
+            "content".to_string(),
+            if content_str.is_empty() {
+                Value::Null
+            } else {
+                json!(content_str)
+            },
+        );
+        assistant_msg.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
+        messages.push(Value::Object(assistant_msg));
+
+        // 通知前端工具执行开始
+        if let Some(handle) = app {
+            for tc in &tool_calls {
+                let fn_name = tc
+                    .pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let _ = handle.emit(
+                    "agent-stream",
+                    json!({
+                        "stream_id": stream_id,
+                        "type": "tool_start",
+                        "tool": fn_name,
+                        "label": tool_display_label(fn_name),
+                    }),
+                );
+            }
+        }
 
         // 短暂加锁执行本地只读工具与提案构造方法，绝不在 .await 期间持有锁
-        let tool_outputs: Vec<(String, String)> = {
+        let tool_outputs: Vec<(String, String, String, bool)> = {
             let conn = db.0.lock().map_err(|e| e.to_string())?;
             tool_calls
                 .iter()
@@ -1627,25 +2131,55 @@ pub async fn run_agent_chat_turn(
                     let fn_name = tc
                         .pointer("/function/name")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                        .unwrap_or("")
+                        .to_string();
                     let raw_args = tc
                         .pointer("/function/arguments")
                         .and_then(|v| v.as_str())
                         .unwrap_or("{}");
                     let args = serde_json::from_str::<Value>(raw_args).unwrap_or_else(|_| json!({}));
-                    let out = dispatch_agent_tool(&conn, fn_name, &args, &mut proposals);
-                    (call_id, serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string()))
+                    let out = dispatch_agent_tool(&conn, &fn_name, &args, &mut proposals);
+                    let ok = out.get("error").is_none();
+                    (
+                        call_id,
+                        fn_name,
+                        serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string()),
+                        ok,
+                    )
                 })
                 .collect()
         };
 
-        for (call_id, out_json) in tool_outputs {
+        for (call_id, fn_name, out_json, ok) in tool_outputs {
+            if let Some(handle) = app {
+                let _ = handle.emit(
+                    "agent-stream",
+                    json!({
+                        "stream_id": stream_id,
+                        "type": "tool_done",
+                        "tool": fn_name,
+                        "label": tool_display_label(&fn_name),
+                        "ok": ok,
+                    }),
+                );
+            }
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
                 "content": out_json,
             }));
         }
+    }
+
+    if let Some(handle) = app {
+        let _ = handle.emit(
+            "agent-stream",
+            json!({
+                "stream_id": stream_id,
+                "type": "done",
+                "cancelled": was_cancelled,
+            }),
+        );
     }
 
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -1883,5 +2417,38 @@ mod tests {
         let after_reject = reject_agent_proposal(&conn, msg.id, &p1.id).unwrap();
         assert_eq!(after_reject.proposals[0].status, "rejected");
         assert_eq!(assets_db::query_reminders(&conn).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_max_tokens_bounds_and_sse_streaming_parser() {
+        assert_eq!(normalize_max_tokens(0), 0);
+        assert_eq!(normalize_max_tokens(128_000), 128_000);
+        assert_eq!(normalize_max_tokens(2_000_000), 1_000_000);
+        assert_eq!(normalize_max_tokens(10), 256);
+
+        let cfg = LoadedAgentConfig {
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: String::new(),
+            model: "gemini-4-hydrogen-xhigh".to_string(),
+            max_tokens: 0,
+        };
+        let auto_body = build_chat_request_body(&cfg, &[], false, None, true);
+        assert!(auto_body.get("max_tokens").is_none());
+        assert_eq!(auto_body.get("stream").and_then(|v| v.as_bool()), Some(true));
+
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"先检查续费\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"本月合计 \"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"¥205.00\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"search_\",\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"assets\",\"arguments\":\"\\\"vps\\\"}\"}}]}}]}\n",
+            "data: [DONE]\n"
+        );
+        let parsed = parse_sse_stream_text_for_test(sse);
+        assert_eq!(parsed.reasoning, "先检查续费");
+        assert_eq!(parsed.content, "本月合计 ¥205.00");
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].pointer("/function/name").and_then(|v| v.as_str()), Some("search_assets"));
+        assert_eq!(parsed.tool_calls[0].pointer("/function/arguments").and_then(|v| v.as_str()), Some("{\"query\":\"vps\"}"));
     }
 }

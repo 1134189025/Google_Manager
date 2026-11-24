@@ -39,7 +39,7 @@ const SystemSettingsDialog = ({
     const [clearApiKey, setClearApiKey] = useState(false);
     const [apiKeyHint, setApiKeyHint] = useState(null);
     const [model, setModel] = useState('');
-    const [maxTokens, setMaxTokens] = useState('2048');
+    const [maxTokens, setMaxTokens] = useState('16384');
     const [testingAi, setTestingAi] = useState(false);
     const [savingAi, setSavingAi] = useState(false);
     const [testResult, setTestResult] = useState(null);
@@ -63,7 +63,11 @@ const SystemSettingsDialog = ({
             if (aiRes.success && aiRes.data) {
                 setBaseUrl(aiRes.data.baseUrl || '');
                 setModel(aiRes.data.model || '');
-                setMaxTokens(String(aiRes.data.maxTokens || 2048));
+                setMaxTokens(
+                    aiRes.data.maxTokens === 0
+                        ? '0'
+                        : String(aiRes.data.maxTokens || 16384),
+                );
                 setApiKeyHint(aiRes.data.apiKeyHint || null);
                 setApiKey('');
                 setClearApiKey(false);
@@ -102,12 +106,15 @@ const SystemSettingsDialog = ({
         e.preventDefault();
         setSavingAi(true);
         try {
+            const trimmedMax = String(maxTokens ?? '').trim();
+            const parsedMax = trimmedMax === '' ? 0 : Number.parseInt(trimmedMax, 10);
+            const normalizedMax = Number.isFinite(parsedMax) && parsedMax >= 0 ? parsedMax : 16384;
             const res = await api.saveAgentSettings({
                 baseUrl: baseUrl.trim(),
                 apiKey: apiKey.trim() || null,
                 clearApiKey,
                 model: model.trim(),
-                maxTokens: Number.parseInt(maxTokens, 10) || 2048,
+                maxTokens: normalizedMax,
             });
             if (!res.success || !res.data) {
                 onNotify?.(res.message || '保存 AI 设置失败', 'error');
@@ -115,7 +122,11 @@ const SystemSettingsDialog = ({
             }
             setBaseUrl(res.data.baseUrl || '');
             setModel(res.data.model || '');
-            setMaxTokens(String(res.data.maxTokens || 2048));
+            setMaxTokens(
+                res.data.maxTokens === 0
+                    ? '0'
+                    : String(res.data.maxTokens || 16384),
+            );
             setApiKeyHint(res.data.apiKeyHint || null);
             setApiKey('');
             setClearApiKey(false);
@@ -258,15 +269,41 @@ const SystemSettingsDialog = ({
                                     />
                                 </label>
                                 <label className="block space-y-1">
-                                    <span className="text-[var(--text-secondary)]">最大输出 Token (256-16384)</span>
+                                    <span className="text-[var(--text-secondary)]">
+                                        最大输出 Token（0 = 自动不限，最高 1,000,000）
+                                    </span>
                                     <input
                                         type="number"
-                                        min={256}
-                                        max={16384}
+                                        min={0}
+                                        max={1000000}
                                         className="gm-input w-full font-mono"
                                         value={maxTokens}
                                         onChange={e => setMaxTokens(e.target.value)}
+                                        placeholder="0 表示自动"
                                     />
+                                    <div className="flex flex-wrap gap-1 pt-1">
+                                        {[
+                                            { label: '自动', val: '0' },
+                                            { label: '8K', val: '8192' },
+                                            { label: '32K', val: '32768' },
+                                            { label: '64K', val: '65536' },
+                                            { label: '128K', val: '128000' },
+                                            { label: '256K', val: '256000' },
+                                        ].map(preset => (
+                                            <button
+                                                key={preset.val}
+                                                type="button"
+                                                onClick={() => setMaxTokens(preset.val)}
+                                                className={`px-2 py-0.5 rounded text-[10.5px] font-mono border transition-colors cursor-pointer ${
+                                                    String(maxTokens) === preset.val
+                                                        ? 'bg-[var(--primary-light)] text-[var(--primary)] border-[var(--primary)]'
+                                                        : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border)] hover:text-[var(--text-primary)]'
+                                                }`}
+                                            >
+                                                {preset.label}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </label>
                             </div>
                             <div className="space-y-1">

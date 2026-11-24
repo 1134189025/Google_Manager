@@ -34,6 +34,7 @@ pub fn run() {
         .manage(sms::SmsService::new())
         .manage(ai_quota::AiOAuthManager::new())
         .manage(ssh_client::SshSessionManager::new())
+        .manage(agent::AgentStreamManager::new())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -114,6 +115,8 @@ pub fn run() {
             asset_commands::create_ai_subscription,
             asset_commands::update_ai_subscription,
             asset_commands::delete_ai_subscription,
+            asset_commands::get_gemini_oauth_config,
+            asset_commands::save_gemini_oauth_config,
             asset_commands::start_ai_oauth,
             asset_commands::get_ai_oauth_status,
             asset_commands::complete_ai_oauth,
@@ -145,6 +148,7 @@ pub fn run() {
             asset_commands::get_agent_messages,
             asset_commands::clear_agent_messages,
             asset_commands::send_agent_message,
+            asset_commands::cancel_agent_stream,
             asset_commands::apply_agent_proposal,
             asset_commands::reject_agent_proposal,
         ])

@@ -24,6 +24,7 @@ import {
     clampDateInputValue,
     convertToCny,
     daysUntilDay,
+    finalizeDateInputValue,
     formatCnyAmount,
     formatCycleLabel,
     formatDaysBadge,
@@ -834,6 +835,10 @@ const DomainsView = ({ servers = [], fxRate = DEFAULT_USD_CNY_RATE, onNotify, on
                                         onChange={(e) => setDomainForm(prev => ({
                                             ...prev,
                                             expiresAt: clampDateInputValue(e.target.value),
+                                        }))}
+                                        onBlur={(e) => setDomainForm(prev => ({
+                                            ...prev,
+                                            expiresAt: finalizeDateInputValue(e.target.value),
                                         }))}
                                     />
                                 </div>

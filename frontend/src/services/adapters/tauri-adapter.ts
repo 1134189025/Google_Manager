@@ -43,6 +43,8 @@ import type {
   OAuthStartInfo,
   OAuthStatusInfo,
   AntigravityQuotaResult,
+  GeminiOAuthConfigView,
+  GeminiOAuthConfigInput,
   ServerItem,
   ServerInput,
   AppMonitorSettings,
@@ -568,6 +570,16 @@ export class TauriAdapter implements ApiAdapter {
     await this.invokeCommand('delete_ai_subscription', { id });
   }
 
+  async getGeminiOauthConfig(): Promise<GeminiOAuthConfigView> {
+    const result = await this.invokeCommand<any>('get_gemini_oauth_config');
+    return snakeToCamel<GeminiOAuthConfigView>(result || {});
+  }
+
+  async saveGeminiOauthConfig(config: GeminiOAuthConfigInput): Promise<GeminiOAuthConfigView> {
+    const result = await this.invokeCommand<any>('save_gemini_oauth_config', { config });
+    return snakeToCamel<GeminiOAuthConfigView>(result || {});
+  }
+
   async startAiOauth(provider: AiOAuthProviderId, subscriptionId: number): Promise<OAuthStartInfo> {
     const result = await this.invokeCommand<any>('start_ai_oauth', { provider, subscriptionId });
     return snakeToCamel<OAuthStartInfo>(result);
@@ -740,6 +752,12 @@ export class TauriAdapter implements ApiAdapter {
   async sendAgentMessage(message: string): Promise<AgentMessageItem[]> {
     const list = await this.invokeCommand<any[]>('send_agent_message', { message });
     return (Array.isArray(list) ? list : []).map(item => snakeToCamel<AgentMessageItem>(item));
+  }
+
+  async cancelAgentStream(streamId?: string | null): Promise<boolean> {
+    return await this.invokeCommand<boolean>('cancel_agent_stream', {
+      streamId: streamId ?? null,
+    });
   }
 
   async applyAgentProposal(messageId: number, proposalId: string): Promise<AgentMessageItem> {

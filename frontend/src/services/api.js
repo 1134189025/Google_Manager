@@ -752,6 +752,26 @@ const api = {
         }
     },
 
+    async getGeminiOauthConfig() {
+        try {
+            const data = await adapter.getGeminiOauthConfig();
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to get Gemini OAuth config:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async saveGeminiOauthConfig(config) {
+        try {
+            const data = await adapter.saveGeminiOauthConfig(config);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to save Gemini OAuth config:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
     async startAiOauth(provider, subscriptionId) {
         try {
             const data = await adapter.startAiOauth(provider, subscriptionId);
@@ -1058,6 +1078,16 @@ const api = {
             return { success: true, data };
         } catch (error) {
             console.error('Failed to send agent message:', error);
+            return { success: false, message: getErrorMessage(error) };
+        }
+    },
+
+    async cancelAgentStream(streamId = null) {
+        try {
+            const data = await adapter.cancelAgentStream(streamId);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Failed to cancel agent stream:', error);
             return { success: false, message: getErrorMessage(error) };
         }
     },

@@ -36,6 +36,7 @@ import {
     clampDateInputValue,
     convertToCny,
     daysUntilDay,
+    finalizeDateInputValue,
     formatCnyAmount,
     formatCycleLabel,
     formatDaysBadge,
@@ -1182,6 +1183,10 @@ const ServersView = ({
                                             onChange={e => setForm(prev => ({
                                                 ...prev,
                                                 expiresAt: clampDateInputValue(e.target.value),
+                                            }))}
+                                            onBlur={e => setForm(prev => ({
+                                                ...prev,
+                                                expiresAt: finalizeDateInputValue(e.target.value),
                                             }))}
                                         />
                                     </label>

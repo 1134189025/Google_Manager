@@ -321,6 +321,12 @@ describe('Phase 4: ServersView & TerminalView', () => {
         const dateInput = dialog.querySelector('input[type="date"]');
         expect(dateInput).toHaveAttribute('min', '1970-01-01');
         expect(dateInput).toHaveAttribute('max', '2099-12-31');
+        // 模拟小键盘逐位输入 2 -> 0 -> 2 -> 6，过程不应被强制锁回 1970
+        fireEvent.change(dateInput, { target: { value: '0002-12-04' } });
+        expect(dateInput).toHaveValue('0002-12-04');
+        fireEvent.change(dateInput, { target: { value: '2026-12-04' } });
+        expect(dateInput).toHaveValue('2026-12-04');
+        // 超过 4 位的异常年份会被截断
         fireEvent.change(dateInput, { target: { value: '202612-12-04' } });
         expect(dateInput).toHaveValue('2026-12-04');
 

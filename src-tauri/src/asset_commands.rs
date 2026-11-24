@@ -1,8 +1,10 @@
 use crate::agent::{
     self, AgentConnectionTestResult, AgentMessageItem, AgentSettingsInput, AgentSettingsView,
+    AgentStreamManager,
 };
 use crate::ai_quota::{
-    self, AiOAuthManager, AntigravityQuotaResult, OAuthStartInfo, OAuthStatusInfo,
+    self, AiOAuthManager, AntigravityQuotaResult, GeminiOAuthConfigInput, GeminiOAuthConfigView,
+    OAuthStartInfo, OAuthStatusInfo,
 };
 use crate::assets_db::{
     self, AiSubscription, AiSubscriptionInput, AppMonitorSettings, CloudflareConnectionInput,
@@ -498,12 +500,40 @@ pub fn delete_ai_subscription(db: State<Database>, id: i64) -> Result<(), String
 }
 
 #[tauri::command]
+pub fn get_gemini_oauth_config(db: State<Database>) -> Result<GeminiOAuthConfigView, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(ai_quota::get_gemini_oauth_config(&conn))
+}
+
+#[tauri::command]
+pub fn save_gemini_oauth_config(
+    db: State<Database>,
+    config: GeminiOAuthConfigInput,
+) -> Result<GeminiOAuthConfigView, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    ai_quota::save_gemini_oauth_config(&conn, &config)
+}
+
+#[tauri::command]
 pub async fn start_ai_oauth(
+    db: State<'_, Database>,
     oauth: State<'_, AiOAuthManager>,
     provider: String,
     subscription_id: i64,
 ) -> Result<OAuthStartInfo, String> {
-    let info = ai_quota::start_oauth_session(&oauth, &provider, subscription_id).await?;
+    let gemini_override = if provider == "gemini" {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        ai_quota::load_gemini_oauth_override(&conn)
+    } else {
+        None
+    };
+    let info = ai_quota::start_oauth_session(
+        &oauth,
+        &provider,
+        subscription_id,
+        gemini_override.as_ref(),
+    )
+    .await?;
     open_external_url(info.authorize_url.clone())?;
     Ok(info)
 }
@@ -554,11 +584,18 @@ pub async fn refresh_ai_subscription_quota(
     db: State<'_, Database>,
     id: i64,
 ) -> Result<AiSubscription, String> {
-    let (provider, tokens) = {
+    let (provider, tokens, gemini_override) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        assets_db::get_ai_oauth_credentials(&conn, id)?
+        let (provider, tokens) = assets_db::get_ai_oauth_credentials(&conn, id)?;
+        let ov = if provider == "gemini" {
+            ai_quota::load_gemini_oauth_override(&conn)
+        } else {
+            None
+        };
+        (provider, tokens, ov)
     };
-    let (updated_tokens, usage_res) = ai_quota::fetch_provider_usage(&provider, tokens).await;
+    let (updated_tokens, usage_res) =
+        ai_quota::fetch_provider_usage(&provider, tokens, gemini_override.as_ref()).await;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     match usage_res {
         Ok(ref usage) => assets_db::save_ai_usage_result(&conn, id, &updated_tokens, Ok(usage)),
@@ -877,21 +914,57 @@ pub fn clear_agent_messages(db: State<Database>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn send_agent_message(
+    app: AppHandle,
     db: State<'_, Database>,
+    streams: State<'_, AgentStreamManager>,
     message: String,
 ) -> Result<Vec<AgentMessageItem>, String> {
+    use tauri::Emitter;
+
     let trimmed = message.trim().to_string();
-    if trimmed.is_empty() || trimmed.chars().count() > 4000 {
-        return Err("提问内容不能为空且不能超过 4000 个字符".to_string());
+    if trimmed.is_empty() || trimmed.chars().count() > 32000 {
+        return Err("提问内容不能为空且不能超过 32000 个字符".to_string());
     }
-    let (cfg, history) = {
+    let (cfg, history, user_msg) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         let cfg = agent::load_agent_config(&conn)?;
         let history = agent::recent_history_messages(&conn)?;
-        agent::insert_agent_message(&conn, "user", &trimmed, &[])?;
-        (cfg, history)
+        let user_msg = agent::insert_agent_message(&conn, "user", &trimmed, &[])?;
+        (cfg, history, user_msg)
     };
-    if let Err(err) = agent::run_agent_chat_turn(&db, cfg, history, &trimmed).await {
+
+    let stream_id = uuid::Uuid::new_v4().to_string();
+    let cancel_flag = streams.register(&stream_id);
+    let _ = app.emit(
+        "agent-stream",
+        serde_json::json!({
+            "stream_id": stream_id,
+            "type": "start",
+            "user_message": user_msg,
+        }),
+    );
+
+    let turn_res = agent::run_agent_chat_turn(
+        Some(&app),
+        &db,
+        cfg,
+        history,
+        &trimmed,
+        &stream_id,
+        &cancel_flag,
+    )
+    .await;
+    streams.remove(&stream_id);
+
+    if let Err(err) = turn_res {
+        let _ = app.emit(
+            "agent-stream",
+            serde_json::json!({
+                "stream_id": stream_id,
+                "type": "error",
+                "error": err,
+            }),
+        );
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         let _ = agent::insert_agent_message(
             &conn,
@@ -902,6 +975,14 @@ pub async fn send_agent_message(
     }
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     agent::query_agent_messages(&conn)
+}
+
+#[tauri::command]
+pub fn cancel_agent_stream(
+    streams: State<AgentStreamManager>,
+    stream_id: Option<String>,
+) -> Result<bool, String> {
+    Ok(streams.cancel(stream_id.as_deref()))
 }
 
 #[tauri::command]

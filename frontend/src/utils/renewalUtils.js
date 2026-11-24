@@ -11,8 +11,9 @@ export const DATE_INPUT_MAX = '2099-12-31';
 export const DEFAULT_USD_CNY_RATE = 7.25;
 
 /**
- * 约束原生 <input type="date"> 返回值：截断 Chromium/WebView2 允许输入的 5~6 位年份为 4 位，
- * 并将年份限制在 1970..2099 合理区间内，避免出现 202612-12-04 这类异常年份。
+ * 输入过程中约束原生 <input type="date"> 返回值：
+ * - 仅在年份位数超过 4 位时截断（防止 Chromium/WebView2 允许输入 5~6 位异常年份，如 202612-12-04）
+ * - 输入过程中绝不把 0002 / 0020 / 0202 这类中间态钳制到 1970，否则会重置小键盘/主键盘年份输入缓冲
  */
 export function clampDateInputValue(value) {
     if (typeof value !== 'string') return '';
@@ -20,13 +21,24 @@ export function clampDateInputValue(value) {
     if (!trimmed) return '';
     const match = trimmed.match(/^(\d+)-(\d{2})-(\d{2})$/);
     if (!match) return trimmed;
-    let yearStr = match[1];
-    if (yearStr.length > 4) {
-        yearStr = yearStr.slice(0, 4);
+    const yearStr = match[1];
+    if (yearStr.length <= 4) {
+        return trimmed;
     }
-    const yearNum = Number(yearStr);
+    return `${yearStr.slice(0, 4)}-${match[2]}-${match[3]}`;
+}
+
+/**
+ * 失焦时对已完成输入的日期做年份边界校验（1970..2099）
+ */
+export function finalizeDateInputValue(value) {
+    const normalized = clampDateInputValue(value);
+    if (!normalized) return '';
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return normalized;
+    const yearNum = Number(match[1]);
     if (!Number.isFinite(yearNum)) return '';
-    const clampedYear = yearStr.length === 4 ? Math.min(2099, Math.max(1970, yearNum)) : yearNum;
+    const clampedYear = Math.min(2099, Math.max(1970, yearNum));
     return `${String(clampedYear).padStart(4, '0')}-${match[2]}-${match[3]}`;
 }
 

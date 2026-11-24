@@ -7,6 +7,7 @@ import {
     computeUnifiedCnySpend,
     convertToCny,
     daysUntilDay,
+    finalizeDateInputValue,
     shiftDay,
     buildRenewalsIcs,
 } from '../utils/renewalUtils';
@@ -100,8 +101,12 @@ describe('Phase 1: renewalUtils & RenewalsView & SideNav', () => {
     it('renewalUtils 正确处理日历日、6 位年份截断、人民币实时换算与 ICS 生成', () => {
         expect(calendarDay('2026-11-24')).toBe('2026-11-24');
         expect(calendarDay('2026-02-30')).toBe('');
+        // 输入过程中保留 0002 / 0020 等小键盘中间态，绝不提前锁回 1970；超 4 位年份即时截断
+        expect(clampDateInputValue('0002-12-06')).toBe('0002-12-06');
         expect(clampDateInputValue('202612-12-04')).toBe('2026-12-04');
-        expect(clampDateInputValue('2999-05-01')).toBe('2099-05-01');
+        // 失焦时才做 1970..2099 范围钳制
+        expect(finalizeDateInputValue('0002-12-06')).toBe('1970-12-06');
+        expect(finalizeDateInputValue('2999-05-01')).toBe('2099-05-01');
         expect(convertToCny(10, 'USD', 7.2)).toBe(72);
         expect(convertToCny(35, 'CNY', 7.2)).toBe(35);
         const unified = computeUnifiedCnySpend(

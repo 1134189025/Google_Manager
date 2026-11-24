@@ -2,17 +2,286 @@ use base64::engine::general_purpose::{URL_SAFE_NO_PAD};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use rand::RngCore;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
 
+use crate::database;
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const OAUTH_SESSION_TIMEOUT: Duration = Duration::from_secs(300);
+
+pub const SETTING_GEMINI_CLIENT_ID: &str = "oauth.gemini.client_id";
+pub const SETTING_GEMINI_CLIENT_SECRET: &str = "oauth.gemini.client_secret";
+
+#[derive(Debug, Clone)]
+pub struct GeminiOAuthOverride {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeminiOAuthConfigView {
+    pub configured: bool,
+    pub source: String,
+    pub client_id_hint: Option<String>,
+    pub has_client_secret: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeminiOAuthConfigInput {
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub raw_json: Option<String>,
+    #[serde(default)]
+    pub clear: Option<bool>,
+}
+
+fn mask_client_id(id: &str) -> String {
+    let chars: Vec<char> = id.trim().chars().collect();
+    if chars.len() <= 12 {
+        return id.trim().to_string();
+    }
+    let head: String = chars.iter().take(6).collect();
+    let tail: String = chars[chars.len() - 6..].iter().collect();
+    format!("{}…{}", head, tail)
+}
+
+/// 解析 Google Cloud Console 下载的 OAuth 客户端 JSON 或扁平 JSON
+pub fn parse_gemini_oauth_json(raw: &str) -> Result<(String, Option<String>), String> {
+    let val: serde_json::Value =
+        serde_json::from_str(raw.trim()).map_err(|_| "OAuth 配置不是有效的 JSON 格式".to_string())?;
+    let section = val
+        .get("installed")
+        .or_else(|| val.get("web"))
+        .unwrap_or(&val);
+    let client_id = section
+        .get("client_id")
+        .or_else(|| section.get("clientId"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "JSON 中缺少 client_id 字段".to_string())?
+        .to_string();
+    let client_secret = section
+        .get("client_secret")
+        .or_else(|| section.get("clientSecret"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Ok((client_id, client_secret))
+}
+
+fn extract_js_string_const(source: &str, name: &str) -> Option<String> {
+    let idx = source.find(name)?;
+    let rest = &source[idx + name.len()..];
+    let eq_idx = rest.find('=')?;
+    let after_eq = rest[eq_idx + 1..].trim_start();
+    let quote = after_eq.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let inner = &after_eq[1..];
+    let end = inner.find(quote)?;
+    let val = inner[..end].trim();
+    (!val.is_empty()).then(|| val.to_string())
+}
+
+fn candidate_gemini_cli_oauth_files() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let rel = Path::new("@google")
+        .join("gemini-cli-core")
+        .join("dist")
+        .join("src")
+        .join("code_assist")
+        .join("oauth2.js");
+
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        paths.push(PathBuf::from(&appdata).join("npm").join("node_modules").join(&rel));
+        paths.push(
+            PathBuf::from(&appdata)
+                .join("npm")
+                .join("node_modules")
+                .join("@google")
+                .join("gemini-cli")
+                .join("node_modules")
+                .join(&rel),
+        );
+    }
+    if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
+        paths.push(
+            PathBuf::from(&local_app)
+                .join("pnpm")
+                .join("global")
+                .join("5")
+                .join("node_modules")
+                .join(&rel),
+        );
+    }
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".npm-global").join("lib").join("node_modules").join(&rel));
+        paths.push(home.join(".pnpm-global").join("node_modules").join(&rel));
+    }
+    paths.push(PathBuf::from("/opt/homebrew/lib/node_modules").join(&rel));
+    paths.push(PathBuf::from("/usr/local/lib/node_modules").join(&rel));
+    paths
+}
+
+fn discover_local_gemini_cli_oauth() -> Option<GeminiOAuthOverride> {
+    for path in candidate_gemini_cli_oauth_files() {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(client_id) = extract_js_string_const(&content, "OAUTH_CLIENT_ID") {
+            let client_secret = extract_js_string_const(&content, "OAUTH_CLIENT_SECRET");
+            return Some(GeminiOAuthOverride {
+                client_id,
+                client_secret,
+            });
+        }
+    }
+    None
+}
+
+pub fn load_gemini_oauth_override(conn: &Connection) -> Option<GeminiOAuthOverride> {
+    let client_id = database::get_setting(conn, SETTING_GEMINI_CLIENT_ID)
+        .ok()
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let client_secret = database::get_setting(conn, SETTING_GEMINI_CLIENT_SECRET)
+        .ok()
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Some(GeminiOAuthOverride {
+        client_id,
+        client_secret,
+    })
+}
+
+fn resolve_gemini_credentials(
+    db_override: Option<&GeminiOAuthOverride>,
+) -> Option<(String, Option<String>, &'static str)> {
+    if let Some(ov) = db_override {
+        let id = ov.client_id.trim();
+        if !id.is_empty() {
+            return Some((
+                id.to_string(),
+                ov.client_secret
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                "本地设置",
+            ));
+        }
+    }
+    if let Some(env_id) = resolve_oauth_env("GOOGLE_MANAGER_GEMINI_CLIENT_ID", None) {
+        let env_secret = resolve_oauth_env("GOOGLE_MANAGER_GEMINI_CLIENT_SECRET", None);
+        return Some((env_id, env_secret, "环境变量"));
+    }
+    if let Some(built_id) = option_env!("GOOGLE_MANAGER_GEMINI_CLIENT_ID")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let built_secret = option_env!("GOOGLE_MANAGER_GEMINI_CLIENT_SECRET")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        return Some((built_id.to_string(), built_secret, "内置构建配置"));
+    }
+    if let Some(cli) = discover_local_gemini_cli_oauth() {
+        return Some((cli.client_id, cli.client_secret, "本机 Gemini CLI"));
+    }
+    None
+}
+
+pub fn get_gemini_oauth_config(conn: &Connection) -> GeminiOAuthConfigView {
+    let db_override = load_gemini_oauth_override(conn);
+    if let Some((cid, csec, source)) = resolve_gemini_credentials(db_override.as_ref()) {
+        GeminiOAuthConfigView {
+            configured: true,
+            source: source.to_string(),
+            client_id_hint: Some(mask_client_id(&cid)),
+            has_client_secret: csec.is_some(),
+        }
+    } else {
+        GeminiOAuthConfigView {
+            configured: false,
+            source: "未配置".to_string(),
+            client_id_hint: None,
+            has_client_secret: false,
+        }
+    }
+}
+
+pub fn save_gemini_oauth_config(
+    conn: &Connection,
+    input: &GeminiOAuthConfigInput,
+) -> Result<GeminiOAuthConfigView, String> {
+    if input.clear == Some(true) {
+        database::set_setting(conn, SETTING_GEMINI_CLIENT_ID, None)?;
+        database::set_setting(conn, SETTING_GEMINI_CLIENT_SECRET, None)?;
+        return Ok(get_gemini_oauth_config(conn));
+    }
+
+    let (client_id, client_secret) = if let Some(ref raw) = input.raw_json {
+        if !raw.trim().is_empty() {
+            parse_gemini_oauth_json(raw)?
+        } else {
+            let id = input
+                .client_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "请填写 Gemini OAuth Client ID 或粘贴 Google OAuth JSON".to_string())?
+                .to_string();
+            let sec = input
+                .client_secret
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            (id, sec)
+        }
+    } else {
+        let id = input
+            .client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "请填写 Gemini OAuth Client ID 或粘贴 Google OAuth JSON".to_string())?
+            .to_string();
+        let sec = input
+            .client_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        (id, sec)
+    };
+
+    database::set_setting(conn, SETTING_GEMINI_CLIENT_ID, Some(&client_id))?;
+    if let Some(ref sec) = client_secret {
+        database::set_setting(conn, SETTING_GEMINI_CLIENT_SECRET, Some(sec))?;
+    } else if input.client_secret.is_some() {
+        database::set_setting(conn, SETTING_GEMINI_CLIENT_SECRET, None)?;
+    }
+
+    Ok(get_gemini_oauth_config(conn))
+}
 
 #[derive(Clone)]
 pub struct AiOAuthProvider {
@@ -42,7 +311,15 @@ fn resolve_oauth_env(name: &str, compile_time: Option<&'static str>) -> Option<S
         })
 }
 
+#[allow(dead_code)]
 pub fn get_provider(id: &str) -> Result<AiOAuthProvider, String> {
+    get_provider_with_override(id, None)
+}
+
+pub fn get_provider_with_override(
+    id: &str,
+    gemini_override: Option<&GeminiOAuthOverride>,
+) -> Result<AiOAuthProvider, String> {
     match id {
         "openai" => Ok(AiOAuthProvider {
             mode: "loopback",
@@ -84,17 +361,10 @@ pub fn get_provider(id: &str) -> Result<AiOAuthProvider, String> {
             profile_url: None,
         }),
         "gemini" => {
-            let client_id = resolve_oauth_env(
-                "GOOGLE_MANAGER_GEMINI_CLIENT_ID",
-                option_env!("GOOGLE_MANAGER_GEMINI_CLIENT_ID"),
-            )
-            .ok_or_else(|| {
-                "Gemini OAuth 未配置凭据：请设置环境变量 GOOGLE_MANAGER_GEMINI_CLIENT_ID（及可选 GOOGLE_MANAGER_GEMINI_CLIENT_SECRET），或使用 Antigravity CLI 读取 Gemini 额度".to_string()
-            })?;
-            let client_secret = resolve_oauth_env(
-                "GOOGLE_MANAGER_GEMINI_CLIENT_SECRET",
-                option_env!("GOOGLE_MANAGER_GEMINI_CLIENT_SECRET"),
-            );
+            let (client_id, client_secret, _source) = resolve_gemini_credentials(gemini_override)
+                .ok_or_else(|| {
+                    "GEMINI_OAUTH_NOT_CONFIGURED:Gemini OAuth 尚未配置凭据。请点击「Gemini OAuth 配置」粘贴 Client ID / JSON，或在发布仓库 Secrets 中设置 GOOGLE_MANAGER_GEMINI_CLIENT_ID。".to_string()
+                })?;
             Ok(AiOAuthProvider {
                 mode: "loopback",
                 client_id,
@@ -653,6 +923,7 @@ pub struct OAuthStatusInfo {
 
 struct OAuthSession {
     provider: String,
+    resolved_provider: AiOAuthProvider,
     subscription_id: i64,
     state: String,
     verifier: String,
@@ -893,12 +1164,12 @@ async fn exchange_token(
 
 async fn complete_code_exchange(
     provider_id: &str,
+    p: &AiOAuthProvider,
     redirect_uri: &str,
     verifier: &str,
     code: &str,
     state: &str,
 ) -> Result<StoredOAuthTokens, String> {
-    let p = get_provider(provider_id)?;
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
@@ -916,7 +1187,7 @@ async fn complete_code_exchange(
         params.push(("state", state.to_string()));
     }
 
-    let tokens = exchange_token(&client, &p, params).await?;
+    let tokens = exchange_token(&client, p, params).await?;
     let access_token = tokens["access_token"].as_str().unwrap_or("").to_string();
     let refresh_token = tokens
         .get("refresh_token")
@@ -973,8 +1244,9 @@ pub async fn start_oauth_session(
     manager: &AiOAuthManager,
     provider_id: &str,
     subscription_id: i64,
+    gemini_override: Option<&GeminiOAuthOverride>,
 ) -> Result<OAuthStartInfo, String> {
-    let p = get_provider(provider_id)?;
+    let p = get_provider_with_override(provider_id, gemini_override)?;
     let session_id = uuid::Uuid::new_v4().to_string();
     let state = random_base64url(24);
     let verifier = random_base64url(32);
@@ -1032,6 +1304,7 @@ pub async fn start_oauth_session(
             session_id.clone(),
             OAuthSession {
                 provider: provider_id.to_string(),
+                resolved_provider: p.clone(),
                 subscription_id,
                 state: state.clone(),
                 verifier: verifier.clone(),
@@ -1051,6 +1324,7 @@ pub async fn start_oauth_session(
         let state_for_task = state.clone();
         let verifier_for_task = verifier.clone();
         let prov_for_task = provider_id.to_string();
+        let resolved_for_task = p.clone();
 
         tauri::async_runtime::spawn(async move {
             let accept_res = tokio::time::timeout(OAUTH_SESSION_TIMEOUT, listener.accept()).await;
@@ -1092,6 +1366,7 @@ pub async fn start_oauth_session(
 
                     match complete_code_exchange(
                         &prov_for_task,
+                        &resolved_for_task,
                         &redir_for_task,
                         &verifier_for_task,
                         &code,
@@ -1146,7 +1421,7 @@ pub async fn complete_oauth_manual(
     session_id: &str,
     callback_input: &str,
 ) -> Result<(i64, String, StoredOAuthTokens), String> {
-    let (provider_id, subscription_id, redirect_uri, verifier, state) = {
+    let (provider_id, resolved_provider, subscription_id, redirect_uri, verifier, state) = {
         let mut guard = manager.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let sess = guard
             .get_mut(session_id)
@@ -1157,6 +1432,7 @@ pub async fn complete_oauth_manual(
         sess.status = "exchanging".to_string();
         (
             sess.provider.clone(),
+            sess.resolved_provider.clone(),
             sess.subscription_id,
             sess.redirect_uri.clone(),
             sess.verifier.clone(),
@@ -1175,7 +1451,7 @@ pub async fn complete_oauth_manual(
         }
     };
 
-    match complete_code_exchange(&provider_id, &redirect_uri, &verifier, &code, &st).await {
+    match complete_code_exchange(&provider_id, &resolved_provider, &redirect_uri, &verifier, &code, &st).await {
         Ok(tokens) => {
             let mut guard = manager.sessions.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(s) = guard.get_mut(session_id) {
@@ -1250,6 +1526,7 @@ async fn send_usage_request(
 async fn refresh_oauth_tokens(
     client: &reqwest::Client,
     provider_id: &str,
+    p: &AiOAuthProvider,
     current: &StoredOAuthTokens,
 ) -> Result<StoredOAuthTokens, String> {
     let refresh_token = current
@@ -1257,10 +1534,9 @@ async fn refresh_oauth_tokens(
         .as_deref()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "登录已过期，请重新授权".to_string())?;
-    let p = get_provider(provider_id)?;
     let new_tokens = exchange_token(
         client,
-        &p,
+        p,
         vec![
             ("grant_type", "refresh_token".to_string()),
             ("client_id", p.client_id.to_string()),
@@ -1302,8 +1578,9 @@ async fn refresh_oauth_tokens(
 pub async fn fetch_provider_usage(
     provider_id: &str,
     tokens: StoredOAuthTokens,
+    gemini_override: Option<&GeminiOAuthOverride>,
 ) -> (StoredOAuthTokens, Result<NormalizedUsage, String>) {
-    let p = match get_provider(provider_id) {
+    let p = match get_provider_with_override(provider_id, gemini_override) {
         Ok(p) => p,
         Err(e) => return (tokens, Err(e)),
     };
@@ -1322,7 +1599,7 @@ pub async fn fetch_provider_usage(
         .unwrap_or(true);
 
     if needs_refresh && current.refresh_token.is_some() {
-        match refresh_oauth_tokens(&client, provider_id, &current).await {
+        match refresh_oauth_tokens(&client, provider_id, &p, &current).await {
             Ok(updated) => current = updated,
             Err(e) => return (current, Err(e)),
         }
@@ -1350,7 +1627,7 @@ pub async fn fetch_provider_usage(
         {
             Ok(v) => Ok(v),
             Err((401, _)) if current.refresh_token.is_some() => {
-                match refresh_oauth_tokens(&client, provider_id, &current).await {
+                match refresh_oauth_tokens(&client, provider_id, &p, &current).await {
                     Ok(updated) => {
                         current = updated;
                         send_usage_request(
@@ -1444,7 +1721,7 @@ pub async fn fetch_provider_usage(
             {
                 Ok(v) => Ok(v),
                 Err((401, _)) if current.refresh_token.is_some() => {
-                    match refresh_oauth_tokens(&client, provider_id, &current).await {
+                    match refresh_oauth_tokens(&client, provider_id, &p, &current).await {
                         Ok(updated) => {
                             current = updated;
                             send_usage_request(
@@ -1497,7 +1774,7 @@ pub async fn fetch_provider_usage(
         {
             Ok(v) => Ok(v),
             Err((401, _)) if current.refresh_token.is_some() => {
-                match refresh_oauth_tokens(&client, provider_id, &current).await {
+                match refresh_oauth_tokens(&client, provider_id, &p, &current).await {
                     Ok(updated) => {
                         current = updated;
                         send_usage_request(
@@ -1623,7 +1900,53 @@ mod tests {
         )
         .is_err());
 
-        // 未配置环境变量时应返回明确提示且代码中无硬编码 Gemini OAuth 凭据
-        assert!(get_provider("gemini").is_err() || std::env::var("GOOGLE_MANAGER_GEMINI_CLIENT_ID").is_ok());
+        // 支持解析 Google Cloud Desktop OAuth JSON 与本地配置覆盖
+        let (gid, gsec) = parse_gemini_oauth_json(
+            r#"{"installed":{"client_id":"demo-client-id.apps.googleusercontent.com","client_secret":"demo-secret"}}"#,
+        )
+        .unwrap();
+        assert_eq!(gid, "demo-client-id.apps.googleusercontent.com");
+        assert_eq!(gsec.as_deref(), Some("demo-secret"));
+
+        let ov = GeminiOAuthOverride {
+            client_id: gid,
+            client_secret: gsec,
+        };
+        let gp = get_provider_with_override("gemini", Some(&ov)).unwrap();
+        assert_eq!(gp.client_id, "demo-client-id.apps.googleusercontent.com");
+        assert_eq!(gp.client_secret.as_deref(), Some("demo-secret"));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = crate::database::init_database_at_for_test(
+            &tmp.path().join("data.db"),
+            &tmp.path().join("backups"),
+        )
+        .unwrap();
+        let saved = save_gemini_oauth_config(
+            &conn,
+            &GeminiOAuthConfigInput {
+                client_id: Some("1234567890-abcdef.apps.googleusercontent.com".to_string()),
+                client_secret: Some("test-local-sec".to_string()),
+                raw_json: None,
+                clear: None,
+            },
+        )
+        .unwrap();
+        assert!(saved.configured);
+        assert_eq!(saved.source, "本地设置");
+        assert!(saved.has_client_secret);
+
+        let cleared = save_gemini_oauth_config(
+            &conn,
+            &GeminiOAuthConfigInput {
+                client_id: None,
+                client_secret: None,
+                raw_json: None,
+                clear: Some(true),
+            },
+        )
+        .unwrap();
+        assert!(load_gemini_oauth_override(&conn).is_none());
+        let _ = cleared;
     }
 }

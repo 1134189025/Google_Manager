@@ -26,6 +26,7 @@ import {
     computeUnifiedCnySpend,
     convertToCny,
     daysUntilDay,
+    finalizeDateInputValue,
     formatCnyAmount,
     formatCycleLabel,
     formatDaysBadge,
@@ -650,6 +651,10 @@ const RenewalsView = ({ fxInfo: externalFxInfo, onRefreshFxRate, onNotify, onNav
                                         onChange={(e) => setForm(prev => ({
                                             ...prev,
                                             dueAt: clampDateInputValue(e.target.value),
+                                        }))}
+                                        onBlur={(e) => setForm(prev => ({
+                                            ...prev,
+                                            dueAt: finalizeDateInputValue(e.target.value),
                                         }))}
                                         required
                                     />

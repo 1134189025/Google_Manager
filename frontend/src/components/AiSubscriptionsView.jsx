@@ -10,7 +10,10 @@ import {
     Terminal,
     Clock,
     ExternalLink,
+    Settings,
+    Upload,
 } from 'lucide-react';
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import api from '../services/api';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
@@ -18,7 +21,11 @@ import { resolveBrandIconUrl } from '../utils/brandIcons';
 import {
     DATE_INPUT_MAX,
     DATE_INPUT_MIN,
+    DEFAULT_USD_CNY_RATE,
     clampDateInputValue,
+    convertToCny,
+    finalizeDateInputValue,
+    formatCnyAmount,
     formatCycleLabel,
     formatMoney,
 } from '../utils/renewalUtils';
@@ -57,6 +64,7 @@ const formatResetTime = (iso) => {
 const AiSubscriptionsView = ({
     googleAccounts = [],
     paymentCards = [],
+    fxRate = DEFAULT_USD_CNY_RATE,
     onNotify,
     onOverviewChanged,
 }) => {
@@ -68,6 +76,15 @@ const AiSubscriptionsView = ({
     const [agyQuota, setAgyQuota] = useState(null);
     const [agyLoading, setAgyLoading] = useState(false);
     const [agyError, setAgyError] = useState('');
+
+    // Gemini OAuth 客户端配置弹窗
+    const [geminiConfig, setGeminiConfig] = useState(null);
+    const [geminiModalOpen, setGeminiModalOpen] = useState(false);
+    const [geminiPendingSub, setGeminiPendingSub] = useState(null);
+    const [geminiClientId, setGeminiClientId] = useState('');
+    const [geminiClientSecret, setGeminiClientSecret] = useState('');
+    const [geminiRawJson, setGeminiRawJson] = useState('');
+    const [savingGeminiCfg, setSavingGeminiCfg] = useState(false);
 
     // 新增/编辑弹窗
     const [modalOpen, setModalOpen] = useState(false);
@@ -93,12 +110,23 @@ const AiSubscriptionsView = ({
         }
     }, [onNotify]);
 
+    const loadGeminiConfig = useCallback(async () => {
+        if (typeof api?.getGeminiOauthConfig !== 'function') return;
+        try {
+            const res = await api.getGeminiOauthConfig();
+            if (res?.success && res.data) setGeminiConfig(res.data);
+        } catch {
+            // 测试环境未 mock 时忽略
+        }
+    }, []);
+
     useEffect(() => {
         loadSubs();
+        loadGeminiConfig();
         return () => {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         };
-    }, [loadSubs]);
+    }, [loadSubs, loadGeminiConfig]);
 
     const openCreate = () => {
         setEditingId(null);
@@ -183,12 +211,86 @@ const AiSubscriptionsView = ({
         }
     };
 
+    const openGeminiConfigModal = (pendingSub = null) => {
+        setGeminiPendingSub(pendingSub);
+        setGeminiClientId('');
+        setGeminiClientSecret('');
+        setGeminiRawJson('');
+        setGeminiModalOpen(true);
+        loadGeminiConfig();
+    };
+
+    const handleImportGeminiJsonFile = async () => {
+        try {
+            const selected = await openFileDialog({
+                title: '选择 Google OAuth 客户端 JSON 文件',
+                multiple: false,
+                filters: [{ name: 'JSON', extensions: ['json'] }],
+            });
+            if (!selected || Array.isArray(selected)) return;
+            const res = await api.readTextFile(selected);
+            if (!res.success || !res.data) {
+                onNotify?.(res.message || '读取 JSON 文件失败', 'error');
+                return;
+            }
+            setGeminiRawJson(res.data);
+            onNotify?.('已加载 OAuth JSON，点击保存即可生效');
+        } catch (err) {
+            onNotify?.(err?.message || '导入文件失败', 'error');
+        }
+    };
+
+    const handleSaveGeminiConfig = async (e) => {
+        e.preventDefault();
+        setSavingGeminiCfg(true);
+        try {
+            const res = await api.saveGeminiOauthConfig({
+                clientId: geminiClientId.trim() || null,
+                clientSecret: geminiClientSecret.trim() || null,
+                rawJson: geminiRawJson.trim() || null,
+            });
+            if (!res.success || !res.data) {
+                onNotify?.(res.message || '保存 Gemini OAuth 配置失败', 'error');
+                return;
+            }
+            setGeminiConfig(res.data);
+            setGeminiModalOpen(false);
+            onNotify?.('Gemini OAuth 凭据已保存');
+            const retrySub = geminiPendingSub;
+            setGeminiPendingSub(null);
+            if (retrySub) {
+                await handleStartOAuth(retrySub, 'gemini');
+            }
+        } finally {
+            setSavingGeminiCfg(false);
+        }
+    };
+
+    const handleClearGeminiConfig = async () => {
+        setSavingGeminiCfg(true);
+        try {
+            const res = await api.saveGeminiOauthConfig({ clear: true });
+            if (res.success && res.data) {
+                setGeminiConfig(res.data);
+                onNotify?.('已清除本地保存的 Gemini OAuth 凭据');
+            }
+        } finally {
+            setSavingGeminiCfg(false);
+        }
+    };
+
     const handleStartOAuth = async (sub, providerId) => {
         const prov = providerId || sub.oauthProvider || 'openai';
         setCallbackInput('');
         const res = await api.startAiOauth(prov, sub.id);
         if (!res.success || !res.data) {
-            onNotify?.(res.message || '启动 OAuth 授权失败', 'error');
+            const errMsg = String(res.message || '启动 OAuth 授权失败');
+            if (prov === 'gemini' && errMsg.includes('GEMINI_OAUTH_NOT_CONFIGURED')) {
+                openGeminiConfigModal(sub);
+                onNotify?.('请先配置 Gemini OAuth Client ID（或导入 Google OAuth JSON）', 'error');
+                return;
+            }
+            onNotify?.(errMsg.replace(/^GEMINI_OAUTH_NOT_CONFIGURED:/, ''), 'error');
             return;
         }
         const startInfo = res.data;
@@ -287,16 +389,16 @@ const AiSubscriptionsView = ({
         }
     };
 
-    const totalMonthlyUsd = useMemo(
+    const totalMonthlyCny = useMemo(
         () =>
             subs.reduce((acc, s) => {
                 if (typeof s.billingAmount !== 'number') return acc;
-                if (s.billingCurrency !== 'USD') return acc;
-                if (s.billingCycle === 'month') return acc + s.billingAmount;
-                if (s.billingCycle === 'year') return acc + s.billingAmount / 12;
+                const cny = convertToCny(s.billingAmount, s.billingCurrency, fxRate) || 0;
+                if (s.billingCycle === 'month') return acc + cny;
+                if (s.billingCycle === 'year') return acc + cny / 12;
                 return acc;
             }, 0),
-        [subs],
+        [subs, fxRate],
     );
 
     return (
@@ -310,10 +412,21 @@ const AiSubscriptionsView = ({
                     </h1>
                     <p className="gm-subtitle mt-1">
                         管理 AI 会员套餐与续费，支持 OpenAI / Claude / Grok / Gemini OAuth 授权与 Antigravity CLI 分类额度刷新。
-                        {totalMonthlyUsd > 0 && ` 当前折合月费 $${totalMonthlyUsd.toFixed(2)}/月。`}
+                        {totalMonthlyCny > 0 && ` 当前折合月费 ${formatCnyAmount(totalMonthlyCny)}/月。`}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => openGeminiConfigModal(null)}
+                        className="gm-btn gm-btn-ghost"
+                        title={geminiConfig?.configured ? `当前来源：${geminiConfig.source}` : '配置 Gemini OAuth 客户端'}
+                    >
+                        <Settings size={14} />
+                        <span>
+                            Gemini OAuth{geminiConfig?.configured ? ' ✓' : ''}
+                        </span>
+                    </button>
                     <button
                         type="button"
                         onClick={handleReadAntigravity}
@@ -673,6 +786,10 @@ const AiSubscriptionsView = ({
                                             ...prev,
                                             renewsAt: clampDateInputValue(e.target.value),
                                         }))}
+                                        onBlur={(e) => setForm(prev => ({
+                                            ...prev,
+                                            renewsAt: finalizeDateInputValue(e.target.value),
+                                        }))}
                                     />
                                 </div>
                             </div>
@@ -787,6 +904,119 @@ const AiSubscriptionsView = ({
                                 >
                                     {completingOauth ? '验证中…' : '提交回调'}
                                 </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>,
+            )}
+
+            {/* Gemini OAuth 客户端凭据配置弹窗 */}
+            {geminiModalOpen && renderInBody(
+                <div className="gm-overlay" role="dialog" aria-modal="true" aria-label="配置 Gemini OAuth 凭据">
+                    <div className="gm-panel w-full max-w-lg p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-[15px] font-semibold gm-text-1">配置 Gemini OAuth 凭据</h3>
+                            <button
+                                type="button"
+                                onClick={() => setGeminiModalOpen(false)}
+                                className="gm-btn gm-btn-ghost p-1"
+                                aria-label="关闭"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="rounded-lg p-3 text-[12px] bg-[var(--bg-elevated)] border border-[var(--border-light)] space-y-1">
+                            <div className="flex items-center justify-between">
+                                <span className="gm-text-2">当前状态</span>
+                                <span className="font-mono font-semibold" style={{ color: geminiConfig?.configured ? 'var(--success)' : 'var(--warning)' }}>
+                                    {geminiConfig?.configured ? `已就绪（${geminiConfig.source}）` : '未配置'}
+                                </span>
+                            </div>
+                            {geminiConfig?.clientIdHint && (
+                                <div className="text-[11px] font-mono gm-text-3">
+                                    Client ID：{geminiConfig.clientIdHint}
+                                    {geminiConfig.hasClientSecret ? ' · 已含 Secret' : ''}
+                                </div>
+                            )}
+                            <p className="text-[11.5px] gm-text-3 pt-1 leading-relaxed">
+                                支持直接导入/粘贴 Google Cloud Console 下载的「桌面应用」OAuth JSON，或手动填写 Client ID 与 Client Secret（仅保存在本机 SQLite）。如本机已安装 <span className="font-mono">@google/gemini-cli</span> 会自动识别。
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleSaveGeminiConfig} className="space-y-3">
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-[12px] gm-text-2">方式一：粘贴或导入 OAuth 客户端 JSON</label>
+                                    <button
+                                        type="button"
+                                        onClick={handleImportGeminiJsonFile}
+                                        className="gm-btn gm-btn-ghost gm-btn-sm"
+                                    >
+                                        <Upload size={12} />
+                                        <span>从文件导入 JSON</span>
+                                    </button>
+                                </div>
+                                <textarea
+                                    rows={3}
+                                    className="gm-input w-full font-mono text-[11.5px]"
+                                    value={geminiRawJson}
+                                    onChange={(e) => setGeminiRawJson(e.target.value)}
+                                    placeholder='{"installed":{"client_id":"...apps.googleusercontent.com","client_secret":"..."}}'
+                                />
+                            </div>
+
+                            <div className="space-y-2 pt-1 border-t border-[var(--border-light)]">
+                                <div className="text-[12px] gm-text-2">方式二：直接填写 Client ID 与 Secret</div>
+                                <input
+                                    type="text"
+                                    className="gm-input w-full font-mono text-[12px]"
+                                    value={geminiClientId}
+                                    onChange={(e) => setGeminiClientId(e.target.value)}
+                                    placeholder="Client ID (xxx.apps.googleusercontent.com)"
+                                />
+                                <input
+                                    type="password"
+                                    className="gm-input w-full font-mono text-[12px]"
+                                    value={geminiClientSecret}
+                                    onChange={(e) => setGeminiClientSecret(e.target.value)}
+                                    placeholder="Client Secret（可选，桌面客户端通常需要）"
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-2">
+                                {geminiConfig?.source === '本地设置' ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleClearGeminiConfig}
+                                        disabled={savingGeminiCfg}
+                                        className="gm-btn gm-btn-ghost text-[var(--danger)]"
+                                    >
+                                        清除本地配置
+                                    </button>
+                                ) : (
+                                    <span />
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setGeminiModalOpen(false)}
+                                        className="gm-btn gm-btn-ghost"
+                                    >
+                                        取消
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={savingGeminiCfg || (!geminiRawJson.trim() && !geminiClientId.trim())}
+                                        className="gm-btn gm-btn-primary"
+                                    >
+                                        {savingGeminiCfg
+                                            ? '保存中…'
+                                            : geminiPendingSub
+                                                ? '保存并开始授权'
+                                                : '保存配置'}
+                                    </button>
+                                </div>
                             </div>
                         </form>
                     </div>

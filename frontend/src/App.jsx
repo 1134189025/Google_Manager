@@ -286,6 +286,30 @@ const App = () => {
         dispatchListAction('export');
     }, [dispatchListAction]);
 
+    // 屏蔽桌面端 WebView 默认网页右键菜单（输入框或已选中文本时保留原生复制/粘贴菜单）及 F5/Ctrl+R 刷新
+    useEffect(() => {
+        const handleContextMenu = (event) => {
+            if (isTypingTarget(event.target)) return;
+            const selected = typeof window.getSelection === 'function'
+                ? String(window.getSelection()?.toString() || '').trim()
+                : '';
+            if (selected.length > 0) return;
+            event.preventDefault();
+        };
+        const handleRefreshBlock = (event) => {
+            const key = String(event.key || '').toLowerCase();
+            if (key === 'f5' || ((event.ctrlKey || event.metaKey) && key === 'r')) {
+                event.preventDefault();
+            }
+        };
+        window.addEventListener('contextmenu', handleContextMenu);
+        window.addEventListener('keydown', handleRefreshBlock);
+        return () => {
+            window.removeEventListener('contextmenu', handleContextMenu);
+            window.removeEventListener('keydown', handleRefreshBlock);
+        };
+    }, []);
+
     // 全局快捷键：Ctrl/Cmd+K 搜索、Alt+N 导入、Alt+E 导出
     useEffect(() => {
         const handleGlobalKeyDown = (event) => {
@@ -645,6 +669,7 @@ const App = () => {
                         <AiSubscriptionsView
                             googleAccounts={accounts}
                             paymentCards={paymentCardsCache}
+                            fxRate={fxInfo.rate}
                             onNotify={showNotification}
                             onOverviewChanged={refreshOverview}
                         />

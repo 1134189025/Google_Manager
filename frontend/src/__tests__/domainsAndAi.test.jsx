@@ -12,6 +12,8 @@ const { mockApi } = vi.hoisted(() => ({
         listDomainDnsRecords: vi.fn(),
         applyDomainDnsRecord: vi.fn(),
         getAiSubscriptions: vi.fn(),
+        getGeminiOauthConfig: vi.fn(),
+        saveGeminiOauthConfig: vi.fn(),
         startAiOauth: vi.fn(),
         getAiOauthStatus: vi.fn(),
         completeAiOauth: vi.fn(),
@@ -109,6 +111,14 @@ describe('Phase 3: DomainsView & AiSubscriptionsView', () => {
                 },
             ],
         });
+        mockApi.getGeminiOauthConfig.mockResolvedValue({
+            success: true,
+            data: { configured: false, source: '未配置', clientIdHint: null, hasClientSecret: false },
+        });
+        mockApi.saveGeminiOauthConfig.mockResolvedValue({
+            success: true,
+            data: { configured: true, source: '本地设置', clientIdHint: 'demo12…com', hasClientSecret: true },
+        });
         mockApi.startAiOauth.mockResolvedValue({
             success: true,
             data: {
@@ -188,6 +198,56 @@ describe('Phase 3: DomainsView & AiSubscriptionsView', () => {
                 'sess-1',
                 'http://localhost:1455/auth/callback?code=c1&state=s1',
             );
+        });
+    });
+
+    it('AiSubscriptionsView 在 Gemini OAuth 未配置时自动引导填写并重试授权', async () => {
+        const user = userEvent.setup();
+        mockApi.getAiSubscriptions.mockResolvedValueOnce({
+            success: true,
+            data: [
+                {
+                    id: 9,
+                    name: 'Gemini Ultra',
+                    provider: 'Google',
+                    plan: 'ultra 20x',
+                    oauthProvider: 'gemini',
+                    oauthConnected: false,
+                },
+            ],
+        });
+        mockApi.startAiOauth
+            .mockResolvedValueOnce({
+                success: false,
+                message: 'GEMINI_OAUTH_NOT_CONFIGURED:Gemini OAuth 尚未配置凭据',
+            })
+            .mockResolvedValueOnce({
+                success: true,
+                data: {
+                    sessionId: 'gem-1',
+                    mode: 'loopback',
+                    authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+                    redirectUri: 'http://localhost:12345/oauth2callback',
+                    manualCallback: false,
+                },
+            });
+
+        render(<AiSubscriptionsView onNotify={vi.fn()} />);
+        await screen.findByText('Gemini Ultra');
+
+        await user.click(screen.getByRole('button', { name: 'OAuth 授权' }));
+        const cfgDialog = await screen.findByRole('dialog', { name: '配置 Gemini OAuth 凭据' });
+        await user.type(
+            within(cfgDialog).getByPlaceholderText(/Client ID \(xxx\.apps\.googleusercontent\.com\)/),
+            'my-client-id.apps.googleusercontent.com',
+        );
+        await user.click(within(cfgDialog).getByRole('button', { name: '保存并开始授权' }));
+
+        await waitFor(() => {
+            expect(mockApi.saveGeminiOauthConfig).toHaveBeenCalledWith(
+                expect.objectContaining({ clientId: 'my-client-id.apps.googleusercontent.com' }),
+            );
+            expect(mockApi.startAiOauth).toHaveBeenCalledTimes(2);
         });
     });
 });

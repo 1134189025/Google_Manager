@@ -31,6 +31,7 @@ import {
     DEFAULT_USD_CNY_RATE,
     clampDateInputValue,
     convertToCny,
+    finalizeDateInputValue,
     formatCnyAmount,
     formatMoney,
 } from '../utils/renewalUtils';
@@ -848,6 +849,7 @@ const CardsView = ({ darkMode, fxRate = DEFAULT_USD_CNY_RATE, onNotify, onCopy, 
                                         className="gm-input w-full"
                                         value={form.expiresAt}
                                         onChange={(e) => setForm(prev => ({ ...prev, expiresAt: clampDateInputValue(e.target.value) }))}
+                                        onBlur={(e) => setForm(prev => ({ ...prev, expiresAt: finalizeDateInputValue(e.target.value) }))}
                                     />
                                 </div>
                             </div>

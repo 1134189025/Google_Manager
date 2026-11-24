@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import HistoryDrawer from '../components/HistoryDrawer';
@@ -99,5 +99,27 @@ describe('布局回归', () => {
     expect(drawerPanel).toHaveClass('w-full');
     expect(drawerPanel).toHaveClass('max-w-[420px]');
     expect(drawerPanel.className).toContain('sm:w-[420px]');
+  });
+
+  it('拦截非编辑区的网页默认右键菜单与 F5/Ctrl+R 刷新，保留输入框右键复制粘贴', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('button', { name: '首页' });
+
+    const main = container.querySelector('main.main-wrapper');
+    const blockedEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    main.dispatchEvent(blockedEvent);
+    expect(blockedEvent.defaultPrevented).toBe(true);
+
+    const input = document.createElement('input');
+    main.appendChild(input);
+    const allowedEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    input.dispatchEvent(allowedEvent);
+    expect(allowedEvent.defaultPrevented).toBe(false);
+    main.removeChild(input);
+
+    const f5Event = new KeyboardEvent('keydown', { key: 'F5', bubbles: true, cancelable: true });
+    window.dispatchEvent(f5Event);
+    expect(f5Event.defaultPrevented).toBe(true);
+    expect(fireEvent.keyDown(window, { key: 'r', ctrlKey: true })).toBe(false);
   });
 });

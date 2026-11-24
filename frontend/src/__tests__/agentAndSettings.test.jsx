@@ -12,6 +12,7 @@ const { mockApi } = vi.hoisted(() => ({
         getAgentMessages: vi.fn(),
         clearAgentMessages: vi.fn(),
         sendAgentMessage: vi.fn(),
+        cancelAgentStream: vi.fn(),
         applyAgentProposal: vi.fn(),
         rejectAgentProposal: vi.fn(),
         getAppMonitorSettings: vi.fn(),
@@ -105,6 +106,7 @@ describe('Phase 5: AgentView & SystemSettingsDialog', () => {
                 INITIAL_ASSISTANT_MSG,
             ],
         });
+        mockApi.cancelAgentStream.mockResolvedValue({ success: true, data: true });
         mockApi.applyAgentProposal.mockResolvedValue({
             success: true,
             data: {
@@ -217,5 +219,96 @@ describe('Phase 5: AgentView & SystemSettingsDialog', () => {
         expect(await within(dialog).findByText('manual_2026-11-24.db')).toBeInTheDocument();
         await user.click(within(dialog).getByRole('button', { name: /创建备份/ }));
         expect(mockApi.createBackup).toHaveBeenCalledWith('manual');
+    });
+
+    it('发送消息后立即上屏并展示流式停止按钮，系统设置支持 128K 最大输出 Token', async () => {
+        const user = userEvent.setup();
+        let resolveSend;
+        mockApi.sendAgentMessage.mockImplementationOnce(
+            () => new Promise(resolve => { resolveSend = resolve; }),
+        );
+
+        render(
+            <AgentView
+                onNotify={vi.fn()}
+                onOpenSystemSettings={vi.fn()}
+                onOverviewChanged={vi.fn()}
+            />,
+        );
+        await screen.findByText(/隐私保护已启用/);
+
+        const textarea = screen.getByPlaceholderText(/输入问题或让助手生成提醒/);
+        await user.type(textarea, '立刻查看我的支出');
+        await user.click(screen.getByRole('button', { name: /发送/ }));
+
+        // 在后端尚未返回前，用户自己发出的消息必须立刻显示，且出现停止生成按钮
+        expect(screen.getByText('立刻查看我的支出')).toBeInTheDocument();
+        expect(screen.getByText(/等待模型首字响应/)).toBeInTheDocument();
+        const stopBtn = screen.getByRole('button', { name: '停止生成' });
+        await user.click(stopBtn);
+        expect(mockApi.cancelAgentStream).toHaveBeenCalledTimes(1);
+
+        resolveSend({
+            success: true,
+            data: [
+                { id: 1, sessionId: 'default', role: 'user', content: '立刻查看我的支出', proposals: [] },
+                { id: 2, sessionId: 'default', role: 'assistant', content: '已停止生成。', proposals: [] },
+            ],
+        });
+        expect(await screen.findByText('已停止生成。')).toBeInTheDocument();
+
+        // 验证系统设置允许输入并保存 128000（不再受 16384 限制）
+        render(
+            <SystemSettingsDialog
+                isOpen={true}
+                initialTab="ai"
+                onClose={vi.fn()}
+                onNotify={vi.fn()}
+                onBackupRestored={vi.fn()}
+            />,
+        );
+        const dialog = await screen.findByRole('dialog', { name: '系统设置' });
+        await user.click(within(dialog).getByRole('button', { name: '128K' }));
+        await user.click(within(dialog).getByRole('button', { name: /保存 AI 设置/ }));
+        expect(mockApi.saveAgentSettings).toHaveBeenCalledWith(
+            expect.objectContaining({ maxTokens: 128000 }),
+        );
+    });
+
+    it('美观格式化 AI 助手回复，自动消除 ***** 原始分隔符并渲染原生标题、引用卡与数据表', async () => {
+        mockApi.getAgentMessages.mockResolvedValueOnce({
+            success: true,
+            data: [
+                {
+                    id: 10,
+                    sessionId: 'default',
+                    role: 'assistant',
+                    content: [
+                        '> 本月固定支出合计 **¥205.00**',
+                        '*****',
+                        '## 服务器明细',
+                        '| 名称 | 费用 |',
+                        '| --- | --- |',
+                        '| `讯猫` | **¥35.00/月** |',
+                    ].join('\n'),
+                    proposals: [],
+                    createdAt: '2026-11-24 20:55:00',
+                },
+            ],
+        });
+
+        const { container } = render(
+            <AgentView
+                onNotify={vi.fn()}
+                onOpenSystemSettings={vi.fn()}
+                onOverviewChanged={vi.fn()}
+            />,
+        );
+
+        expect(await screen.findByText('服务器明细')).toBeInTheDocument();
+        expect(screen.queryByText('*****')).not.toBeInTheDocument();
+        expect(container.querySelector('.gm-md-callout')).toHaveTextContent('本月固定支出合计 ¥205.00');
+        expect(container.querySelector('.gm-md-table')).toHaveTextContent('讯猫');
+        expect(container.querySelector('.gm-md-hr')).not.toBeNull();
     });
 });
