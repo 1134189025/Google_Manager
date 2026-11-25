@@ -26,6 +26,16 @@ import {
 } from 'lucide-react';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import api from '../services/api';
+import {
+    BrandLogo,
+    EmptyState,
+    FluentIcon,
+    GlassButton,
+    GlassCapsule,
+    GlassSearch,
+    PageToolbar,
+    SegmentedControl,
+} from './glass';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { formatDbTimestamp } from '../utils/timeUtils';
@@ -667,190 +677,170 @@ const ServersView = ({
     );
 
     return (
-        <div className="max-w-7xl mx-auto space-y-5 gm-view-enter">
-            {/* 顶部操作栏 */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <Server size={20} className="text-[var(--primary)]" />
-                        服务器台账与监控
-                    </h1>
-                    <p className="gm-subtitle">
-                        通过纯 Rust SSH 采集系统负载、监听端口与 Docker 状态，支持 TOFU 主机指纹校验与 SFTP 文件管理。
-                    </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost text-xs"
-                        onClick={() => onOpenSystemSettings?.('monitor')}
-                        title="调整服务器采集周期"
-                    >
-                        <Activity size={14} />
-                        {monitorMinutes > 0 ? `自动采集：每 ${monitorMinutes} 分钟` : '自动采集：已关闭'}
-                    </button>
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost"
-                        onClick={() => handleProbeAll()}
-                        disabled={probingAll || servers.length === 0}
-                    >
-                        <RefreshCw size={15} className={probingAll ? 'animate-spin' : ''} />
-                        全部探测
-                    </button>
-                    <button type="button" className="gm-btn gm-btn-primary" onClick={openCreateModal}>
-                        <Plus size={15} />
-                        新增服务器
-                    </button>
-                </div>
-            </div>
+        <>
+            <PageToolbar
+                title="服务器台账与监控"
+                subtitle="纯 Rust SSH 负载采集 · TOFU 主机指纹校验 · SFTP 管理"
+                right={
+                    <div className="flex flex-wrap items-center gap-2">
+                        <GlassCapsule>
+                            <GlassButton
+                                onClick={() => onOpenSystemSettings?.('monitor')}
+                                title="调整服务器采集周期"
+                            >
+                                <Activity size={14} />
+                                <span>{monitorMinutes > 0 ? `自动采集：每 ${monitorMinutes} 分钟` : '自动采集：已关闭'}</span>
+                            </GlassButton>
+                            <GlassButton
+                                onClick={() => handleProbeAll()}
+                                disabled={probingAll || servers.length === 0}
+                            >
+                                <FluentIcon name="sync" size={16} className={probingAll ? 'animate-spin' : ''} />
+                                <span>全部探测</span>
+                            </GlassButton>
+                        </GlassCapsule>
+                        <GlassButton glass pill prominent onClick={openCreateModal}>
+                            <FluentIcon name="add" size={16} />
+                            <span>新增服务器</span>
+                        </GlassButton>
+                    </div>
+                }
+            />
 
-            {/* 概览卡片（统一人民币结算） */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">服务器总数</div>
-                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--text-primary)]">{summary.total}</div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)] flex items-center gap-1.5">
-                        <span className="gm-pixel-led is-success" aria-hidden="true" />
-                        <span>在线节点</span>
+            <div className="page page-wide page-in space-y-5">
+                {/* 概览排版数字条（统一人民币结算） */}
+                <section className="figures" style={{ marginTop: 8 }} aria-label="服务器概览">
+                    <div className="figure">
+                        <span className="v">{summary.total}</span>
+                        <span className="k">服务器总数</span>
                     </div>
-                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--success)]">{summary.online}</div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">折合月支出（人民币）</div>
-                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--text-primary)]">
-                        {formatCnyAmount(summary.monthlyCny)}
+                    <div className="figure">
+                        <span className="v" style={{ color: 'var(--green)' }}>{summary.online}</span>
+                        <span className="k">在线节点</span>
                     </div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-xs text-[var(--text-secondary)]">折合年支出（人民币）</div>
-                    <div className="mt-1 text-2xl font-bold font-mono text-[var(--primary)]">
-                        {formatCnyAmount(summary.yearlyCny)}
+                    <div className="figure">
+                        <span className="v">{formatCnyAmount(summary.monthlyCny)}</span>
+                        <span className="k">折合月支出（人民币）</span>
                     </div>
-                </div>
-            </div>
+                    <div className="figure">
+                        <span className="v" style={{ color: 'var(--accent)' }}>
+                            {formatCnyAmount(summary.yearlyCny)}
+                        </span>
+                        <span className="k">折合年支出（人民币）</span>
+                    </div>
+                </section>
 
-            {/* 搜索与筛选 */}
-            <div className="gm-card p-3 flex flex-wrap items-center gap-3">
-                <div className="relative flex-1 min-w-[220px]">
-                    <Search
-                        size={15}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-                    />
-                    <input
-                        type="text"
+                {/* 搜索与状态筛选 */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <GlassSearch
                         value={search}
                         onChange={e => setSearch(e.target.value)}
+                        onClear={() => setSearch('')}
                         placeholder="按名称、IP、区域、标签搜索..."
-                        className="gm-input w-full pl-9"
+                        ariaLabel="搜索服务器"
+                    />
+                    <SegmentedControl
+                        label="服务器状态筛选"
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        options={[
+                            { value: 'all', label: '全部' },
+                            { value: 'online', label: '在线' },
+                            { value: 'offline', label: '离线' },
+                            { value: 'unknown', label: '未探测' },
+                        ]}
                     />
                 </div>
-                <div className="flex items-center gap-1.5">
-                    {[
-                        { id: 'all', label: '全部' },
-                        { id: 'online', label: '在线' },
-                        { id: 'offline', label: '离线' },
-                        { id: 'unknown', label: '未探测' },
-                    ].map(tab => (
-                        <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setStatusFilter(tab.id)}
-                            className={`gm-btn text-xs ${
-                                statusFilter === tab.id ? 'gm-btn-primary' : 'gm-btn-ghost'
-                            }`}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
 
-            {/* 服务器卡片列表 */}
-            {loading ? (
-                <div className="gm-card p-8 text-center text-[var(--text-secondary)]">正在加载服务器列表...</div>
-            ) : filteredServers.length === 0 ? (
-                <div className="gm-card p-10 text-center space-y-2">
-                    <Server size={28} className="mx-auto text-[var(--text-muted)]" />
-                    <div className="font-medium text-[var(--text-primary)]">暂无符合条件的服务器</div>
-                    <p className="text-xs text-[var(--text-secondary)]">
-                        点击右上角「新增服务器」即可接入 VPS 监控、多标签终端与 SFTP。
-                    </p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {filteredServers.map(server => {
-                        const isProbing = Boolean(probingIds[server.id]);
-                        const mismatch = parseHostKeyMismatch(server.probeError);
-                        const days = server.expiresAt ? daysUntilDay(server.expiresAt) : null;
-                        const dueBadge = days !== null ? formatDaysBadge(days) : null;
-                        const services = parseServicesJson(server.servicesJson);
-                        const dotColor =
-                            server.status === 'online'
-                                ? 'var(--success)'
-                                : server.status === 'offline'
-                                    ? 'var(--danger)'
-                                    : 'var(--text-muted)';
+                {/* 服务器卡片列表 */}
+                {loading ? (
+                    <div className="group p-8 text-center muted">正在加载服务器列表...</div>
+                ) : filteredServers.length === 0 ? (
+                    <div className="group">
+                        <EmptyState
+                            icon="server"
+                            title="暂无符合条件的服务器"
+                            description="点击右上角「新增服务器」即可接入 VPS 监控、多标签终端与 SFTP。"
+                        />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {filteredServers.map(server => {
+                            const isProbing = Boolean(probingIds[server.id]);
+                            const mismatch = parseHostKeyMismatch(server.probeError);
+                            const days = server.expiresAt ? daysUntilDay(server.expiresAt) : null;
+                            const dueBadge = days !== null ? formatDaysBadge(days) : null;
+                            const services = parseServicesJson(server.servicesJson);
+                            const dotColor =
+                                server.status === 'online'
+                                    ? 'var(--success)'
+                                    : server.status === 'offline'
+                                        ? 'var(--danger)'
+                                        : 'var(--text-muted)';
 
-                        return (
-                            <div key={server.id} className="gm-card p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span
-                                                className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                                                style={{ background: dotColor }}
-                                                title={`状态: ${server.status}`}
+                            return (
+                                <div key={server.id} className="gm-card p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-start gap-3 min-w-0">
+                                            <BrandLogo
+                                                name={server.name}
+                                                hints={[server.provider, server.os, server.name]}
                                             />
-                                            <h3 className="font-semibold text-[var(--text-primary)] truncate">
-                                                {server.name}
-                                            </h3>
-                                            {server.region && (
-                                                <span className="gm-badge text-[11px]">{server.region}</span>
-                                            )}
-                                            <span className="gm-badge text-[11px]">
-                                                {server.authKind === 'key' ? '私钥' : '密码'}
-                                            </span>
-                                            {dueBadge && (
-                                                <span
-                                                    className="gm-badge text-[11px]"
-                                                    style={{
-                                                        background:
-                                                            dueBadge.tone === 'danger'
-                                                                ? 'var(--danger-soft)'
-                                                                : dueBadge.tone === 'warning'
-                                                                    ? 'var(--warning-soft)'
-                                                                    : 'var(--bg-elevated)',
-                                                        color:
-                                                            dueBadge.tone === 'danger'
-                                                                ? 'var(--danger)'
-                                                                : dueBadge.tone === 'warning'
-                                                                    ? 'var(--warning)'
-                                                                    : 'var(--text-secondary)',
-                                                    }}
-                                                >
-                                                    {dueBadge.text}
-                                                </span>
-                                            )}
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span
+                                                        className="inline-block w-2 h-2 rounded-full shrink-0"
+                                                        style={{ background: dotColor }}
+                                                        title={`状态: ${server.status}`}
+                                                    />
+                                                    <h3 className="font-semibold text-[var(--text-primary)] truncate">
+                                                        {server.name}
+                                                    </h3>
+                                                    {server.region && (
+                                                        <span className="gm-badge text-[11px]">{server.region}</span>
+                                                    )}
+                                                    <span className="gm-badge text-[11px]">
+                                                        {server.authKind === 'key' ? '私钥' : '密码'}
+                                                    </span>
+                                                    {dueBadge && (
+                                                        <span
+                                                            className="gm-badge text-[11px]"
+                                                            style={{
+                                                                background:
+                                                                    dueBadge.tone === 'danger'
+                                                                        ? 'var(--danger-soft)'
+                                                                        : dueBadge.tone === 'warning'
+                                                                            ? 'var(--warning-soft)'
+                                                                            : 'var(--bg-elevated)',
+                                                                color:
+                                                                    dueBadge.tone === 'danger'
+                                                                        ? 'var(--danger)'
+                                                                        : dueBadge.tone === 'warning'
+                                                                            ? 'var(--warning)'
+                                                                            : 'var(--text-secondary)',
+                                                            }}
+                                                        >
+                                                            {dueBadge.text}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="mt-1 text-xs font-mono text-[var(--text-secondary)]">
+                                                    {server.username}@{server.host}:{server.port}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="mt-1 text-xs font-mono text-[var(--text-secondary)]">
-                                            {server.username}@{server.host}:{server.port}
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleToggleCollect(server)}
+                                            className={`gm-btn text-[11px] px-2 py-1 ${
+                                                server.collectEnabled ? 'gm-btn-ghost' : 'gm-btn-ghost opacity-60'
+                                            }`}
+                                            title={server.collectEnabled ? '定期采集中（点击暂停）' : '已暂停定期采集（点击启用）'}
+                                        >
+                                            <Power size={12} />
+                                            {server.collectEnabled ? '定期采集' : '已暂停'}
+                                        </button>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleToggleCollect(server)}
-                                        className={`gm-btn text-[11px] px-2 py-1 ${
-                                            server.collectEnabled ? 'gm-btn-ghost' : 'gm-btn-ghost opacity-60'
-                                        }`}
-                                        title={server.collectEnabled ? '定期采集中（点击暂停）' : '已暂停定期采集（点击启用）'}
-                                    >
-                                        <Power size={12} />
-                                        {server.collectEnabled ? '定期采集' : '已暂停'}
-                                    </button>
-                                </div>
 
                                 {(server.os || server.uptime || server.loadavg) && (
                                     <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-4 gap-y-1">
@@ -1663,7 +1653,8 @@ const ServersView = ({
                         </div>
                     </div>,
                 )}
-        </div>
+            </div>
+        </>
     );
 };
 

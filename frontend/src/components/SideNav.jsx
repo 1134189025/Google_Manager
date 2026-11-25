@@ -1,31 +1,6 @@
 import { useState } from 'react';
-import {
-    Home,
-    Users,
-    UserPlus,
-    Trash2,
-    Settings,
-    RefreshCw,
-    CalendarClock,
-    Bot,
-    Sparkles,
-    CreditCard,
-    Server,
-    Terminal,
-    Globe,
-    SlidersHorizontal,
-    ChevronDown,
-    ChevronRight,
-} from 'lucide-react';
-import { PixelMascot } from './PixelArt';
+import { FluentIcon, useLiquidGlass } from './glass';
 import { APP_BUILD_TIME, APP_VERSION, buildVersionLabel, formatBuildTime } from '../utils/buildInfo';
-
-const ContrastIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M8 2a6 6 0 0 0 0 12V2z" fill="currentColor" />
-    </svg>
-);
 
 const NAV_GROUPS_STORAGE_KEY = 'gm.nav.groups';
 
@@ -49,19 +24,20 @@ function readExpandedGroups() {
 }
 
 /**
- * 分组可折叠悬浮圆角侧栏
+ * 悬浮液态玻璃侧边导航 (.sidebar.glass)
+ * - 保留完整分组折叠与 localStorage 状态持久化 (gm.nav.groups)
+ * - 使用 Microsoft Fluent UI System Icons，选中态自动切换 Filled 实心图标与左侧强调药丸
  */
 const SideNav = ({
     view,
     accountsCount = 0,
     overview = null,
-    darkMode,
     updater,
     onNavigate,
     onOpenBrowserSettings,
     onOpenSystemSettings,
-    onToggleDarkMode,
 }) => {
+    const { closeNav } = useLiquidGlass();
     const versionText = APP_VERSION === 'dev' ? 'dev' : `v${APP_VERSION}`;
     const versionTooltip = `版本 ${buildVersionLabel} · 编译 ${formatBuildTime(APP_BUILD_TIME)}`;
 
@@ -79,173 +55,191 @@ const SideNav = ({
         });
     };
 
+    const handleSelectView = (nextView) => {
+        closeNav();
+        onNavigate?.(nextView);
+    };
+
     const groups = [
         {
             id: 'workspace',
             title: '工作台',
             items: [
-                { id: 'home', label: '首页', icon: Home },
+                { id: 'home', label: '首页', icon: 'home' },
                 {
                     id: 'renewals',
                     label: '费用与续费',
-                    icon: CalendarClock,
+                    icon: 'calendar',
                     count: overview?.pendingRemindersCount || 0,
                 },
-                { id: 'agent', label: 'AI 助手', icon: Bot },
+                { id: 'agent', label: 'AI 助手', icon: 'bot' },
             ],
         },
         {
             id: 'google',
             title: '谷歌账号',
             items: [
-                { id: 'list', label: '账号列表', icon: Users, count: accountsCount },
-                { id: 'import', label: '导入账号', icon: UserPlus },
-                { id: 'recycle', label: '回收站', icon: Trash2 },
+                { id: 'list', label: '账号列表', icon: 'people', count: accountsCount },
+                { id: 'import', label: '导入账号', icon: 'personAdd' },
+                { id: 'recycle', label: '回收站', icon: 'trash' },
             ],
         },
         {
             id: 'finance',
             title: '账号与金融',
             items: [
-                { id: 'ai', label: 'AI 订阅', icon: Sparkles, count: overview?.aiSubscriptionsCount || 0 },
-                { id: 'cards', label: 'U 卡与支付卡', icon: CreditCard, count: overview?.paymentCardsCount || 0 },
+                { id: 'ai', label: 'AI 订阅', icon: 'sparkle', count: overview?.aiSubscriptionsCount || 0 },
+                { id: 'cards', label: 'U 卡与支付卡', icon: 'card', count: overview?.paymentCardsCount || 0 },
             ],
         },
         {
             id: 'infra',
             title: '基础设施',
             items: [
-                { id: 'servers', label: '服务器', icon: Server, count: overview?.serversCount || 0 },
-                { id: 'terminal', label: 'SSH 终端', icon: Terminal },
-                { id: 'domains', label: '域名管理', icon: Globe, count: overview?.domainsCount || 0 },
+                { id: 'servers', label: '服务器', icon: 'server', count: overview?.serversCount || 0 },
+                { id: 'terminal', label: 'SSH 终端', icon: 'terminal' },
+                { id: 'domains', label: '域名管理', icon: 'globe', count: overview?.domainsCount || 0 },
             ],
         },
     ];
 
     return (
-        <aside className="side-nav" aria-label="主导航">
-            {/* 顶部品牌区 */}
-            <div className="side-nav-header">
-                <div className="side-nav-brand" title="GoogleManager">
-                    <PixelMascot size={20} variant="badge" />
-                </div>
-                <div className="side-nav-brand-text">
-                    <span className="side-nav-title">GoogleManager</span>
-                    <span className="side-nav-subtitle">个人数字资产工作区</span>
-                </div>
-            </div>
-
-            {/* 可滚动分组主导航 */}
-            <div className="side-nav-scroll">
-                <nav className="nav-items" aria-label="工作区视图">
-                    {groups.map(group => {
-                        const isOpen = expanded[group.id] !== false;
-                        return (
-                            <div key={group.id} className="nav-group">
-                                <button
-                                    type="button"
-                                    className="nav-group-toggle"
-                                    aria-expanded={isOpen}
-                                    onClick={() => toggleGroup(group.id)}
-                                >
-                                    <span>{group.title}</span>
-                                    {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                                </button>
-                                {isOpen && (
-                                    <div className="nav-items">
-                                        {group.items.map(item => {
-                                            const Icon = item.icon;
-                                            return (
+        <aside className="side-nav sidebar glass" data-lens="sidebar" aria-label="主导航">
+            <nav className="nav" aria-label="工作区视图">
+                {groups.map(group => {
+                    const isOpen = expanded[group.id] !== false;
+                    return (
+                        <div key={group.id}>
+                            <button
+                                type="button"
+                                className="nav-head"
+                                aria-expanded={isOpen}
+                                onClick={() => toggleGroup(group.id)}
+                            >
+                                <span>{group.title}</span>
+                                <FluentIcon name="chevDown" />
+                            </button>
+                            {isOpen && (
+                                <ul className="nav-list">
+                                    {group.items.map(item => {
+                                        const active = view === item.id;
+                                        return (
+                                            <li key={item.id}>
                                                 <button
-                                                    key={item.id}
                                                     type="button"
-                                                    onClick={() => onNavigate(item.id)}
-                                                    className={`nav-item ${view === item.id ? 'active' : ''}`}
+                                                    onClick={() => handleSelectView(item.id)}
+                                                    className={`nav-item ${active ? 'active' : ''}`}
+                                                    aria-current={active ? 'page' : undefined}
                                                     title={item.label}
                                                 >
-                                                    <Icon className="nav-item-icon" size={16} />
-                                                    <span className="nav-item-text">{item.label}</span>
+                                                    <FluentIcon name={item.icon} filled={active} />
+                                                    <span className="label">{item.label}</span>
                                                     {item.count > 0 && (
-                                                        <span className="nav-item-count">{item.count}</span>
+                                                        <span className="count">{item.count}</span>
                                                     )}
                                                 </button>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </nav>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+                    );
+                })}
 
                 {/* 系统分区 */}
-                <div className="nav-group">
+                <div>
                     <button
                         type="button"
-                        className="nav-group-toggle"
+                        className="nav-head"
                         aria-expanded={expanded.system !== false}
                         onClick={() => toggleGroup('system')}
                     >
                         <span>系统</span>
-                        {expanded.system !== false ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        <FluentIcon name="chevDown" />
                     </button>
                     {expanded.system !== false && (
-                        <div className="nav-items">
-                            <button
-                                type="button"
-                                onClick={onOpenBrowserSettings}
-                                className="nav-item"
-                                title="账号浏览器设置"
-                            >
-                                <Settings className="nav-item-icon" size={16} />
-                                <span className="nav-item-text">浏览器设置</span>
-                            </button>
-
-                            {onOpenSystemSettings && (
+                        <ul className="nav-list">
+                            <li>
                                 <button
                                     type="button"
-                                    onClick={onOpenSystemSettings}
+                                    onClick={() => {
+                                        closeNav();
+                                        onOpenBrowserSettings?.();
+                                    }}
                                     className="nav-item"
-                                    title="系统设置"
+                                    title="账号浏览器设置"
                                 >
-                                    <SlidersHorizontal className="nav-item-icon" size={16} />
-                                    <span className="nav-item-text">系统设置</span>
+                                    <FluentIcon name="browser" />
+                                    <span className="label">浏览器设置</span>
                                 </button>
+                            </li>
+
+                            {onOpenSystemSettings && (
+                                <li>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            closeNav();
+                                            onOpenSystemSettings();
+                                        }}
+                                        className="nav-item"
+                                        title="系统设置"
+                                    >
+                                        <FluentIcon name="settings" />
+                                        <span className="label">系统设置</span>
+                                    </button>
+                                </li>
                             )}
 
-                            <button
-                                type="button"
-                                onClick={() => updater?.checkNow?.()}
-                                className="nav-item"
-                                title={updater?.hasUpdate ? `发现新版本 v${updater.version}，点击查看` : '检查更新'}
-                                aria-label="检查更新"
-                            >
-                                <RefreshCw className="nav-item-icon" size={16} />
-                                <span className="nav-item-text">检查更新</span>
-                                {updater?.hasUpdate && (
-                                    <span className="nav-update-pill">更新</span>
-                                )}
-                            </button>
-                        </div>
+                            <li>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        closeNav();
+                                        updater?.checkNow?.();
+                                    }}
+                                    className="nav-item"
+                                    title={updater?.hasUpdate ? `发现新版本 v${updater.version}，点击查看` : '检查更新'}
+                                    aria-label="检查更新"
+                                >
+                                    <FluentIcon name="sync" />
+                                    <span className="label">检查更新</span>
+                                    {updater?.hasUpdate && (
+                                        <span className="nav-update-pill">更新</span>
+                                    )}
+                                </button>
+                            </li>
+                        </ul>
                     )}
                 </div>
-            </div>
+            </nav>
 
-            {/* 底栏：版本号 + 双半圆主题切换 */}
-            <div className="side-nav-footer">
-                <span className="side-nav-version" title={versionTooltip}>
-                    {versionText}
-                </span>
-                <button
-                    type="button"
-                    onClick={onToggleDarkMode}
-                    className="gm-theme-toggle"
-                    data-theme-mode={darkMode ? 'dark' : 'light'}
-                    title={darkMode ? '切换亮色模式' : '切换暗色模式'}
-                    aria-label={darkMode ? '切换亮色模式' : '切换暗色模式'}
-                >
-                    <ContrastIcon />
-                </button>
+            {/* 底栏：品牌徽标 + 版本号 + 系统设置快捷入口 */}
+            <div className="sidebar-foot">
+                <div className="me">
+                    <span className="me-mark" aria-hidden="true">G</span>
+                    <span className="od-field">
+                        <span className="t">Google Manager</span>
+                        <span className="s side-nav-version" title={versionTooltip}>
+                            {versionText} · 本地数据
+                        </span>
+                    </span>
+                </div>
+                {onOpenSystemSettings && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            closeNav();
+                            onOpenSystemSettings();
+                        }}
+                        className="gbtn icon"
+                        title="系统设置"
+                        aria-label="打开系统设置"
+                    >
+                        <FluentIcon name="settings" size={18} />
+                    </button>
+                )}
             </div>
         </aside>
     );

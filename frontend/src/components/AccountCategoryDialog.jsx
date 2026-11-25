@@ -162,7 +162,8 @@ const AccountCategoryDialog = ({
             onClick={() => onClose?.()}
         >
             <div
-                className="gm-modal w-full max-w-lg max-h-[88vh] flex flex-col"
+                className="gm-modal glass w-full max-w-lg max-h-[88vh] flex flex-col"
+                data-lens="sheet"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="gm-modal-header">

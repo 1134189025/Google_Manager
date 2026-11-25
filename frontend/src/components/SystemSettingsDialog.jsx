@@ -20,6 +20,7 @@ import api from '../services/api';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { FluentIcon, SegmentedControl } from './glass';
 
 const MONITOR_OPTIONS = [
     { value: 0, label: '关闭自动采集（仅手动探测）' },
@@ -87,6 +88,8 @@ function clampInt(raw, min, max) {
 const SystemSettingsDialog = ({
     isOpen,
     initialTab = 'ai',
+    themeMode = 'dark',
+    onChangeThemeMode,
     onClose,
     onNotify,
     onBackupRestored,
@@ -486,45 +489,109 @@ const SystemSettingsDialog = ({
         }
     };
 
+    const settingsTabs = [
+        { id: 'ai', label: 'AI 模型配置', icon: 'bot', color: '#5e5ce6' },
+        { id: 'appearance', label: '外观', icon: 'color', color: '#0a84ff' },
+        { id: 'general', label: '常规与托盘', icon: 'settings', color: '#8e8e93' },
+        { id: 'monitor', label: '服务器监控', icon: 'server', color: '#30a14e' },
+        { id: 'backup', label: '数据备份与恢复', icon: 'database', color: '#e8710a' },
+    ];
+
+    const currentTabMeta = settingsTabs.find(item => item.id === tab) || settingsTabs[0];
+
     return renderInBody(
-        <div className="gm-overlay" role="dialog" aria-modal="true" aria-label="系统设置">
-            <div className="gm-modal w-full max-w-2xl max-h-[90vh] flex flex-col p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                        <SlidersHorizontal size={18} className="text-[var(--primary)]" />
-                        系统设置
-                    </h2>
-                    <button type="button" className="gm-btn gm-btn-ghost p-1" onClick={() => onClose?.()}>
-                        <X size={16} />
-                    </button>
-                </div>
+        <div
+            className="gm-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="系统设置"
+            onClick={() => onClose?.()}
+        >
+            <div
+                className="gm-modal sheet glass settings w-full max-w-3xl max-h-[90vh] flex flex-col"
+                data-lens="sheet"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="set-layout">
+                    {/* 左侧 Windows 11 设置导航栏 */}
+                    <div className="set-nav" aria-label="设置分类">
+                        <div className="px-2.5 pb-2 text-[11px] font-semibold tracking-wider muted">
+                            系统设置
+                        </div>
+                        {settingsTabs.map(item => {
+                            const active = tab === item.id;
+                            return (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => setTab(item.id)}
+                                    aria-current={active ? 'page' : undefined}
+                                    className={`nav-item ${active ? 'active' : ''}`}
+                                >
+                                    <span
+                                        className="app-ico"
+                                        style={{ background: item.color, width: 22, height: 22, borderRadius: 6 }}
+                                        aria-hidden="true"
+                                    >
+                                        <FluentIcon name={item.icon} filled={active} size={13} />
+                                    </span>
+                                    <span className="label">{item.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
 
-                {/* 分区 Tab */}
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2">
-                    {[
-                        { id: 'ai', label: 'AI 模型配置', icon: Bot },
-                        { id: 'general', label: '常规与托盘', icon: Monitor },
-                        { id: 'monitor', label: '服务器监控', icon: Activity },
-                        { id: 'backup', label: '数据备份与恢复', icon: Database },
-                    ].map(item => {
-                        const Icon = item.icon;
-                        return (
+                    {/* 右侧设置面板 */}
+                    <div className="set-pane text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <h2>{currentTabMeta.label}</h2>
                             <button
-                                key={item.id}
                                 type="button"
-                                onClick={() => setTab(item.id)}
-                                className={`gm-btn text-xs ${
-                                    tab === item.id ? 'gm-btn-primary' : 'gm-btn-ghost'
-                                }`}
+                                className="gbtn icon"
+                                style={{ width: 30, height: 30, minWidth: 30 }}
+                                onClick={() => onClose?.()}
+                                aria-label="关闭系统设置"
                             >
-                                <Icon size={14} />
-                                {item.label}
+                                <FluentIcon name="dismiss" size={16} />
                             </button>
-                        );
-                    })}
-                </div>
+                        </div>
 
-                <div className="flex-1 overflow-y-auto space-y-4 text-xs pr-0.5">
+                        {tab === 'appearance' && (
+                            <div className="space-y-4">
+                                <div className="group">
+                                    <ul className="rows flush">
+                                        <li>
+                                            <div className="row flex-wrap sm:flex-nowrap">
+                                                <span className="od-field od-fill">
+                                                    <span className="t">主题模式</span>
+                                                    <span className="s">「自动」会跟随 Windows / macOS 系统深浅色实时切换</span>
+                                                </span>
+                                                <SegmentedControl
+                                                    label="主题模式"
+                                                    value={themeMode}
+                                                    onChange={(mode) => onChangeThemeMode?.(mode)}
+                                                    options={[
+                                                        { value: 'light', label: '浅色' },
+                                                        { value: 'dark', label: '深色' },
+                                                        { value: 'auto', label: '自动' },
+                                                    ]}
+                                                />
+                                            </div>
+                                        </li>
+                                        <li>
+                                            <div className="row">
+                                                <span className="od-field od-fill">
+                                                    <span className="t">材质与无障碍兼容</span>
+                                                    <span className="s">
+                                                        Windows WebView2 自动启用液态玻璃边缘折射与 Mica 壁纸透光；macOS 与系统「降低透明度」模式自动降级为高对比毛玻璃。
+                                                    </span>
+                                                </span>
+                                            </div>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
                     {tab === 'ai' && (
                         <form onSubmit={handleSaveAi} className="space-y-3.5">
                             <label className="block space-y-1">
@@ -1034,9 +1101,10 @@ const SystemSettingsDialog = ({
                                         </tbody>
                                     </table>
                                 )}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
         </div>,

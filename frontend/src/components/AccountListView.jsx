@@ -1,14 +1,11 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import {
-    Search,
-    X,
-    FileDown,
-    FolderPlus,
-    SlidersHorizontal,
-    Plus,
-    Check,
-} from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
+import {
+    FluentIcon,
+    GlassButton,
+    GlassSearch,
+    PageToolbar,
+} from './glass';
 import Pagination from './Pagination';
 import usePagination from '../hooks/usePagination';
 import useInlineEdit from '../hooks/useInlineEdit';
@@ -861,65 +858,41 @@ const AccountListView = ({
 
     return (
         <>
-            <div className="space-y-3.5 gm-view-enter">
-                {/* 精简页头：标题与实时计数在左，命令式搜索框与轻量动作在右 */}
-                <div className="gm-list-header">
-                    <div className="gm-list-title-group">
-                        <div className="flex items-baseline gap-2.5">
-                            <h1 className="gm-title">账号库</h1>
-                            <span className="font-mono text-[11.5px] gm-text-3 tabular-nums">
-                                {accounts.length} 条
-                            </span>
-                        </div>
-                        <p className="gm-subtitle">管理您的所有谷歌账号资产</p>
-                    </div>
-
-                    <div className="gm-list-actions">
-                        <div className="gm-search-box">
-                            <Search className="gm-search-icon" size={14} />
-                            <input
-                                ref={searchInputRef}
-                                type="text"
-                                placeholder="搜索邮箱或备注内容..."
-                                value={search}
-                                onChange={handleSearchChange}
-                                className="gm-input"
-                            />
-                            {search ? (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSearch('');
-                                        pagination.resetPage();
-                                        onSearchChange?.('');
-                                        searchInputRef.current?.focus();
-                                    }}
-                                    className="gm-search-clear"
-                                    aria-label="清空搜索"
-                                    title="清空搜索"
-                                >
-                                    <X size={13} />
-                                </button>
-                            ) : (
-                                <span className="gm-search-kbd inline-flex items-center gap-0.5">
-                                    <kbd className="gm-kbd">Ctrl</kbd>
-                                    <kbd className="gm-kbd">K</kbd>
-                                </span>
-                            )}
-                        </div>
-
-                        <button
+            <PageToolbar
+                title="账号库"
+                subtitle="管理您的所有谷歌账号资产"
+                left={<span className="chip font-mono">{accounts.length} 条</span>}
+                right={
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <GlassSearch
+                            ref={searchInputRef}
+                            value={search}
+                            onChange={handleSearchChange}
+                            onClear={() => {
+                                setSearch('');
+                                pagination.resetPage();
+                                onSearchChange?.('');
+                                searchInputRef.current?.focus();
+                            }}
+                            placeholder="搜索邮箱或备注内容..."
+                            ariaLabel="搜索邮箱或备注内容"
+                            shortcutHint="Ctrl+K"
+                        />
+                        <GlassButton
+                            glass
+                            pill
                             onClick={handleOpenExportDialog}
-                            className="gm-btn gm-btn-secondary"
                             title="导出账号为文本文件"
                         >
-                            <FileDown size={15} />
+                            <FluentIcon name="export" size={16} />
                             <span>导出账号</span>
-                        </button>
+                        </GlassButton>
                     </div>
-                </div>
+                }
+            />
 
-                {/* 横向像素胶囊分类筛选条（常驻显示，支持添加/管理自定义分类与未分类筛选） */}
+            <div className="list-wrap page-in space-y-3.5">
+                {/* 横向液态玻璃分类筛选条（常驻显示，支持添加/管理自定义分类与未分类筛选） */}
                 <div className="gm-filter-strip" role="group" aria-label="账号分类筛选">
                     <button
                         type="button"
@@ -952,7 +925,7 @@ const AccountListView = ({
                             >
                                 {colorMeta && (
                                     <span
-                                        className="w-1.5 h-1.5 rounded-[1px] shrink-0"
+                                        className="w-1.5 h-1.5 rounded-full shrink-0"
                                         style={{ background: colorMeta.dot }}
                                         aria-hidden="true"
                                     />
@@ -984,12 +957,12 @@ const AccountListView = ({
                             className="gm-filter-pill inline-flex items-center gap-1"
                             style={{
                                 borderStyle: 'dashed',
-                                color: 'var(--primary)',
-                                borderColor: 'rgba(91, 142, 244, 0.35)',
+                                color: 'var(--accent)',
+                                borderColor: 'color-mix(in srgb, var(--accent) 40%, transparent)',
                             }}
                             title="添加或自定义谷歌邮箱分类"
                         >
-                            <FolderPlus size={12} />
+                            <FluentIcon name="add" size={13} />
                             <span>添加分类</span>
                         </button>
                     )}
@@ -1001,24 +974,11 @@ const AccountListView = ({
                             className="gm-filter-pill inline-flex items-center gap-1"
                             title="重命名、改色或删除分类"
                         >
-                            <SlidersHorizontal size={11.5} />
+                            <FluentIcon name="settings" size={13} />
                             <span>管理分类</span>
                         </button>
                     )}
                 </div>
-
-                {/* 批量操作工具栏 */}
-                <BatchToolbar
-                    selectedCount={selection.selectedIds.size}
-                    totalResultCount={currentResultAccountIds.length}
-                    canSelectAllCurrentResult={canSelectAllCurrentResult}
-                    isBatchProcessing={isBatchProcessing}
-                    onSelectAllCurrentResult={handleSelectAllCurrentResult}
-                    onBatchEdit={handleBatchEdit}
-                    onBatchDelete={handleBatchDelete}
-                    onBatchClearBrowserCache={handleBatchClearBrowserCache}
-                    onClearSelection={selection.clearSelection}
-                />
 
                 {/* 表格 */}
                 <AccountTable
@@ -1076,6 +1036,19 @@ const AccountListView = ({
                 )}
             </div>
 
+            {/* 悬浮液态玻璃批量操作条（位于 .page-in 外层避免 transform 影响 fixed 定位） */}
+            <BatchToolbar
+                selectedCount={selection.selectedIds.size}
+                totalResultCount={currentResultAccountIds.length}
+                canSelectAllCurrentResult={canSelectAllCurrentResult}
+                isBatchProcessing={isBatchProcessing}
+                onSelectAllCurrentResult={handleSelectAllCurrentResult}
+                onBatchEdit={handleBatchEdit}
+                onBatchDelete={handleBatchDelete}
+                onBatchClearBrowserCache={handleBatchClearBrowserCache}
+                onClearSelection={selection.clearSelection}
+            />
+
             {/* 历史记录抽屉 */}
             <HistoryDrawer
                 isOpen={historyDrawer.isOpen}
@@ -1113,7 +1086,8 @@ const AccountListView = ({
                     onClick={() => setBatchCategoryModal(null)}
                 >
                     <div
-                        className="gm-modal w-full max-w-md"
+                        className="gm-modal glass w-full max-w-md"
+                        data-lens="sheet"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="gm-modal-header">
@@ -1121,11 +1095,11 @@ const AccountListView = ({
                             <button
                                 type="button"
                                 onClick={() => setBatchCategoryModal(null)}
-                                className="gm-icon-btn"
-                                style={{ width: 30, height: 30 }}
+                                className="gbtn icon"
+                                style={{ width: 30, height: 30, minWidth: 30 }}
                                 aria-label="关闭批量分类"
                             >
-                                <X size={16} />
+                                <FluentIcon name="dismiss" size={16} />
                             </button>
                         </div>
                         <form onSubmit={applyBatchCategoryAssignment}>
@@ -1156,13 +1130,13 @@ const AccountListView = ({
                                                     >
                                                         {meta && (
                                                             <span
-                                                                className="w-1.5 h-1.5 rounded-[1px]"
+                                                                className="w-1.5 h-1.5 rounded-full"
                                                                 style={{ background: meta.dot }}
                                                                 aria-hidden="true"
                                                             />
                                                         )}
                                                         <span>{name}</span>
-                                                        {active && <Check size={11} />}
+                                                        {active && <FluentIcon name="check" size={12} />}
                                                     </button>
                                                 );
                                             })}
@@ -1197,7 +1171,7 @@ const AccountListView = ({
                                                 disabled={creatingBatchQuickCat || !batchQuickCatName.trim()}
                                                 className="gm-btn gm-btn-secondary gm-btn-sm shrink-0"
                                             >
-                                                <Plus size={12} />
+                                                <FluentIcon name="add" size={13} />
                                                 <span>新建并选中</span>
                                             </button>
                                         </div>
@@ -1261,11 +1235,12 @@ const AccountListView = ({
                                 <button
                                     type="button"
                                     onClick={() => setBatchCategoryModal(null)}
-                                    className="gm-btn gm-btn-secondary flex-1"
+                                    className="gbtn glass flex-1"
+                                    data-lens="cap"
                                 >
                                     取消
                                 </button>
-                                <button type="submit" className="gm-btn gm-btn-primary flex-1">
+                                <button type="submit" className="gbtn glass prominent flex-1" data-lens="cap">
                                     应用
                                 </button>
                             </div>

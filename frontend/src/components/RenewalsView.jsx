@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    CalendarClock,
-    Check,
-    Download,
-    Plus,
-    RefreshCw,
-    Trash2,
-    Edit3,
-    Bell,
-    Clock,
-    Wallet,
-    ArrowLeftRight,
-    X,
-} from 'lucide-react';
 import api from '../services/api';
+import {
+    BrandLogo,
+    Chip,
+    EmptyState,
+    FluentIcon,
+    GlassButton,
+    GlassCapsule,
+    PageToolbar,
+    SegmentedControl,
+} from './glass';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { isTauriRuntime } from '../utils/tauriRuntime';
@@ -44,12 +40,18 @@ const EMPTY_FORM = {
     note: '',
 };
 
-const DAYS_BADGE_STYLE = {
-    danger: { background: 'var(--danger-soft)', color: 'var(--danger)' },
-    warning: { background: 'var(--warning-soft)', color: 'var(--warning)' },
-    accent: { background: 'var(--primary-light)', color: 'var(--primary)' },
-    muted: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)' },
+const mapBadgeTone = (tone) => {
+    if (tone === 'danger') return 'bad';
+    if (tone === 'warning') return 'warn';
+    if (tone === 'accent') return 'accent';
+    return '';
 };
+
+const RANGE_OPTIONS = [
+    { value: 30, label: '30 天内' },
+    { value: 90, label: '90 天内' },
+    { value: 365, label: '365 天内' },
+];
 
 const RenewalsView = ({ fxInfo: externalFxInfo, onRefreshFxRate, onNotify, onNavigate, onOverviewChanged }) => {
     const [withinDays, setWithinDays] = useState(90);
@@ -287,429 +289,400 @@ const RenewalsView = ({ fxInfo: externalFxInfo, onRefreshFxRate, onNotify, onNav
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6 gm-view-enter">
-            {/* 页头 */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <CalendarClock size={20} style={{ color: 'var(--primary)' }} />
-                        <span>费用与续费</span>
-                    </h1>
-                    <p className="gm-subtitle mt-1">
-                        统一汇总服务器、域名、AI 订阅与支付卡支出，管理周期续费与自定义备忘。
-                    </p>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => loadData(withinDays)}
-                        className="gm-btn gm-btn-ghost"
-                        disabled={loading}
-                    >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        <span>刷新</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleExportIcs}
-                        className="gm-btn gm-btn-ghost"
-                    >
-                        <Download size={14} />
-                        <span>导出 .ics</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={openCreateModal}
-                        className="gm-btn gm-btn-primary"
-                    >
-                        <Plus size={14} />
-                        <span>新建备忘</span>
-                    </button>
-                </div>
-            </div>
+        <>
+            <PageToolbar
+                title="费用与续费"
+                subtitle="统一汇总服务器、域名、AI 订阅与支付卡支出"
+                right={
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <SegmentedControl
+                            label="续费时间范围"
+                            options={RANGE_OPTIONS}
+                            value={withinDays}
+                            onChange={setWithinDays}
+                        />
+                        <GlassCapsule>
+                            <GlassButton onClick={() => loadData(withinDays)} disabled={loading} title="刷新数据">
+                                <FluentIcon name="sync" size={16} className={loading ? 'animate-spin' : ''} />
+                                <span>刷新</span>
+                            </GlassButton>
+                            <GlassButton onClick={handleExportIcs} title="导出 iCalendar 日历文件">
+                                <FluentIcon name="export" size={16} />
+                                <span>导出 .ics</span>
+                            </GlassButton>
+                        </GlassCapsule>
+                        <GlassButton glass pill prominent onClick={openCreateModal}>
+                            <FluentIcon name="add" size={16} />
+                            <span>新建备忘</span>
+                        </GlassButton>
+                    </div>
+                }
+            />
 
-            {/* 单人民币统一结算总览（自动按实时汇率折算 USD） */}
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-4" aria-label="支出概览">
-                <div className="gm-card gm-pixel-card p-4 space-y-2">
-                    <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span className="flex items-center gap-1.5">
-                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
-                            <span>月度总支出（人民币结算）</span>
+            <div className="page page-in">
+                {/* 统一人民币结算总览卡片 */}
+                <section className="overview group" aria-label="支出概览">
+                    <div className="ov-main">
+                        <span className="k">月度总支出（人民币结算）</span>
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="v">{formatCnyAmount(unifiedSpend.monthlyCny)}</span>
+                            <span className="s">/ 月</span>
+                        </div>
+                        <span className="s">
+                            折合年付总支出{' '}
+                            <strong style={{ color: 'var(--accent)' }}>{formatCnyAmount(unifiedSpend.yearlyCny)}</strong> / 年
+                            {unifiedSpend.usdMonthly > 0
+                                ? ` · 含美元折算 ${formatMoney(unifiedSpend.usdMonthly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdMonthlyInCny)}`
+                                : ' · 全部为人民币计费，无需换汇'}
                         </span>
-                        <Wallet size={14} />
-                    </div>
-                    <div className="flex items-baseline gap-2.5">
-                        <span className="font-mono text-2xl font-bold gm-text-1">
-                            {formatCnyAmount(unifiedSpend.monthlyCny)}
-                        </span>
-                        <span className="text-[12px] gm-text-3">/ 月</span>
-                    </div>
-                    <div className="text-[11.5px] gm-text-2 font-mono">
-                        {unifiedSpend.usdMonthly > 0 ? (
-                            <>
-                                含美元折算 {formatMoney(unifiedSpend.usdMonthly, 'USD')} → {formatCnyAmount(unifiedSpend.usdMonthlyInCny)}
-                            </>
-                        ) : (
-                            '全部为人民币计费，无需换汇'
+                        {unifiedSpend.onceCny > 0 && (
+                            <span className="muted text-[12px]">
+                                另含一次性支出 {formatCnyAmount(unifiedSpend.onceCny)}
+                            </span>
                         )}
                     </div>
-                </div>
 
-                <div className="gm-card gm-pixel-card p-4 space-y-2">
-                    <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span className="flex items-center gap-1.5">
-                            <span className="gm-pixel-led is-success" aria-hidden="true" />
-                            <span>折合年付总支出（人民币）</span>
-                        </span>
-                        <Wallet size={14} />
-                    </div>
-                    <div className="flex items-baseline gap-2.5">
-                        <span className="font-mono text-2xl font-bold gm-text-1">
-                            {formatCnyAmount(unifiedSpend.yearlyCny)}
-                        </span>
-                        <span className="text-[12px] gm-text-3">/ 年</span>
-                    </div>
-                    <div className="text-[11.5px] gm-text-2 font-mono">
-                        {unifiedSpend.onceCny > 0
-                            ? `另含一次性支出 ${formatCnyAmount(unifiedSpend.onceCny)}`
-                            : unifiedSpend.usdYearly > 0
-                                ? `含美元年付 ${formatMoney(unifiedSpend.usdYearly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdYearlyInCny)}`
-                                : `共 ${unifiedSpend.totalPricedCount} 项已标价资产`}
-                    </div>
-                </div>
-
-                <div className="gm-card gm-pixel-card p-4 space-y-2">
-                    <div className="flex items-center justify-between text-[12px] gm-text-3">
-                        <span className="flex items-center gap-1.5">
-                            <ArrowLeftRight size={13} style={{ color: 'var(--primary)' }} />
-                            <span>实时汇率 &amp; 计费统计</span>
-                        </span>
-                        <button
-                            type="button"
-                            onClick={handleRefreshFx}
-                            disabled={Boolean(fxInfo.loading)}
-                            className="gm-btn gm-btn-ghost p-1 text-[11px]"
-                            aria-label="刷新实时汇率"
-                            title="立即拉取最新 USD → CNY 汇率"
-                        >
-                            <RefreshCw size={12} className={fxInfo.loading ? 'animate-spin' : ''} />
-                        </button>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-mono text-xl font-bold" style={{ color: 'var(--primary)' }}>
-                            1 USD = ¥{unifiedSpend.rate.toFixed(4)}
-                        </span>
-                        <span
-                            className={`gm-pixel-tag ${fxInfo.isFallback ? '' : 'is-success'}`}
-                            title={fxInfo.updatedAt ? `更新于 ${fxInfo.updatedAt}` : ''}
-                        >
-                            {fxInfo.isFallback ? '缓存/参考' : '实时汇率'}
-                        </span>
-                    </div>
-                    <div className="text-[11.5px] gm-text-2 flex items-center justify-between gap-2">
-                        <span>
-                            已标价 <strong className="font-mono gm-text-1">{unifiedSpend.totalPricedCount}</strong> 项 · 即将到期 <strong className="font-mono gm-text-1">{summary.timeline.length}</strong> 项
-                        </span>
-                        <span className="text-[10.5px] gm-text-3 truncate max-w-[110px]" title={fxInfo.source}>
-                            {fxInfo.source}
-                        </span>
-                    </div>
-                </div>
-            </section>
-
-            {/* 下方双栏：左续费时间线 / 右备忘提醒 */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                <section className="lg:col-span-7 gm-card p-4 space-y-4" aria-label="续费时间线">
-                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-[var(--border-light)]">
-                        <h2 className="text-[14px] font-semibold gm-text-1">到期与续费时间线</h2>
-                        <div className="flex items-center gap-1">
-                            {[30, 90, 365].map(days => (
+                    <div className="ov-cats">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span
+                                className="chip accent font-mono"
+                                title={fxInfo.updatedAt ? `更新于 ${fxInfo.updatedAt}` : `来源：${fxInfo.source}`}
+                            >
+                                1 USD = ¥{unifiedSpend.rate.toFixed(4)}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <Chip tone={fxInfo.isFallback ? '' : 'ok'}>
+                                    {fxInfo.isFallback ? '缓存/参考' : '实时汇率'}
+                                </Chip>
                                 <button
-                                    key={days}
                                     type="button"
-                                    onClick={() => setWithinDays(days)}
-                                    className={`px-2.5 py-1 rounded text-[11.5px] font-medium transition-colors ${
-                                        withinDays === days
-                                            ? 'bg-[var(--primary-light)] text-[var(--primary)]'
-                                            : 'gm-text-3 hover:bg-[var(--bg-hover)]'
-                                    }`}
+                                    onClick={handleRefreshFx}
+                                    disabled={Boolean(fxInfo.loading)}
+                                    className="btn"
+                                    style={{ height: 28, padding: '0 10px' }}
+                                    aria-label="刷新实时汇率"
+                                    title="立即拉取最新 USD → CNY 汇率"
                                 >
-                                    {days} 天内
+                                    <FluentIcon
+                                        name="sync"
+                                        size={13}
+                                        className={fxInfo.loading ? 'animate-spin' : ''}
+                                    />
                                 </button>
-                            ))}
+                            </div>
+                        </div>
+
+                        <div className="prov">
+                            <FluentIcon name="receipt" size={16} style={{ color: 'var(--accent)' }} />
+                            <span>已标价资产</span>
+                            <span className="muted font-semibold" style={{ color: 'var(--text)' }}>
+                                {unifiedSpend.totalPricedCount} 项
+                            </span>
+                        </div>
+                        <div className="prov">
+                            <FluentIcon name="calendar" size={16} style={{ color: 'var(--orange)' }} />
+                            <span>{withinDays} 天内即将到期</span>
+                            <span className="muted font-semibold" style={{ color: 'var(--text)' }}>
+                                {summary.timeline.length} 项
+                            </span>
+                        </div>
+                        <div className="prov">
+                            <span className="muted" style={{ marginLeft: 0 }} title={fxInfo.source}>
+                                汇率来源：{fxInfo.source}
+                            </span>
                         </div>
                     </div>
+                </section>
 
-                    {summary.timeline.length === 0 ? (
-                        <div className="py-10 text-center text-[13px] gm-text-3">
-                            {loading ? '正在统计到期数据…' : `未来 ${withinDays} 天内暂无待续费资产`}
+                {/* 下方双栏：续费时间线 / 备忘提醒 */}
+                <div className="section grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <section className="lg:col-span-7" aria-label="续费时间线">
+                        <div className="section-h">
+                            <h2>到期与续费时间线</h2>
+                            <span className="muted text-[12px] tabular-nums">
+                                共 {summary.timeline.length} 项
+                            </span>
                         </div>
-                    ) : (
-                        <div className="space-y-2">
-                            {summary.timeline.map(item => {
-                                const badge = formatDaysBadge(item.days);
-                                const key = `${item.kind}:${item.id}`;
-                                const canAdvance = !item.fixedExpiry && (item.billingCycle === 'month' || item.billingCycle === 'year');
-                                return (
-                                    <div
-                                        key={key}
-                                        className="flex items-center justify-between gap-3 p-3 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-light)]"
-                                    >
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="gm-chip">{formatKindLabel(item.kind)}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => navigateKind(item.kind)}
-                                                    className="text-[13.5px] font-medium gm-text-1 hover:underline truncate text-left"
-                                                >
-                                                    {item.name}
-                                                </button>
-                                            </div>
-                                            <div className="flex items-center gap-2 mt-1 text-[11.5px] gm-text-3 font-mono">
-                                                <span>{item.date}</span>
-                                                {item.subtitle && <span className="truncate">· {item.subtitle}</span>}
-                                                {typeof item.billingAmount === 'number' && (() => {
-                                                    const cnyPrice = convertToCny(
-                                                        item.billingAmount,
-                                                        item.billingCurrency,
-                                                        unifiedSpend.rate,
-                                                    );
-                                                    return (
-                                                        <span className="gm-text-2">
-                                                            · {formatCnyAmount(cnyPrice)}/{formatCycleLabel(item.billingCycle)}
-                                                            {item.billingCurrency === 'USD' && (
-                                                                <span className="ml-1 gm-text-3">
-                                                                    ({formatMoney(item.billingAmount, 'USD')})
-                                                                </span>
-                                                            )}
+
+                        <div className="group">
+                            {summary.timeline.length === 0 ? (
+                                <EmptyState
+                                    icon="calendar"
+                                    title={loading ? '正在统计到期数据…' : `未来 ${withinDays} 天内暂无待续费资产`}
+                                    description="已配置到期日或计费周期的服务器、域名、AI 订阅与支付卡会自动汇聚到这里。"
+                                />
+                            ) : (
+                                <ul className="rows logo-rows">
+                                    {summary.timeline.map(item => {
+                                        const badge = formatDaysBadge(item.days);
+                                        const key = `${item.kind}:${item.id}`;
+                                        const canAdvance = !item.fixedExpiry && (item.billingCycle === 'month' || item.billingCycle === 'year');
+                                        const cnyPrice = typeof item.billingAmount === 'number'
+                                            ? convertToCny(item.billingAmount, item.billingCurrency, unifiedSpend.rate)
+                                            : null;
+                                        return (
+                                            <li key={key}>
+                                                <div className="rrow">
+                                                    <BrandLogo
+                                                        name={item.name}
+                                                        hints={[item.subtitle, item.name, item.kind]}
+                                                    />
+                                                    <span className="od-field">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => navigateKind(item.kind)}
+                                                            className="t od-truncate text-left border-0 bg-transparent p-0 hover:underline cursor-pointer"
+                                                            style={{ color: 'var(--text)' }}
+                                                        >
+                                                            {item.name}
+                                                        </button>
+                                                        <span className="s od-truncate">
+                                                            {formatKindLabel(item.kind)}
+                                                            {item.subtitle ? ` · ${item.subtitle}` : ''}
+                                                            {item.billingCycle ? ` · ${formatCycleLabel(item.billingCycle)}` : ''}
+                                                            {item.billingCurrency === 'USD' && typeof item.billingAmount === 'number'
+                                                                ? ` · ${formatMoney(item.billingAmount, 'USD')}`
+                                                                : ''}
                                                         </span>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <span
-                                                className="px-2 py-0.5 rounded text-[11px] font-medium"
-                                                style={DAYS_BADGE_STYLE[badge.tone]}
-                                            >
-                                                {badge.text}
-                                            </span>
-                                            {canAdvance && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleAdvanceRenewal(item)}
-                                                    disabled={advancingKey === key}
-                                                    className="gm-btn gm-btn-ghost text-[12px] px-2.5 py-1"
-                                                    title="按周期顺延一期"
-                                                >
-                                                    <Check size={12} />
-                                                    <span>已续费</span>
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </section>
-
-                <section className="lg:col-span-5 gm-card p-4 space-y-4" aria-label="备忘提醒">
-                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-[var(--border-light)]">
-                        <h2 className="text-[14px] font-semibold gm-text-1 flex items-center gap-1.5">
-                            <Bell size={14} style={{ color: 'var(--primary)' }} />
-                            <span>备忘提醒</span>
-                        </h2>
-                        <label className="flex items-center gap-1.5 text-[11.5px] gm-text-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                className="gm-checkbox"
-                                checked={showCompleted}
-                                onChange={(e) => setShowCompleted(e.target.checked)}
-                            />
-                            <span>显示已完成</span>
-                        </label>
-                    </div>
-
-                    {visibleReminders.length === 0 ? (
-                        <div className="py-10 text-center text-[13px] gm-text-3">
-                            暂无待办备忘，点击右上角「新建备忘」添加
-                        </div>
-                    ) : (
-                        <div className="space-y-2">
-                            {visibleReminders.map(rem => {
-                                const days = daysUntilDay(rem.dueAt);
-                                const badge = formatDaysBadge(days);
-                                return (
-                                    <div
-                                        key={rem.id}
-                                        className={`p-3 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-light)] space-y-1.5 ${
-                                            rem.done ? 'opacity-60' : ''
-                                        }`}
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0 flex-1">
-                                                <div className={`text-[13px] font-medium gm-text-1 ${rem.done ? 'line-through' : ''}`}>
-                                                    {rem.title}
+                                                    </span>
+                                                    <span className="od-field due">
+                                                        <span className="font-mono">{item.date}</span>
+                                                        <span className="muted">{formatCycleLabel(item.billingCycle)}</span>
+                                                    </span>
+                                                    <Chip tone={mapBadgeTone(badge.tone)}>{badge.text}</Chip>
+                                                    <span className="amount">
+                                                        {cnyPrice !== null ? formatCnyAmount(cnyPrice) : '未标价'}
+                                                    </span>
+                                                    {canAdvance ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAdvanceRenewal(item)}
+                                                            disabled={advancingKey === key}
+                                                            className="btn"
+                                                            style={{ height: 30, padding: '0 12px' }}
+                                                            title="按周期顺延一期"
+                                                        >
+                                                            <FluentIcon name="check" size={14} />
+                                                            <span>已续费</span>
+                                                        </button>
+                                                    ) : (
+                                                        <span className="muted text-[12px] text-right">固定到期</span>
+                                                    )}
                                                 </div>
-                                                <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] gm-text-3 font-mono">
-                                                    <span>{rem.dueAt}</span>
-                                                    <span>· {formatRepeatLabel(rem.repeat)}</span>
-                                                    <span>· 提前 {rem.leadDays} 天</span>
-                                                </div>
-                                            </div>
-                                            {!rem.done && (
-                                                <span
-                                                    className="px-2 py-0.5 rounded text-[11px] font-medium shrink-0"
-                                                    style={DAYS_BADGE_STYLE[badge.tone]}
-                                                >
-                                                    {badge.text}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {rem.note && (
-                                            <p className="text-[12px] gm-text-2 break-words">{rem.note}</p>
-                                        )}
-                                        <div className="flex items-center justify-end gap-1 pt-1">
-                                            {!rem.done && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleCompleteReminder(rem)}
-                                                    className="gm-btn gm-btn-ghost text-[11.5px] px-2 py-1"
-                                                >
-                                                    <Check size={12} />
-                                                    <span>{rem.repeat === 'none' ? '完成' : '完成并顺延'}</span>
-                                                </button>
-                                            )}
-                                            <button
-                                                type="button"
-                                                onClick={() => openEditModal(rem)}
-                                                className="gm-btn gm-btn-ghost text-[11.5px] px-2 py-1"
-                                                aria-label={`编辑 ${rem.title}`}
-                                            >
-                                                <Edit3 size={12} />
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleDeleteReminder(rem)}
-                                                className="gm-btn gm-btn-ghost text-[11.5px] px-2 py-1 hover:text-[var(--danger)]"
-                                                aria-label={`删除 ${rem.title}`}
-                                            >
-                                                <Trash2 size={12} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
                         </div>
-                    )}
-                </section>
+                    </section>
+
+                    <section className="lg:col-span-5" aria-label="备忘提醒">
+                        <div className="section-h">
+                            <h2>备忘提醒</h2>
+                            <label className="flex items-center gap-2 text-[12.5px] muted cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="check"
+                                    checked={showCompleted}
+                                    onChange={(e) => setShowCompleted(e.target.checked)}
+                                />
+                                <span>显示已完成</span>
+                            </label>
+                        </div>
+
+                        <div className="group">
+                            {visibleReminders.length === 0 ? (
+                                <EmptyState
+                                    icon="clock"
+                                    title="暂无待办备忘"
+                                    description="点击右上角「新建备忘」记录自定义到期事项。"
+                                />
+                            ) : (
+                                <ul className="rows flush">
+                                    {visibleReminders.map(rem => {
+                                        const days = daysUntilDay(rem.dueAt);
+                                        const badge = formatDaysBadge(days);
+                                        return (
+                                            <li key={rem.id}>
+                                                <div className={`row flex-col items-stretch gap-2.5 ${rem.done ? 'opacity-60' : ''}`}>
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="od-field od-fill">
+                                                            <span className={`t ${rem.done ? 'todo-text done' : ''}`}>
+                                                                {rem.title}
+                                                            </span>
+                                                            <span className="s font-mono">
+                                                                {rem.dueAt} · {formatRepeatLabel(rem.repeat)} · 提前 {rem.leadDays} 天
+                                                            </span>
+                                                        </div>
+                                                        {!rem.done && (
+                                                            <Chip tone={mapBadgeTone(badge.tone)}>{badge.text}</Chip>
+                                                        )}
+                                                    </div>
+                                                    {rem.note && (
+                                                        <p className="text-[12.5px] muted break-words m-0">{rem.note}</p>
+                                                    )}
+                                                    <div className="flex items-center justify-end gap-1.5">
+                                                        {!rem.done && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleCompleteReminder(rem)}
+                                                                className="btn"
+                                                                style={{ height: 28, padding: '0 10px', fontSize: 'var(--fs-s)' }}
+                                                            >
+                                                                <FluentIcon name="check" size={13} />
+                                                                <span>{rem.repeat === 'none' ? '完成' : '完成并顺延'}</span>
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEditModal(rem)}
+                                                            className="gbtn icon"
+                                                            style={{ width: 28, height: 28, minWidth: 28 }}
+                                                            aria-label={`编辑 ${rem.title}`}
+                                                            title="编辑"
+                                                        >
+                                                            <FluentIcon name="edit" size={15} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteReminder(rem)}
+                                                            className="gbtn icon"
+                                                            style={{ width: 28, height: 28, minWidth: 28, color: 'var(--red)' }}
+                                                            aria-label={`删除 ${rem.title}`}
+                                                            title="删除"
+                                                        >
+                                                            <FluentIcon name="trash" size={15} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+                    </section>
+                </div>
             </div>
 
-            {/* 新建/编辑备忘弹窗 */}
+            {/* 新建/编辑备忘液态玻璃弹窗 */}
             {modalOpen && renderInBody(
-                <div className="gm-overlay" role="dialog" aria-modal="true" aria-label={editingId ? '编辑备忘' : '新建备忘'}>
-                    <div className="gm-panel w-full max-w-md p-5 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[15px] font-semibold gm-text-1">
-                                {editingId ? '编辑备忘' : '新建备忘'}
-                            </h3>
-                            <button
-                                type="button"
-                                onClick={() => setModalOpen(false)}
-                                className="gm-btn gm-btn-ghost p-1"
-                                aria-label="关闭"
-                            >
-                                <X size={16} />
-                            </button>
-                        </div>
+                <div
+                    className="gm-overlay"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={editingId ? '编辑备忘' : '新建备忘'}
+                    onClick={() => setModalOpen(false)}
+                >
+                    <div
+                        className="sheet glass"
+                        data-lens="sheet"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <form onSubmit={handleSaveReminder}>
+                            <div className="sheet-in">
+                                <div className="flex items-center justify-between">
+                                    <span style={{ width: 28 }} />
+                                    <h2>{editingId ? '编辑备忘' : '新建备忘'}</h2>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModalOpen(false)}
+                                        className="gbtn icon"
+                                        style={{ width: 28, height: 28, minWidth: 28 }}
+                                        aria-label="关闭"
+                                    >
+                                        <FluentIcon name="dismiss" size={16} />
+                                    </button>
+                                </div>
+                                <p className="desc">配置到期日期与重复周期，到期前会在首页与工作区提示。</p>
 
-                        <form onSubmit={handleSaveReminder} className="space-y-3">
-                            <div className="space-y-1">
-                                <label className="text-[12px] gm-text-2">标题 *</label>
-                                <input
-                                    type="text"
-                                    className="gm-input w-full"
-                                    value={form.title}
-                                    onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
-                                    placeholder="例如：检查机场流量 / 宽带续费"
-                                    maxLength={80}
-                                    required
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <label className="text-[12px] gm-text-2">到期日期 *</label>
+                                <div className="field">
+                                    <label>
+                                        标题<span className="req">*</span>
+                                    </label>
                                     <input
-                                        type="date"
-                                        min={DATE_INPUT_MIN}
-                                        max={DATE_INPUT_MAX}
-                                        className="gm-input w-full"
-                                        value={form.dueAt}
-                                        onChange={(e) => setForm(prev => ({
-                                            ...prev,
-                                            dueAt: clampDateInputValue(e.target.value),
-                                        }))}
-                                        onBlur={(e) => setForm(prev => ({
-                                            ...prev,
-                                            dueAt: finalizeDateInputValue(e.target.value),
-                                        }))}
+                                        type="text"
+                                        value={form.title}
+                                        onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
+                                        placeholder="例如：检查机场流量 / 宽带续费"
+                                        maxLength={80}
                                         required
                                     />
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-[12px] gm-text-2">重复周期</label>
-                                    <select
-                                        className="gm-input w-full"
-                                        value={form.repeat}
-                                        onChange={(e) => setForm(prev => ({ ...prev, repeat: e.target.value }))}
-                                    >
-                                        <option value="none">不重复</option>
-                                        <option value="week">每周</option>
-                                        <option value="month">每月</option>
-                                        <option value="year">每年</option>
-                                    </select>
+
+                                <div className="pair">
+                                    <div className="field">
+                                        <label>
+                                            到期日期<span className="req">*</span>
+                                        </label>
+                                        <input
+                                            type="date"
+                                            min={DATE_INPUT_MIN}
+                                            max={DATE_INPUT_MAX}
+                                            value={form.dueAt}
+                                            onChange={(e) => setForm(prev => ({
+                                                ...prev,
+                                                dueAt: clampDateInputValue(e.target.value),
+                                            }))}
+                                            onBlur={(e) => setForm(prev => ({
+                                                ...prev,
+                                                dueAt: finalizeDateInputValue(e.target.value),
+                                            }))}
+                                            required
+                                        />
+                                    </div>
+                                    <div className="field">
+                                        <label>重复周期</label>
+                                        <select
+                                            value={form.repeat}
+                                            onChange={(e) => setForm(prev => ({ ...prev, repeat: e.target.value }))}
+                                        >
+                                            <option value="none">不重复</option>
+                                            <option value="week">每周</option>
+                                            <option value="month">每月</option>
+                                            <option value="year">每年</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="field">
+                                    <label>提前提醒天数 (0-90)</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        max={90}
+                                        value={form.leadDays}
+                                        onChange={(e) => setForm(prev => ({ ...prev, leadDays: Number(e.target.value) }))}
+                                    />
+                                </div>
+
+                                <div className="field">
+                                    <label>备注</label>
+                                    <textarea
+                                        rows={3}
+                                        value={form.note}
+                                        onChange={(e) => setForm(prev => ({ ...prev, note: e.target.value }))}
+                                        placeholder="可选备注说明"
+                                        maxLength={1000}
+                                    />
                                 </div>
                             </div>
 
-                            <div className="space-y-1">
-                                <label className="text-[12px] gm-text-2">提前提醒天数 (0-90)</label>
-                                <input
-                                    type="number"
-                                    min={0}
-                                    max={90}
-                                    className="gm-input w-full"
-                                    value={form.leadDays}
-                                    onChange={(e) => setForm(prev => ({ ...prev, leadDays: Number(e.target.value) }))}
-                                />
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-[12px] gm-text-2">备注</label>
-                                <textarea
-                                    rows={3}
-                                    className="gm-input w-full"
-                                    value={form.note}
-                                    onChange={(e) => setForm(prev => ({ ...prev, note: e.target.value }))}
-                                    placeholder="可选备注说明"
-                                    maxLength={1000}
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-2">
+                            <div className="sheet-foot">
                                 <button
                                     type="button"
                                     onClick={() => setModalOpen(false)}
-                                    className="gm-btn gm-btn-ghost"
+                                    className="gbtn glass"
+                                    data-lens="cap"
                                 >
                                     取消
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={saving}
-                                    className="gm-btn gm-btn-primary"
+                                    className="gbtn glass prominent"
+                                    data-lens="cap"
                                 >
                                     {saving ? '保存中…' : '保存'}
                                 </button>
@@ -718,7 +691,7 @@ const RenewalsView = ({ fxInfo: externalFxInfo, onRefreshFxRate, onNotify, onNav
                     </div>
                 </div>,
             )}
-        </div>
+        </>
     );
 };
 

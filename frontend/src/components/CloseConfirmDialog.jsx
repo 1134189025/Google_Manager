@@ -62,7 +62,8 @@ const CloseConfirmDialog = ({ isOpen, onClose, onNotify }) => {
             onClick={() => !busy && onClose?.()}
         >
             <div
-                className="gm-modal w-full max-w-md p-6 space-y-4"
+                className="gm-modal glass w-full max-w-md p-6 space-y-4"
+                data-lens="sheet"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-start justify-between gap-3">

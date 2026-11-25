@@ -1,20 +1,26 @@
 /* ============================================
-   双轨微动效体系（流畅阻尼轨 + 像素阶梯轨）
-   - 视图与容器级入场动画严格使用 backwards，绝不保留 transform
+   液态玻璃动效体系（流畅弹簧 + 阻尼过渡）
+   - 视图与容器级入场动画严格使用 backwards，结束后绝不保留 transform
    ============================================ */
 
 :root {
-  --ease-damp: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-fast: 140ms;
-  --dur-mid: 200ms;
-  --dur-view: 240ms;
+  --ease-damp: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 160ms;
+  --dur-mid: 260ms;
+  --dur-view: 260ms;
 }
 
-/* ---------- 流畅阻尼轨 ---------- */
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 @keyframes gmViewEnter {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -23,29 +29,46 @@
 }
 
 @keyframes gmFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheetIn {
   from {
     opacity: 0;
+    transform: scale(0.94);
   }
+}
+
+@keyframes sheetOut {
   to {
-    opacity: 1;
+    opacity: 0;
+    transform: scale(0.96);
   }
 }
 
 @keyframes gmModalIn {
   from {
     opacity: 0;
-    transform: scale(0.97) translateY(6px);
+    transform: scale(0.94);
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
   }
 }
 
 @keyframes gmDrawerIn {
   from {
-    opacity: 0.4;
-    transform: translateX(28px);
+    opacity: 0.2;
+    transform: translateX(20px);
   }
   to {
     opacity: 1;
@@ -53,46 +76,73 @@
   }
 }
 
-@keyframes gmToastIn {
+@keyframes drop {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translate(-50%, -14px) scale(0.9);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.96);
   }
+}
+
+@keyframes squish {
+  0% { scale: 1 1; }
+  40% { scale: 1.18 0.84; }
+  100% { scale: 1 1; }
+}
+
+@keyframes grow {
+  from { transform: scaleX(0); }
+}
+
+@keyframes copied {
+  0% {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.55); }
+  100% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes gmToastDecay {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 @keyframes gmCheckPop {
-  0% {
-    transform: scale(0.84);
-  }
-  60% {
-    transform: scale(1.08);
-  }
-  100% {
-    transform: scale(1);
-  }
+  0% { transform: scale(0.84); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
 }
 
-@keyframes gmCopyFlash {
-  0% {
-    background-color: var(--primary-light);
-    color: var(--primary);
-  }
-  100% {
-    background-color: transparent;
-  }
+@keyframes gmPixelStepPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes gmPixelBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.page-in {
+  animation: pageIn var(--t-base) var(--ease-out) backwards;
 }
 
 .gm-view-enter {
@@ -100,137 +150,44 @@
 }
 
 .gm-stagger-1 {
-  animation: gmViewEnter var(--dur-view) var(--ease-damp) 30ms backwards;
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 25ms backwards;
 }
 
 .gm-stagger-2 {
-  animation: gmViewEnter var(--dur-view) var(--ease-damp) 65ms backwards;
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 55ms backwards;
 }
 
 .gm-stagger-3 {
-  animation: gmViewEnter var(--dur-view) var(--ease-damp) 100ms backwards;
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 85ms backwards;
 }
 
 .gm-stagger-4 {
-  animation: gmViewEnter var(--dur-view) var(--ease-damp) 135ms backwards;
+  animation: gmViewEnter var(--dur-view) var(--ease-damp) 115ms backwards;
 }
 
-.gm-copy-flash {
-  animation: gmCopyFlash 360ms var(--ease-damp);
+.gm-copy-flash,
+.cell.flash {
+  animation: copied 700ms var(--ease-out);
 }
 
-/* ---------- 像素阶梯轨（steps） ---------- */
-@keyframes gmPixelBlink {
-  0%, 90%, 100% {
-    transform: scaleY(1);
-  }
-  94%, 97% {
-    transform: scaleY(0.18);
-  }
-}
-
-@keyframes gmPixelFloatA {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-2px);
-  }
-}
-
-@keyframes gmPixelFloatB {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(2px);
-  }
-}
-
-@keyframes gmPixelHop {
-  0% {
-    transform: translateY(0);
-  }
-  35% {
-    transform: translateY(-4px);
-  }
-  70% {
-    transform: translateY(-1px);
-  }
-  100% {
-    transform: translateY(0);
-  }
-}
-
-@keyframes gmPixelStepPulse {
-  0%, 100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes gmPixelZ {
-  0%, 100% {
-    opacity: 0.25;
-    transform: translate(0, 0);
-  }
-  50% {
-    opacity: 0.9;
-    transform: translate(1px, -2px);
-  }
-}
-
-@keyframes gmPixelDotPulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.8);
-  }
-}
-
-.gm-pixel-eye {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: gmPixelBlink 4.6s steps(1, end) infinite;
-}
-
-.gm-pixel-float-a {
-  animation: gmPixelFloatA 2.2s steps(2, end) infinite;
-}
-
-.gm-pixel-float-b {
-  animation: gmPixelFloatB 2.6s steps(2, end) infinite;
-}
-
-.gm-pixel-z {
-  animation: gmPixelZ 2.4s steps(2, end) infinite;
-}
-
-.gm-pixel-mascot-hop:hover .gm-pixel-body,
-.gm-pixel-mascot--wave .gm-pixel-body {
-  animation: gmPixelHop 420ms steps(3, end);
+.spin {
+  animation: spin 900ms linear infinite;
 }
 
 .gm-pixel-loader-cell {
-  animation: gmPixelStepPulse 0.9s steps(2, end) infinite;
+  animation: gmPixelStepPulse 0.9s ease-in-out infinite;
 }
 
 .gm-pixel-status-pulse {
-  animation: gmPixelDotPulse 1.6s steps(2, end) infinite;
+  animation: pulse 1.8s var(--ease-out) infinite;
 }
 
-/* ---------- 降级无障碍 ---------- */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
   }
 }

@@ -1,20 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-    Globe,
-    ArrowRight,
-    Wallet,
-    RefreshCw,
-    CalendarClock,
-    Bell,
-    Sparkles,
-    CreditCard,
-    Server,
-    Terminal,
-    Bot,
-    Users,
-    ArrowLeftRight,
-} from 'lucide-react';
-import { PixelDivider, PixelMascot } from './PixelArt';
+    BrandLogo,
+    Chip,
+    FluentIcon,
+    GlassButton,
+    GlassCapsule,
+    LogoStack,
+    PageToolbar,
+} from './glass';
 import { splitGroupNameValues } from '../utils/multiValueField';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import {
@@ -31,14 +24,16 @@ import {
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 const formatClock = (date) => {
+    const month = date.getMonth() + 1;
+    const dayNum = date.getDate();
     const day = WEEKDAYS[date.getDay()];
     const hh = String(date.getHours()).padStart(2, '0');
     const mm = String(date.getMinutes()).padStart(2, '0');
-    return `${day} ${hh}:${mm}`;
+    return `${month}月${dayNum}日 ${day} ${hh}:${mm}`;
 };
 
 const getGreetingByHour = (hour) => {
-    if (hour < 6) return '还在忙吗？';
+    if (hour < 6) return '夜深了，还在忙吗？';
     if (hour < 12) return '早安，资产状态一目了然';
     if (hour < 18) return '下午好，数字资产总控台';
     return '晚上好，今天还顺利吗？';
@@ -51,18 +46,18 @@ const parseDbTimeMs = (value) => {
     return Number.isNaN(ts) ? 0 : ts;
 };
 
-const DAYS_BADGE_STYLE = {
-    danger: { background: 'var(--danger-soft)', color: 'var(--danger)' },
-    warning: { background: 'var(--warning-soft)', color: 'var(--warning)' },
-    accent: { background: 'var(--primary-light)', color: 'var(--primary)' },
-    muted: { background: 'var(--bg-elevated)', color: 'var(--text-secondary)' },
+const mapBadgeTone = (tone) => {
+    if (tone === 'danger') return 'bad';
+    if (tone === 'warning') return 'warn';
+    if (tone === 'accent') return 'accent';
+    return '';
 };
 
 /**
- * 像素风个人数字资产首页总控台
- * - 顶部聚合：统一人民币月/年费用、实时 USD→CNY 汇率、即将到期与待办数
- * - 中部矩阵：8 大工作区资产一键直达 + 到期续费/备忘双栏看板
- * - 底部保留：活跃浏览器与最近更新谷歌账号；右侧保留竖排账号统计
+ * Windows 11 Liquid Glass 首页总控台
+ * - 顶部粘性工具栏 + 快捷操作玻璃胶囊（Ctrl+K 搜索 / Alt+N 导入 / Alt+E 导出）
+ * - 排版数字统计条 + 统一人民币费用概览卡
+ * - 即将到期续费与待办备忘双栏 + 8 大数字资产工作区磁贴 + 活跃浏览器与最近更新
  */
 const HomeView = ({
     accounts = [],
@@ -81,7 +76,6 @@ const HomeView = ({
     onCopyEmail,
 }) => {
     const [now, setNow] = useState(() => new Date());
-    const [mascotHover, setMascotHover] = useState(false);
 
     const knownCategoryNames = useMemo(
         () => accountCategories.map(cat => cat?.name).filter(Boolean),
@@ -146,73 +140,82 @@ const HomeView = ({
             {
                 id: 'list',
                 label: '谷歌账号',
-                icon: Users,
+                icon: 'people',
                 value: String(stats.total),
+                unit: '个',
                 sub: `Pro ${stats.pro} · 接码 ${stats.sms}`,
-                led: stats.runningCount > 0 ? 'is-success' : 'is-primary',
+                brands: ['google', 'gmail'],
                 onClick: () => (onNavigateList ? onNavigateList() : onNavigate?.('list')),
             },
             {
                 id: 'renewals',
                 label: '费用与续费',
-                icon: CalendarClock,
+                icon: 'calendar',
                 value: String(upcomingRenewals.length + pendingRemindersCount),
+                unit: '项',
                 sub: `到期 ${upcomingRenewals.length} · 备忘 ${pendingRemindersCount}`,
-                led: upcomingRenewals.length > 0 ? 'is-warning' : 'is-primary',
+                warn: upcomingRenewals.length > 0,
+                brands: [],
                 onClick: () => onNavigate?.('renewals'),
             },
             {
                 id: 'ai',
                 label: 'AI 订阅',
-                icon: Sparkles,
+                icon: 'sparkle',
                 value: String(overview?.aiSubscriptionsCount ?? 0),
+                unit: '项',
                 sub: '额度与 OAuth 直连',
-                led: 'is-primary',
+                brands: ['openai', 'claude', 'gemini', 'grok'],
                 onClick: () => onNavigate?.('ai'),
             },
             {
                 id: 'cards',
                 label: 'U 卡与支付卡',
-                icon: CreditCard,
+                icon: 'card',
                 value: String(overview?.paymentCardsCount ?? 0),
+                unit: '张',
                 sub: '卡面与 CVV 账单',
-                led: 'is-primary',
+                brands: ['visa', 'mastercard', 'wise'],
                 onClick: () => onNavigate?.('cards'),
             },
             {
                 id: 'servers',
                 label: '服务器节点',
-                icon: Server,
+                icon: 'server',
                 value: `${serversOnline}/${serversTotal}`,
-                sub: serversTotal > 0 ? `${serversOnline} 台在线` : '暂未录入主机',
-                led: serversOnline > 0 ? 'is-success' : serversTotal > 0 ? 'is-warning' : '',
+                unit: '在线',
+                sub: serversTotal > 0 ? `${serversOnline} 台在线运行` : '暂未录入主机',
+                brands: ['hetzner', 'vultr', 'digitalocean', 'aws'],
                 onClick: () => onNavigate?.('servers'),
             },
             {
                 id: 'domains',
                 label: '域名管理',
-                icon: Globe,
+                icon: 'globe',
                 value: String(overview?.domainsCount ?? 0),
+                unit: '个',
                 sub: 'WHOIS 与 CF DNS',
-                led: 'is-primary',
+                brands: ['cloudflare', 'namecheap', 'porkbun'],
                 onClick: () => onNavigate?.('domains'),
             },
             {
                 id: 'terminal',
                 label: 'SSH 终端',
-                icon: Terminal,
+                icon: 'terminal',
                 value: 'TTY',
+                unit: '',
                 sub: '多标签与 SFTP',
-                led: 'is-success',
+                brands: ['ubuntu', 'debian', 'docker'],
                 onClick: () => onNavigate?.('terminal'),
             },
             {
                 id: 'agent',
                 label: 'AI 助手',
-                icon: Bot,
+                icon: 'bot',
                 value: 'SAFE',
+                unit: '',
                 sub: '脱敏洞察与提案',
-                led: 'is-primary',
+                brands: [],
                 onClick: () => onNavigate?.('agent'),
             },
         ],
@@ -220,7 +223,6 @@ const HomeView = ({
             stats.total,
             stats.pro,
             stats.sms,
-            stats.runningCount,
             upcomingRenewals.length,
             pendingRemindersCount,
             overview?.aiSubscriptionsCount,
@@ -236,451 +238,380 @@ const HomeView = ({
     const greeting = getGreetingByHour(now.getHours());
 
     return (
-        <div className="gm-home gm-view-enter">
-            {/* 左侧主栏 */}
-            <div className="gm-home-main">
-                {/* 顶部像素问候 + 快捷操作条 */}
-                <section className="space-y-3 gm-stagger-1">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-3.5 min-w-0">
-                            <div
-                                onMouseEnter={() => setMascotHover(true)}
-                                onMouseLeave={() => setMascotHover(false)}
-                                className="inline-flex text-[color:var(--text-primary)] cursor-default shrink-0"
-                            >
-                                <PixelMascot
-                                    size={46}
-                                    variant={loading ? 'loading' : (mascotHover ? 'wave' : 'idle')}
-                                />
-                            </div>
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="gm-pixel-tag is-accent" aria-label="当前时间">
-                                        {formatClock(now)}
-                                    </span>
-                                    <span className="text-[11px] font-mono gm-text-3">
-                                        WORKSPACE · ALL-IN-ONE
-                                    </span>
-                                </div>
-                                <h1 className="gm-home-greeting mt-1">{greeting}</h1>
-                            </div>
-                        </div>
+        <>
+            <PageToolbar
+                title="首页"
+                subtitle={formatClock(now)}
+                right={
+                    <GlassCapsule aria-label="快捷操作">
+                        <GlassButton onClick={onTriggerSearch} title="搜索账号 (Ctrl+K)">
+                            <FluentIcon name="search" size={16} />
+                            <span>搜索账号</span>
+                            <kbd className="gm-kbd">Ctrl+K</kbd>
+                        </GlassButton>
+                        <GlassButton onClick={onTriggerImport} title="导入账号 (Alt+N)">
+                            <FluentIcon name="personAdd" size={16} />
+                            <span>导入账号</span>
+                            <kbd className="gm-kbd">Alt+N</kbd>
+                        </GlassButton>
+                        <GlassButton onClick={onTriggerExport} title="导出账号 (Alt+E)">
+                            <FluentIcon name="export" size={16} />
+                            <span>导出账号</span>
+                            <kbd className="gm-kbd">Alt+E</kbd>
+                        </GlassButton>
+                    </GlassCapsule>
+                }
+            />
 
-                        {/* 紧凑快捷键操作区（完整保留 Ctrl+K / Alt+N / Alt+E 交互） */}
-                        <div className="flex flex-wrap items-center gap-2" aria-label="快捷操作">
-                            <button
-                                type="button"
-                                onClick={onTriggerSearch}
-                                className="gm-btn gm-btn-secondary gm-btn-sm"
-                            >
-                                <kbd className="gm-kbd">Ctrl+K</kbd>
-                                <span>搜索账号</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={onTriggerImport}
-                                className="gm-btn gm-btn-secondary gm-btn-sm"
-                            >
-                                <kbd className="gm-kbd">Alt+N</kbd>
-                                <span>导入账号</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={onTriggerExport}
-                                className="gm-btn gm-btn-secondary gm-btn-sm"
-                            >
-                                <kbd className="gm-kbd">Alt+E</kbd>
-                                <span>导出账号</span>
-                            </button>
-                        </div>
+            <div className="page page-in">
+                <h2 className="hello">{greeting}</h2>
+                <p className="hello-sub">
+                    当前管理 <b>{stats.total}</b> 个谷歌账号，本月周期费用折合{' '}
+                    <b>{formatCnyAmount(unifiedSpend.monthlyCny)}</b>，90 天内有{' '}
+                    <b>{upcomingRenewals.length}</b> 项待续费、<b>{pendingRemindersCount}</b> 条待办提醒。
+                </p>
+
+                {/* 排版数字统计条（完整保留 aria-label="账号统计" 与 .gm-stat-item / .gm-stat-value） */}
+                <section className="figures" aria-label="账号统计">
+                    <div className="figure gm-stat-item">
+                        <span className="v gm-stat-value">{stats.total}</span>
+                        <span className="k">总账号</span>
+                    </div>
+                    <div className="figure gm-stat-item">
+                        <span className="v gm-stat-value" style={{ color: 'var(--accent)' }}>
+                            {stats.pro}
+                        </span>
+                        <span className="k">Pro 账号</span>
+                    </div>
+                    <div className="figure gm-stat-item">
+                        <span className="v gm-stat-value">{stats.sms}</span>
+                        <span className="k">已配接码</span>
+                    </div>
+                    <div className="figure gm-stat-item">
+                        <span
+                            className="v gm-stat-value"
+                            style={{ color: stats.runningCount > 0 ? 'var(--green)' : undefined }}
+                        >
+                            {stats.runningCount}
+                        </span>
+                        <span className="k">运行中浏览器</span>
                     </div>
                 </section>
 
-                {/* 核心焦点 1：费用与续费统一人民币结算面板 */}
-                <section className="gm-home-spend-hero gm-pixel-card gm-stagger-1" aria-label="费用结算总览">
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--border-light)]">
-                        <div className="flex items-center gap-2">
-                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
-                            <Wallet size={15} style={{ color: 'var(--primary)' }} />
-                            <h2 className="text-[13.5px] font-semibold gm-text-1">
-                                资产费用总览（统一人民币结算）
-                            </h2>
+                {/* 统一人民币费用结算总览 */}
+                <section className="overview group" aria-label="费用结算总览">
+                    <div className="ov-main">
+                        <span className="k">资产费用总览（统一人民币结算）</span>
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="v">{formatCnyAmount(unifiedSpend.monthlyCny)}</span>
+                            <span className="s">/ 月</span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <span className="s">
+                            折合年度 <strong style={{ color: 'var(--accent)' }}>{formatCnyAmount(unifiedSpend.yearlyCny)}</strong> / 年
+                            {unifiedSpend.usdMonthly > 0
+                                ? ` · 含美元 ${formatMoney(unifiedSpend.usdMonthly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdMonthlyInCny)}`
+                                : unifiedSpend.onceCny > 0
+                                    ? ` · 另含一次性 ${formatCnyAmount(unifiedSpend.onceCny)}`
+                                    : unifiedSpend.unpricedCount > 0
+                                        ? ` · 尚有 ${unifiedSpend.unpricedCount} 项未填费用`
+                                        : ` · 共 ${unifiedSpend.totalPricedCount} 项已标价资产`}
+                        </span>
+                    </div>
+
+                    <div className="ov-cats">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span
-                                className="inline-flex items-center gap-1.5 text-[11px] font-mono gm-text-2 px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-light)]"
+                                className="chip accent font-mono"
                                 title={`汇率来源：${effectiveFx.source}`}
                             >
-                                <ArrowLeftRight size={11} style={{ color: 'var(--primary)' }} />
-                                <span>1 USD = ¥{unifiedSpend.rate.toFixed(4)}</span>
+                                1 USD = ¥{unifiedSpend.rate.toFixed(4)}
                             </span>
-                            {typeof onRefreshFxRate === 'function' && (
+                            <div className="flex items-center gap-1.5">
+                                {typeof onRefreshFxRate === 'function' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onRefreshFxRate(true)}
+                                        disabled={Boolean(effectiveFx.loading)}
+                                        className="btn"
+                                        style={{ height: 30, padding: '0 10px' }}
+                                        aria-label="刷新实时汇率"
+                                        title="立即刷新 USD → CNY 实时汇率"
+                                    >
+                                        <FluentIcon
+                                            name="sync"
+                                            size={14}
+                                            className={effectiveFx.loading ? 'animate-spin' : ''}
+                                        />
+                                        <span>刷新汇率</span>
+                                    </button>
+                                )}
                                 <button
                                     type="button"
-                                    onClick={() => onRefreshFxRate(true)}
-                                    disabled={Boolean(effectiveFx.loading)}
-                                    className="gm-btn gm-btn-ghost p-1"
-                                    aria-label="刷新实时汇率"
-                                    title="立即刷新 USD → CNY 实时汇率"
+                                    onClick={() => onNavigate?.('renewals')}
+                                    className="btn primary"
+                                    style={{ height: 30, padding: '0 12px' }}
                                 >
-                                    <RefreshCw size={12} className={effectiveFx.loading ? 'animate-spin' : ''} />
+                                    <span>费用详情</span>
+                                    <FluentIcon name="chevRight" size={14} />
                                 </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => onNavigate?.('renewals')}
-                                className="gm-btn gm-btn-sm"
-                                style={{
-                                    background: 'var(--primary-light)',
-                                    color: 'var(--primary)',
-                                    borderColor: 'rgba(107, 155, 247, 0.36)',
-                                }}
-                            >
-                                <span>费用详情</span>
-                                <ArrowRight size={12} />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3.5">
-                        <div>
-                            <div className="text-[11.5px] gm-text-3">本月预计总支出</div>
-                            <div className="mt-1 flex items-baseline gap-1.5">
-                                <span className="font-mono text-[26px] font-bold tracking-tight gm-text-1">
-                                    {formatCnyAmount(unifiedSpend.monthlyCny)}
-                                </span>
-                                <span className="text-[11.5px] gm-text-3">/ 月</span>
-                            </div>
-                            <div className="mt-1 text-[11px] font-mono gm-text-3">
-                                {unifiedSpend.usdMonthly > 0
-                                    ? `含美元 ${formatMoney(unifiedSpend.usdMonthly, 'USD')} → ${formatCnyAmount(unifiedSpend.usdMonthlyInCny)}`
-                                    : `${unifiedSpend.totalPricedCount} 项已标价资产`}
                             </div>
                         </div>
 
-                        <div>
-                            <div className="text-[11.5px] gm-text-3">折合年度总支出</div>
-                            <div className="mt-1 flex items-baseline gap-1.5">
-                                <span className="font-mono text-[26px] font-bold tracking-tight" style={{ color: 'var(--primary)' }}>
-                                    {formatCnyAmount(unifiedSpend.yearlyCny)}
-                                </span>
-                                <span className="text-[11.5px] gm-text-3">/ 年</span>
-                            </div>
-                            <div className="mt-1 text-[11px] font-mono gm-text-3">
-                                {unifiedSpend.onceCny > 0
-                                    ? `另含一次性 ${formatCnyAmount(unifiedSpend.onceCny)}`
-                                    : unifiedSpend.unpricedCount > 0
-                                        ? `尚有 ${unifiedSpend.unpricedCount} 项未填费用`
-                                        : '全部周期费用已计入'}
-                            </div>
+                        <div className="prov">
+                            <FluentIcon name="calendar" size={16} style={{ color: 'var(--orange)' }} />
+                            <span>90 天内到期续费</span>
+                            <span className="muted font-semibold" style={{ color: 'var(--text)' }}>
+                                {upcomingRenewals.length} 项
+                            </span>
                         </div>
-
-                        <div className="flex flex-col justify-between gap-2 sm:border-l sm:border-[var(--border-light)] sm:pl-4">
-                            <div className="flex items-center justify-between text-[12px]">
-                                <span className="gm-text-3 flex items-center gap-1.5">
-                                    <CalendarClock size={13} style={{ color: 'var(--warning)' }} />
-                                    <span>90 天内到期续费</span>
-                                </span>
-                                <span className="font-mono font-bold text-[15px] gm-text-1">
-                                    {upcomingRenewals.length} 项
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between text-[12px]">
-                                <span className="gm-text-3 flex items-center gap-1.5">
-                                    <Bell size={13} style={{ color: 'var(--primary)' }} />
-                                    <span>待办备忘提醒</span>
-                                </span>
-                                <span className="font-mono font-bold text-[15px] gm-text-1">
-                                    {overview?.pendingRemindersCount ?? 0} 项
-                                </span>
-                            </div>
-                            <div className="text-[10.5px] font-mono gm-text-3 truncate">
+                        <div className="prov">
+                            <FluentIcon name="alert" size={16} style={{ color: 'var(--accent)' }} />
+                            <span>待办备忘提醒</span>
+                            <span className="muted font-semibold" style={{ color: 'var(--text)' }}>
+                                {pendingRemindersCount} 项
+                            </span>
+                        </div>
+                        <div className="prov">
+                            <span className="muted" style={{ marginLeft: 0 }}>
                                 {effectiveFx.isFallback ? '汇率：缓存/参考' : `实时汇率 · ${effectiveFx.source}`}
-                            </div>
+                            </span>
                         </div>
                     </div>
                 </section>
 
-                {/* 核心焦点 2：即将到期续费 & 待办提醒双栏面板 */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 gm-stagger-2">
-                    <section className="gm-card gm-pixel-card p-4 space-y-2.5" aria-label="即将到期续费">
-                        <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
-                            <h2 className="text-[13px] font-semibold gm-text-1 flex items-center gap-1.5">
-                                <CalendarClock size={14} style={{ color: 'var(--warning)' }} />
-                                <span>即将到期续费</span>
-                            </h2>
+                {/* 即将到期续费 & 待办备忘提醒双栏 */}
+                <div className="section cols">
+                    <section aria-label="即将到期续费">
+                        <div className="section-h">
+                            <h2>即将到期续费</h2>
                             <button
                                 type="button"
                                 onClick={() => onNavigate?.('renewals')}
-                                className="gm-home-more-btn inline-flex items-center gap-1"
+                                className="btn link"
                             >
                                 <span>处理</span>
-                                <ArrowRight size={12} />
+                                <FluentIcon name="chevRight" size={14} />
                             </button>
                         </div>
-                        {upcomingRenewals.length > 0 ? (
-                            <div className="space-y-1.5">
-                                {upcomingRenewals.slice(0, 5).map(item => {
-                                    const badge = formatDaysBadge(item.days);
-                                    const cnyAmt = typeof item.billingAmount === 'number'
-                                        ? convertToCny(item.billingAmount, item.billingCurrency, unifiedSpend.rate)
-                                        : null;
-                                    return (
-                                        <button
-                                            key={`${item.kind}-${item.id}`}
-                                            type="button"
-                                            onClick={() => onNavigate?.('renewals')}
-                                            className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-light)] text-left transition-colors cursor-pointer"
-                                        >
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="gm-pixel-tag">{formatKindLabel(item.kind)}</span>
-                                                    <span className="text-[12.5px] font-medium gm-text-1 truncate">
-                                                        {item.name}
-                                                    </span>
-                                                </div>
-                                                <div className="mt-0.5 text-[11px] font-mono gm-text-3 flex items-center gap-2">
-                                                    <span>{item.date}</span>
-                                                    {cnyAmt !== null && (
-                                                        <span className="gm-text-2">
-                                                            {formatCnyAmount(cnyAmt)}/{formatCycleLabel(item.billingCycle)}
+                        <div className="group">
+                            {upcomingRenewals.length > 0 ? (
+                                <ul className="rows logo-rows">
+                                    {upcomingRenewals.slice(0, 5).map(item => {
+                                        const badge = formatDaysBadge(item.days);
+                                        const cnyAmt = typeof item.billingAmount === 'number'
+                                            ? convertToCny(item.billingAmount, item.billingCurrency, unifiedSpend.rate)
+                                            : null;
+                                        return (
+                                            <li key={`${item.kind}-${item.id}`}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onNavigate?.('renewals')}
+                                                    className="rrow compact w-full text-left border-0 bg-transparent cursor-pointer hover:bg-[var(--row-hover)] transition-colors"
+                                                >
+                                                    <BrandLogo
+                                                        name={item.name}
+                                                        hints={[item.provider, item.name, item.kind]}
+                                                    />
+                                                    <span className="od-field">
+                                                        <span className="t od-truncate">{item.name}</span>
+                                                        <span className="s od-truncate">
+                                                            {formatKindLabel(item.kind)} · {item.date}
                                                         </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <span
-                                                className="px-2 py-0.5 rounded-[4px] text-[10.5px] font-mono font-semibold shrink-0"
-                                                style={DAYS_BADGE_STYLE[badge.tone]}
-                                            >
-                                                {badge.text}
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="py-5 text-center text-[12px] gm-text-3">
-                                近期暂无即将到期的资产续费
-                            </div>
-                        )}
+                                                    </span>
+                                                    <Chip tone={mapBadgeTone(badge.tone)}>{badge.text}</Chip>
+                                                    <span className="amount">
+                                                        {cnyAmt !== null
+                                                            ? `${formatCnyAmount(cnyAmt)}/${formatCycleLabel(item.billingCycle)}`
+                                                            : '未标价'}
+                                                    </span>
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            ) : (
+                                <div className="gm-home-empty">近期暂无即将到期的资产续费</div>
+                            )}
+                        </div>
                     </section>
 
-                    <section className="gm-card gm-pixel-card p-4 space-y-2.5" aria-label="待办备忘提醒">
-                        <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
-                            <h2 className="text-[13px] font-semibold gm-text-1 flex items-center gap-1.5">
-                                <Bell size={14} style={{ color: 'var(--primary)' }} />
-                                <span>待办备忘提醒</span>
-                            </h2>
+                    <section aria-label="待办备忘提醒">
+                        <div className="section-h">
+                            <h2>待办备忘提醒</h2>
                             <button
                                 type="button"
                                 onClick={() => onNavigate?.('renewals')}
-                                className="gm-home-more-btn inline-flex items-center gap-1"
+                                className="btn link"
                             >
                                 <span>管理</span>
-                                <ArrowRight size={12} />
+                                <FluentIcon name="chevRight" size={14} />
                             </button>
                         </div>
-                        {dueReminders.length > 0 ? (
-                            <div className="space-y-1.5">
-                                {dueReminders.slice(0, 5).map(rem => (
-                                    <button
-                                        key={`rem-${rem.id}`}
-                                        type="button"
-                                        onClick={() => onNavigate?.('renewals')}
-                                        className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] border border-[var(--border-light)] text-left transition-colors cursor-pointer"
-                                    >
-                                        <span className="text-[12.5px] font-medium gm-text-1 truncate">
-                                            {rem.title}
-                                        </span>
-                                        <span className="font-mono text-[11px] gm-text-3 shrink-0">
-                                            {rem.dueAt}
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="py-5 text-center text-[12px] gm-text-3">
-                                暂无到期备忘提醒，可前往费用与续费页新建
-                            </div>
-                        )}
+                        <div className="group">
+                            {dueReminders.length > 0 ? (
+                                <ul className="rows flush">
+                                    {dueReminders.slice(0, 5).map(rem => (
+                                        <li key={`rem-${rem.id}`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => onNavigate?.('renewals')}
+                                                className="row"
+                                            >
+                                                <span
+                                                    className="app-ico"
+                                                    style={{ background: 'var(--accent)', width: 26, height: 26 }}
+                                                    aria-hidden="true"
+                                                >
+                                                    <FluentIcon name="clock" size={14} />
+                                                </span>
+                                                <span className="od-field od-fill">
+                                                    <span className="t od-truncate">{rem.title}</span>
+                                                    {rem.note && <span className="s od-truncate">{rem.note}</span>}
+                                                </span>
+                                                <span className="chip font-mono">{rem.dueAt}</span>
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <div className="gm-home-empty">
+                                    暂无到期备忘提醒，可前往费用与续费页新建
+                                </div>
+                            )}
+                        </div>
                     </section>
                 </div>
 
-                {/* 核心焦点 3：全部数字资产工作区像素矩阵 */}
-                <section className="gm-home-section gm-stagger-2" aria-label="数字资产总览">
-                    <div className="gm-home-section-head">
-                        <h2 className="gm-home-section-title flex items-center gap-2">
-                            <span className="gm-pixel-led is-primary" aria-hidden="true" />
-                            <span>数字资产工作区</span>
-                        </h2>
-                        <span className="text-[11px] font-mono gm-text-3">点击磁贴直达对应模块</span>
+                {/* 全部 8 大数字资产工作区磁贴 */}
+                <section className="section" aria-label="数字资产总览">
+                    <div className="section-h">
+                        <h2>数字资产工作区</h2>
+                        <span className="muted text-[12px]">点击磁贴直达对应模块</span>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        {workspaceTiles.map(tile => {
-                            const Icon = tile.icon;
-                            return (
-                                <button
-                                    key={tile.id}
-                                    type="button"
-                                    onClick={tile.onClick}
-                                    className="gm-home-asset-tile"
-                                >
-                                    <div className="flex items-center justify-between gap-2 w-full">
-                                        <span className="text-[11.5px] font-medium gm-text-2 flex items-center gap-1.5 truncate">
-                                            <Icon size={13} style={{ color: 'var(--primary)' }} className="shrink-0" />
-                                            <span className="truncate">{tile.label}</span>
-                                        </span>
-                                        <span className={`gm-pixel-led ${tile.led}`} aria-hidden="true" />
-                                    </div>
-                                    <div>
-                                        <div className="font-mono text-xl font-bold gm-text-1 leading-tight">
-                                            {tile.value}
-                                        </div>
-                                        <div className="mt-0.5 text-[10.5px] gm-text-3 truncate">
-                                            {tile.sub}
-                                        </div>
-                                    </div>
-                                </button>
-                            );
-                        })}
+                    <div className="assets cols-4">
+                        {workspaceTiles.map(tile => (
+                            <button
+                                key={tile.id}
+                                type="button"
+                                onClick={tile.onClick}
+                                className="asset"
+                            >
+                                <div className="asset-top">
+                                    <FluentIcon name={tile.icon} filled className="asset-ic" />
+                                    <span className="asset-name">{tile.label}</span>
+                                    <FluentIcon name="chevRight" className="chev" />
+                                </div>
+                                <div className="asset-num">
+                                    <span className="n">{tile.value}</span>
+                                    {tile.unit && <span className="u">{tile.unit}</span>}
+                                </div>
+                                <div className="asset-foot">
+                                    {tile.brands.length > 0 && <LogoStack items={tile.brands} max={3} />}
+                                    <span className={`asset-meta ${tile.warn ? 'warn' : ''}`}>
+                                        {tile.sub}
+                                    </span>
+                                </div>
+                            </button>
+                        ))}
                     </div>
                 </section>
 
-                <PixelDivider />
-
                 {/* 活跃浏览器 + 最近更新谷歌账号 */}
-                <div className="gm-home-sections gm-stagger-3" style={{ paddingTop: 0, gap: '20px' }}>
-                    <section className="gm-home-section" aria-label="活跃浏览器">
-                        <div className="gm-home-section-head">
-                            <h2 className="gm-home-section-title">
-                                活跃浏览器 <span className="gm-home-section-count">· {stats.runningCount}</span>
-                            </h2>
+                <div className="section cols">
+                    <section aria-label="活跃浏览器">
+                        <div className="section-h">
+                            <h2>活跃浏览器 · {stats.runningCount}</h2>
                         </div>
-                        {stats.runningAccounts.length > 0 ? (
-                            <div className="gm-home-pill-strip">
-                                {stats.runningAccounts.slice(0, 6).map(acc => (
-                                    <button
-                                        key={acc.id}
-                                        type="button"
-                                        onClick={() => onOpenBrowser?.(acc)}
-                                        className="gm-home-browser-pill"
-                                        title={`点击切换到 ${acc.email} 的浏览器窗口`}
-                                    >
-                                        <span
-                                            className="w-1.5 h-1.5 rounded-[1px] shrink-0 gm-pixel-status-pulse"
-                                            style={{ background: 'var(--success)' }}
-                                            aria-hidden="true"
-                                        />
-                                        <span className="truncate">{acc.email}</span>
-                                        <Globe size={12} className="shrink-0 gm-text-3" />
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="gm-home-empty">
-                                暂无运行中的独立浏览器
-                            </div>
-                        )}
-                    </section>
-
-                    <section className="gm-home-section" aria-label="最近更新">
-                        <div className="gm-home-section-head">
-                            <h2 className="gm-home-section-title">最近更新</h2>
-                            <button
-                                type="button"
-                                onClick={onNavigateList}
-                                className="gm-home-more-btn inline-flex items-center gap-1"
-                            >
-                                <span>全部</span>
-                                <ArrowRight size={12} />
-                            </button>
-                        </div>
-                        {recentAccounts.length > 0 ? (
-                            <div className="gm-home-list">
-                                {recentAccounts.map(acc => {
-                                    const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
-                                    const badgeText = tags[0] || (acc.status === 'pro' ? 'Pro' : '普通');
-                                    const timeText = formatDbTimestamp(acc.updatedAt || acc.createdAt);
-                                    const isPro = acc.status === 'pro';
-                                    return (
+                        <div className="group p-4">
+                            {stats.runningAccounts.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {stats.runningAccounts.slice(0, 6).map(acc => (
                                         <button
                                             key={acc.id}
                                             type="button"
-                                            onClick={() => onCopyEmail?.(acc.email)}
-                                            className="gm-home-row"
-                                            title="点击复制邮箱"
+                                            onClick={() => onOpenBrowser?.(acc)}
+                                            className="gm-home-browser-pill"
+                                            title={`点击切换到 ${acc.email} 的浏览器窗口`}
                                         >
-                                            <span className="inline-flex items-center gap-2.5 min-w-0 flex-1">
-                                                <span
-                                                    className="gm-home-row-dot"
-                                                    style={{ background: isPro ? 'var(--primary)' : 'var(--text-muted)' }}
-                                                    aria-hidden="true"
-                                                />
-                                                <span className="truncate text-[13.5px] font-normal">
-                                                    {acc.email}
-                                                </span>
-                                                {acc.remark && (
-                                                    <span className="truncate text-[12px] gm-text-3 hidden sm:inline">
-                                                        {acc.remark.split('\n')[0]}
-                                                    </span>
-                                                )}
-                                            </span>
-                                            <span className="inline-flex items-center gap-3 shrink-0">
-                                                <span className={`gm-chip ${isPro ? 'gm-chip-accent' : ''}`}>{badgeText}</span>
-                                                <span className="font-mono text-[11.5px] gm-text-3 tabular-nums">
-                                                    {timeText ? timeText.slice(5, 16) : '-'}
-                                                </span>
-                                            </span>
+                                            <span
+                                                className="signal running"
+                                                style={{ marginTop: 0 }}
+                                                aria-hidden="true"
+                                            />
+                                            <span className="truncate">{acc.email}</span>
+                                            <FluentIcon name="browser" size={14} />
                                         </button>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="gm-home-empty">
-                                {loading ? '正在加载账号数据…' : '暂无账号记录，可点击导入账号'}
-                            </div>
-                        )}
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="gm-home-empty" style={{ padding: '4px 2px' }}>
+                                    暂无运行中的独立浏览器
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    <section aria-label="最近更新">
+                        <div className="section-h">
+                            <h2>最近更新</h2>
+                            <button
+                                type="button"
+                                onClick={onNavigateList}
+                                className="btn link"
+                            >
+                                <span>全部</span>
+                                <FluentIcon name="chevRight" size={14} />
+                            </button>
+                        </div>
+                        <div className="group">
+                            {recentAccounts.length > 0 ? (
+                                <ul className="rows flush">
+                                    {recentAccounts.map(acc => {
+                                        const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
+                                        const badgeText = tags[0] || (acc.status === 'pro' ? 'Pro' : '普通');
+                                        const timeText = formatDbTimestamp(acc.updatedAt || acc.createdAt);
+                                        const isPro = acc.status === 'pro';
+                                        return (
+                                            <li key={acc.id}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onCopyEmail?.(acc.email)}
+                                                    className="row gm-home-row"
+                                                    style={{ minHeight: 52 }}
+                                                    title="点击复制邮箱"
+                                                >
+                                                    <span
+                                                        className={`signal ${isPro ? 'pro' : ''}`}
+                                                        style={{ marginTop: 0 }}
+                                                        aria-hidden="true"
+                                                    />
+                                                    <span className="od-field od-fill">
+                                                        <span className="t od-truncate">{acc.email}</span>
+                                                        {acc.remark && (
+                                                            <span className="s od-truncate">
+                                                                {acc.remark.split('\n')[0]}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <Chip tone={isPro ? 'accent' : ''}>{badgeText}</Chip>
+                                                    <span className="font-mono text-[11.5px] muted tabular-nums shrink-0">
+                                                        {timeText ? timeText.slice(5, 16) : '-'}
+                                                    </span>
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            ) : (
+                                <div className="gm-home-empty">
+                                    {loading ? '正在加载账号数据…' : '暂无账号记录，可点击导入账号'}
+                                </div>
+                            )}
+                        </div>
                     </section>
                 </div>
             </div>
-
-            {/* 右侧竖排统计栏 */}
-            <aside className="gm-home-stats" aria-label="账号统计">
-                <div className="gm-stat-item gm-stagger-1">
-                    <span className="gm-stat-label">总账号</span>
-                    <div className="gm-stat-value-row">
-                        <span className="gm-stat-value">{stats.total}</span>
-                        <span className="gm-stat-unit">个</span>
-                    </div>
-                </div>
-
-                <div className="gm-stat-item gm-stagger-2">
-                    <span className="gm-stat-label">Pro 账号</span>
-                    <div className="gm-stat-value-row">
-                        <span className="gm-stat-value is-accent">{stats.pro}</span>
-                        <span className="gm-stat-unit">个</span>
-                    </div>
-                </div>
-
-                <div className="gm-stat-item gm-stagger-3">
-                    <span className="gm-stat-label">已配接码</span>
-                    <div className="gm-stat-value-row">
-                        <span className="gm-stat-value">{stats.sms}</span>
-                        <span className="gm-stat-unit">个</span>
-                    </div>
-                </div>
-
-                <div className="gm-stat-item gm-stagger-4">
-                    <span className="gm-stat-label">运行中浏览器</span>
-                    <div className="gm-stat-value-row">
-                        <span className={`gm-stat-value ${stats.runningCount > 0 ? 'is-success' : ''}`}>
-                            {stats.runningCount}
-                        </span>
-                        <span className="gm-stat-unit">个</span>
-                    </div>
-                </div>
-            </aside>
-        </div>
+        </>
     );
 };
 

@@ -1,20 +1,34 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark" data-scheme="dark">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GoogleManager - 谷歌账号管理系统</title>
-    <meta name="description" content="专业的谷歌账号资产管理工具，支持批量导入、2FA验证码生成、状态管理等功能" />
+    <title>Google Manager</title>
+    <meta name="description" content="个人数字资产管理桌面工作区：谷歌账号、费用续费、AI 订阅、支付卡、服务器监控、SSH 终端与域名管理" />
     <script>
-        // 首帧前应用主题（暗黑优先：无缓存记录时默认 dark，消除启动白闪）
+        // 首帧前同步主题，消除启动闪烁；兼容 gm.lg.theme（light/dark/auto）与旧键 darkMode
         (function () {
             try {
-                var saved = localStorage.getItem('darkMode');
-                var dark = saved === null ? true : JSON.parse(saved) === true;
-                document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+                var pref = localStorage.getItem('gm.lg.theme');
+                var mode = null;
+                if (pref) {
+                    try { mode = JSON.parse(pref); } catch (_) { mode = pref; }
+                }
+                if (mode !== 'light' && mode !== 'dark' && mode !== 'auto') {
+                    var legacy = localStorage.getItem('darkMode');
+                    mode = legacy === null ? 'dark' : (JSON.parse(legacy) === true ? 'dark' : 'light');
+                }
+                var scheme = mode === 'auto'
+                    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : mode;
+                document.documentElement.dataset.scheme = scheme;
+                document.documentElement.dataset.theme = scheme;
+                document.documentElement.dataset.themePref = mode;
             } catch (e) {
+                document.documentElement.dataset.scheme = 'dark';
                 document.documentElement.dataset.theme = 'dark';
+                document.documentElement.dataset.themePref = 'dark';
             }
         })();
     </script>

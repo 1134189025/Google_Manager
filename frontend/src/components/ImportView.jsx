@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { UserPlus, FileText, Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2 } from 'lucide-react';
 import { parseImportText } from '../utils/importParser';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
 import { describeSmsUrl, extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
 import { appendUniqueLine } from '../utils/multiValueField';
 import { renderInBody } from '../utils/portal';
-import { PixelMascot, PixelLoader } from './PixelArt';
+import { FluentIcon, PageToolbar, SegmentedControl } from './glass';
 
 /**
  * 防抖 Hook - 延迟执行函数，避免频繁调用
@@ -300,34 +300,29 @@ const ImportView = ({
     };
 
     return (
-        <div className="gm-import-shell gm-view-enter">
-            {/* 顶部一体化标题与模式切换 */}
-            <div className="gm-import-header">
-                <div>
-                    <h1 className="gm-title">导入账号</h1>
-                    <p className="gm-subtitle mt-0.5">导入后状态默认设为"未开启"</p>
-                </div>
+        <>
+            <PageToolbar
+                title="导入账号"
+                subtitle='导入后状态默认设为"未开启"'
+                right={
+                    <SegmentedControl
+                        label="导入模式"
+                        value={importMode}
+                        onChange={(key) => {
+                            if (importing) return;
+                            setImportMode(key);
+                            if (quickCatError) setQuickCatError('');
+                        }}
+                        options={[
+                            { value: 'single', label: '单个导入', icon: 'personAdd', disabled: importing },
+                            { value: 'batch', label: '批量导入', icon: 'textAdd', disabled: importing },
+                        ]}
+                    />
+                }
+            />
 
-                <div className="gm-seg">
-                    {[
-                        { key: 'single', icon: <UserPlus size={14} />, label: '单个导入' },
-                        { key: 'batch', icon: <FileText size={14} />, label: '批量导入' },
-                    ].map(({ key, icon, label }) => (
-                        <button
-                            key={key}
-                            disabled={importing}
-                            onClick={() => {
-                                setImportMode(key);
-                                if (quickCatError) setQuickCatError('');
-                            }}
-                            className={`gm-seg-item flex items-center gap-1.5 ${importMode === key ? 'active' : ''} ${importing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                        >
-                            {icon}
-                            {label}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            <div className="page page-wide page-in">
+                <div className="gm-import-shell">
 
             {importMode === 'single' ? (
                 <div className="gm-import-grid">
@@ -502,7 +497,7 @@ const ImportView = ({
                                 </div>
                             ) : (
                                 <div className="gm-pass-empty">
-                                    <PixelMascot size={56} variant="sleep" className="gm-text-3" />
+                                    <FluentIcon name="personAdd" size={40} className="gm-text-3" />
                                     <p className="text-[13.5px] font-medium gm-text-2 mt-2">请填写账号信息</p>
                                     <p className="text-[12px] gm-text-3 mt-1">邮箱和密码为必填项</p>
                                 </div>
@@ -656,7 +651,8 @@ const ImportView = ({
 
                             {isParsing && preview.length === 0 ? (
                                 <div className="gm-pass-empty">
-                                    <PixelLoader label="解析数据中..." />
+                                    <Loader2 size={24} className="animate-spin gm-text-3" />
+                                    <p className="text-[12.5px] gm-text-2 mt-2">解析数据中...</p>
                                 </div>
                             ) : preview.length > 0 ? (
                                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin">
@@ -664,7 +660,7 @@ const ImportView = ({
                                 </div>
                             ) : (
                                 <div className="gm-pass-empty">
-                                    <PixelMascot size={56} variant="sleep" className="gm-text-3" />
+                                    <FluentIcon name="inbox" size={40} className="gm-text-3" />
                                     <p className="text-[13.5px] font-medium gm-text-2 mt-2">等待解析数据...</p>
                                     <p className="text-[12px] gm-text-3 mt-1">所有导入项初始状态均为"未开启"</p>
                                 </div>
@@ -678,11 +674,13 @@ const ImportView = ({
                     </div>
                 </div>
             )}
+                </div>
+            </div>
 
             {/* 格式确认对话框 */}
             {showFormatConfirm && renderInBody(
                 <div className="gm-overlay">
-                    <div className="gm-modal max-w-md mx-4" role="dialog" aria-label="检测到多种导入格式">
+                    <div className="gm-modal glass max-w-md mx-4" data-lens="sheet" role="dialog" aria-label="检测到多种导入格式">
                         <div className="gm-modal-header">
                             <h3 className="gm-title text-base">检测到多种导入格式</h3>
                         </div>
@@ -698,13 +696,15 @@ const ImportView = ({
                         <div className="gm-modal-footer">
                             <button
                                 onClick={() => { setShowFormatConfirm(false); setText(''); setPreview([]); setDetectedFormats([]); }}
-                                className="gm-btn gm-btn-secondary"
+                                className="gbtn glass"
+                                data-lens="cap"
                             >
                                 返回修改
                             </button>
                             <button
                                 onClick={() => setShowFormatConfirm(false)}
-                                className="gm-btn gm-btn-primary"
+                                className="gbtn glass prominent"
+                                data-lens="cap"
                             >
                                 确认导入
                             </button>
@@ -712,7 +712,7 @@ const ImportView = ({
                     </div>
                 </div>
             )}
-        </div>
+        </>
     );
 };
 

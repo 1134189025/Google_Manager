@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
     X, Clock, Key, Mail, Shield, History, ArrowRight, ChevronDown, ChevronUp,
-    AtSign, Phone, Calendar, Globe, Tag, FileText, ToggleRight,
+    AtSign, Phone, Calendar, Globe, Tag, FileText, ToggleRight, Loader2,
 } from 'lucide-react';
 import api from '../services/api';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import { renderInBody } from '../utils/portal';
-import { PixelLoader } from './PixelArt';
 
 // 旧数据库可能残留已下线字段的历史记录，渲染时静默跳过
 const LEGACY_HIDDEN_FIELDS = ['sold_status'];
@@ -99,7 +98,10 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
                 onClick={onClose}
             />
 
-            <div className="gm-drawer fixed right-0 top-0 h-full w-full max-w-[420px] sm:w-[420px] z-50 flex flex-col">
+            <div
+                className="gm-drawer glass fixed right-0 top-0 h-full w-full max-w-[420px] sm:w-[420px] z-50 flex flex-col"
+                data-lens="panel"
+            >
                 {/* 极简暗黑头部 */}
                 <div className="px-5 py-4 flex items-center justify-between border-b shrink-0" style={{ borderColor: 'var(--border-light)' }}>
                     <div className="flex items-center gap-3">
@@ -132,8 +134,9 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
                 {/* 历史记录内容 */}
                 <div className="p-4 overflow-y-auto flex-1 min-h-0">
                     {loading ? (
-                        <div className="flex items-center justify-center py-20">
-                            <PixelLoader label="正在加载记录..." />
+                        <div className="flex flex-col items-center justify-center gap-2 py-20 muted">
+                            <Loader2 size={20} className="animate-spin" />
+                            <span className="text-xs">正在加载记录...</span>
                         </div>
                     ) : visibleCount === 0 ? (
                         <div className="gm-empty">

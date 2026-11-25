@@ -53,7 +53,7 @@ const PromptDialog = ({
 
     return renderInBody(
         <div className="gm-overlay" onKeyDown={handleKeyDown}>
-            <div className="gm-modal w-full max-w-md" role="dialog" aria-label={title}>
+            <div className="gm-modal glass w-full max-w-md" data-lens="sheet" role="dialog" aria-label={title}>
                 <div className="gm-modal-header">
                     <h3 className="gm-title text-base">{title}</h3>
                     <button type="button" onClick={onCancel} className="gm-icon-btn" style={{ width: 30, height: 30 }} aria-label="关闭">

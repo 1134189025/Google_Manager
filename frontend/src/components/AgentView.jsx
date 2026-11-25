@@ -25,6 +25,7 @@ import { snakeToCamel } from '../services/utils';
 import { confirmDialog } from '../utils/dialogs';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import AgentMemoryDialog from './AgentMemoryDialog';
+import { GlassButton, GlassCapsule, PageToolbar } from './glass';
 
 const STARTER_PROMPTS = [
     '盘点未来 90 天内到期的服务器、域名和 AI 订阅，并按人民币汇总月度与年度支出。',
@@ -1067,91 +1068,84 @@ const AgentView = ({
     };
 
     return (
-        <div className="max-w-5xl mx-auto flex flex-col gap-3.5 h-[calc(100vh-106px)] gm-view-enter">
-            {/* 头部 */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <Bot size={20} className="text-[var(--primary)]" />
-                        <span>AI 数字资产助手</span>
-                        <span className="gm-pixel-tag is-accent">PI-STREAM</span>
-                    </h1>
-                    <p className="gm-subtitle">
-                        支持上下文自动/手动压缩与 Hermes 双区本地记忆；基于脱敏元数据实时检索，写操作需 Diff 确认。
-                    </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    {contextStatus && (
-                        <div
-                            className={`gm-context-pill ${
-                                contextStatus.needsCompaction
-                                    ? 'is-danger'
-                                    : contextPct >= 65
-                                        ? 'is-warn'
-                                        : ''
-                            }`}
-                            title={`阈值 ${formatTokenCount(contextStatus.thresholdTokens)} · 预留 ${formatTokenCount(contextStatus.reserveTokens)} · 保留近期 ${formatTokenCount(contextStatus.keepRecentTokens)}`}
-                        >
-                            <span>
-                                上下文 {formatTokenCount(contextStatus.estimatedTokens)} / {formatTokenCount(contextStatus.contextWindow)} ({contextStatus.usagePercent}%)
-                            </span>
-                            <span className="gm-context-bar" aria-hidden="true">
-                                <span
-                                    className="gm-context-bar-fill"
-                                    style={{ width: `${contextPct}%` }}
-                                />
-                            </span>
-                        </div>
-                    )}
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost text-xs"
-                        onClick={handleOpenMemoryDialog}
-                        disabled={sending || compacting}
-                    >
-                        <Brain size={14} className="text-[var(--primary)]" />
-                        <span>本地记忆 ({memoryTotalCount})</span>
-                    </button>
-                    {activeMessages.length >= 2 && (
-                        <button
-                            type="button"
-                            className="gm-btn gm-btn-ghost text-xs"
-                            onClick={() => handleCompact(null)}
-                            disabled={compacting || sending}
-                            title="参考 Pi-Agent 规则压缩较早对话，保留末尾完整问答"
-                        >
-                            <Minimize2 size={13} className={compacting ? 'animate-spin' : ''} />
-                            <span>{compacting ? '压缩中...' : '压缩上下文'}</span>
-                        </button>
-                    )}
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost text-xs"
-                        onClick={() => onOpenSystemSettings?.('ai')}
-                        title={
-                            isConfigured
-                                ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}`
-                                : '配置 AI 模型'
-                        }
-                    >
-                        <SlidersHorizontal size={14} className="shrink-0" />
-                        <span className="max-w-[200px] truncate">
-                            {isConfigured ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}` : '配置 AI 模型'}
-                        </span>
-                    </button>
-                    {messages.length > 0 && (
-                        <button
-                            type="button"
-                            className="gm-btn gm-btn-ghost text-xs text-[var(--danger)]"
-                            onClick={handleClear}
-                            disabled={sending || compacting}
-                        >
-                            <Trash2 size={14} />
-                            清空对话
-                        </button>
-                    )}
-                </div>
-            </div>
+        <>
+            <PageToolbar
+                title="AI 数字资产助手"
+                subtitle="脱敏元数据实时检索 · 写操作需 Diff 确认"
+                right={
+                    <div className="flex flex-wrap items-center gap-2">
+                        {contextStatus && (
+                            <div
+                                className={`gm-context-pill ${
+                                    contextStatus.needsCompaction
+                                        ? 'is-danger'
+                                        : contextPct >= 65
+                                            ? 'is-warn'
+                                            : ''
+                                }`}
+                                title={`阈值 ${formatTokenCount(contextStatus.thresholdTokens)} · 预留 ${formatTokenCount(contextStatus.reserveTokens)} · 保留近期 ${formatTokenCount(contextStatus.keepRecentTokens)}`}
+                            >
+                                <span>
+                                    上下文 {formatTokenCount(contextStatus.estimatedTokens)} / {formatTokenCount(contextStatus.contextWindow)} ({contextStatus.usagePercent}%)
+                                </span>
+                                <span className="gm-context-bar" aria-hidden="true">
+                                    <span
+                                        className="gm-context-bar-fill"
+                                        style={{ width: `${contextPct}%` }}
+                                    />
+                                </span>
+                            </div>
+                        )}
+                        <GlassCapsule>
+                            <GlassButton
+                                onClick={handleOpenMemoryDialog}
+                                disabled={sending || compacting}
+                            >
+                                <Brain size={14} style={{ color: 'var(--accent)' }} />
+                                <span>本地记忆 ({memoryTotalCount})</span>
+                            </GlassButton>
+                            {activeMessages.length >= 2 && (
+                                <GlassButton
+                                    onClick={() => handleCompact(null)}
+                                    disabled={compacting || sending}
+                                    title="参考 Pi-Agent 规则压缩较早对话，保留末尾完整问答"
+                                >
+                                    <Minimize2 size={13} className={compacting ? 'animate-spin' : ''} />
+                                    <span>{compacting ? '压缩中...' : '压缩上下文'}</span>
+                                </GlassButton>
+                            )}
+                            <GlassButton
+                                onClick={() => onOpenSystemSettings?.('ai')}
+                                title={
+                                    isConfigured
+                                        ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}`
+                                        : '配置 AI 模型'
+                                }
+                            >
+                                <SlidersHorizontal size={14} className="shrink-0" />
+                                <span className="max-w-[180px] truncate">
+                                    {isConfigured ? `${settings.model}${maxTokensBadge ? ` · ${maxTokensBadge}` : ''}` : '配置 AI 模型'}
+                                </span>
+                            </GlassButton>
+                            {messages.length > 0 && (
+                                <GlassButton
+                                    onClick={handleClear}
+                                    disabled={sending || compacting}
+                                    style={{ color: 'var(--red)' }}
+                                >
+                                    <Trash2 size={14} />
+                                    <span>清空对话</span>
+                                </GlassButton>
+                            )}
+                        </GlassCapsule>
+                    </div>
+                }
+            />
+
+            <div
+                className="page page-in flex flex-col gap-3.5"
+                style={{ height: 'calc(100vh - var(--titlebar-h) - 82px)', paddingBottom: 20 }}
+            >
 
             {/* 隐私隔离声明横幅 */}
             <div
@@ -1455,6 +1449,7 @@ const AgentView = ({
                 onOpenAiSettings={() => onOpenSystemSettings?.('ai')}
             />
         </div>
+        </>
     );
 };
 

@@ -1,5 +1,4 @@
 import React, { Suspense, lazy, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 // 导入服务和组件
 import api from './services/api';
@@ -20,7 +19,7 @@ import BrowserSettingsDialog from './components/BrowserSettingsDialog';
 import SystemSettingsDialog from './components/SystemSettingsDialog';
 import CloseConfirmDialog from './components/CloseConfirmDialog';
 import UpdateDialog from './components/UpdateDialog';
-import { PixelDitherBackdrop } from './components/PixelArt';
+import { FluentIcon, LiquidGlassProvider, useLiquidGlass } from './components/glass';
 import { isTauriRuntime } from './utils/tauriRuntime';
 
 const TerminalView = lazy(() => import('./components/TerminalView'));
@@ -43,8 +42,51 @@ const isTypingTarget = (target) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
 };
 
-const App = () => {
+const THEME_STORAGE_KEY = 'gm.lg.theme';
+
+const getSystemScheme = () => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        try {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        } catch {
+            return 'dark';
+        }
+    }
+    return 'dark';
+};
+
+const readInitialThemeMode = () => {
+    try {
+        const raw = localStorage.getItem(THEME_STORAGE_KEY);
+        if (raw !== null) {
+            const parsed = JSON.parse(raw);
+            if (parsed === 'light' || parsed === 'dark' || parsed === 'auto') {
+                return parsed;
+            }
+        }
+        const legacy = localStorage.getItem('darkMode');
+        if (legacy !== null) {
+            return JSON.parse(legacy) === false ? 'light' : 'dark';
+        }
+    } catch {
+        // 忽略不可用或损坏的本地存储
+    }
+    // 暗黑优先：无记录时默认暗色模式
+    return 'dark';
+};
+
+const applyDocumentTheme = (mode, scheme) => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = scheme;
+    document.documentElement.dataset.scheme = scheme;
+    document.documentElement.dataset.themePref = mode;
+};
+
+const AppShell = () => {
     const updater = useAppUpdater();
+    const { navOpen, closeNav, scrolled, setScrolled } = useLiquidGlass();
+    const scrollerRef = useRef(null);
+
     const [view, setView] = useState('home');
     const [accounts, setAccounts] = useState([]);
     const [search, setSearch] = useState('');
@@ -147,30 +189,59 @@ const App = () => {
         browserSettingsResolveRef.current = null;
     }, []);
 
-    // 暗黑优先：无 localStorage 记录时默认开启暗色模式
-    const [darkMode, setDarkMode] = useState(() => {
-        try {
-            const saved = localStorage.getItem('darkMode');
-            return saved === null ? true : JSON.parse(saved) === true;
-        } catch {
-            return true;
-        }
-    });
+    // 主题模式：支持 light / dark / auto，默认 dark，并同步旧键 darkMode 与 data-theme / data-scheme
+    const [themeMode, setThemeMode] = useState(readInitialThemeMode);
+    const [systemScheme, setSystemScheme] = useState(getSystemScheme);
+    const resolvedScheme = themeMode === 'auto' ? systemScheme : themeMode;
+    const darkMode = resolvedScheme === 'dark';
 
     useEffect(() => {
-        localStorage.setItem('darkMode', JSON.stringify(darkMode));
-        document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
-    }, [darkMode]);
+        applyDocumentTheme(themeMode, resolvedScheme);
+        try {
+            localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(themeMode));
+            localStorage.setItem('darkMode', JSON.stringify(darkMode));
+        } catch {
+            // 忽略受限存储环境
+        }
+    }, [themeMode, resolvedScheme, darkMode]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+        let mql;
+        try {
+            mql = window.matchMedia('(prefers-color-scheme: dark)');
+        } catch {
+            return undefined;
+        }
+        const onChange = (event) => setSystemScheme(event.matches ? 'dark' : 'light');
+        mql.addEventListener?.('change', onChange);
+        return () => mql.removeEventListener?.('change', onChange);
+    }, []);
 
     const handleToggleDarkMode = useCallback(() => {
-        setDarkMode(prev => {
-            const next = !prev;
-            if (typeof document !== 'undefined') {
-                document.documentElement.dataset.theme = next ? 'dark' : 'light';
-            }
-            return next;
-        });
+        const nextMode = darkMode ? 'light' : 'dark';
+        applyDocumentTheme(nextMode, nextMode);
+        setThemeMode(nextMode);
+    }, [darkMode]);
+
+    const handleChangeThemeMode = useCallback((nextMode) => {
+        if (nextMode !== 'light' && nextMode !== 'dark' && nextMode !== 'auto') return;
+        const nextScheme = nextMode === 'auto' ? getSystemScheme() : nextMode;
+        applyDocumentTheme(nextMode, nextScheme);
+        setThemeMode(nextMode);
     }, []);
+
+    // 切换视图时重置滚动容器顶部并复位工具栏溶解态
+    useEffect(() => {
+        if (scrollerRef.current) {
+            scrollerRef.current.scrollTop = 0;
+        }
+        setScrolled(false);
+    }, [view, setScrolled]);
+
+    const handleScrollerScroll = useCallback((e) => {
+        setScrolled((e.currentTarget?.scrollTop || 0) > 4);
+    }, [setScrolled]);
 
     useEffect(() => {
         return () => {
@@ -738,179 +809,198 @@ const App = () => {
     }, [accounts, groupFilter, knownCategoryNames]);
 
     return (
-        <div className="app-container">
-            <PixelDitherBackdrop />
-            <TitleBar view={view} onRequestClose={() => setCloseDialogOpen(true)} />
+        <div className="window">
+            <div className="mica" aria-hidden="true" />
 
-            <div className="app-workspace">
+            <TitleBar
+                view={view}
+                darkMode={darkMode}
+                onToggleDarkMode={handleToggleDarkMode}
+                onRequestClose={() => setCloseDialogOpen(true)}
+            />
+
+            <div className="shell">
                 <SideNav
                     view={view}
                     accountsCount={accounts.length}
                     overview={workspaceOverview}
-                    darkMode={darkMode}
                     updater={updater}
                     onNavigate={navigateToView}
                     onOpenBrowserSettings={() => openBrowserSettings()}
                     onOpenSystemSettings={() => setSystemSettingsDialog({ isOpen: true, tab: 'ai' })}
-                    onToggleDarkMode={handleToggleDarkMode}
                 />
 
-                <main className="main-wrapper">
-                    {view === 'home' ? (
-                        <HomeView
-                            accounts={accounts}
-                            accountCategories={accountCategories}
-                            browserStatuses={homeBrowserStatuses}
-                            overview={workspaceOverview}
-                            fxInfo={fxInfo}
-                            onRefreshFxRate={refreshFxRate}
-                            loading={loading}
-                            onTriggerSearch={triggerSearchAction}
-                            onTriggerImport={triggerImportAction}
-                            onTriggerExport={triggerExportAction}
-                            onNavigateList={() => navigateToView('list')}
-                            onNavigate={navigateToView}
-                            onOpenBrowser={handleHomeOpenBrowser}
-                            onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
-                        />
-                    ) : view === 'renewals' ? (
-                        <RenewalsView
-                            fxInfo={fxInfo}
-                            onRefreshFxRate={refreshFxRate}
-                            onNotify={showNotification}
-                            onNavigate={navigateToView}
-                            onOverviewChanged={refreshOverview}
-                        />
-                    ) : view === 'cards' ? (
-                        <CardsView
-                            darkMode={darkMode}
-                            fxRate={fxInfo.rate}
-                            onNotify={showNotification}
-                            onCopy={copyToClipboard}
-                            onOverviewChanged={refreshOverview}
-                        />
-                    ) : view === 'domains' ? (
-                        <DomainsView
-                            servers={serversCache}
-                            fxRate={fxInfo.rate}
-                            onNotify={showNotification}
-                            onOverviewChanged={refreshOverview}
-                        />
-                    ) : view === 'ai' ? (
-                        <AiSubscriptionsView
-                            googleAccounts={accounts}
-                            paymentCards={paymentCardsCache}
-                            fxRate={fxInfo.rate}
-                            onNotify={showNotification}
-                            onOverviewChanged={refreshOverview}
-                        />
-                    ) : view === 'servers' ? (
-                        <ServersView
-                            fxRate={fxInfo.rate}
-                            onNotify={showNotification}
-                            onOverviewChanged={() => {
-                                refreshOverview();
-                                if (typeof api?.getServers === 'function') {
-                                    api.getServers().then(res => {
-                                        if (res?.success && Array.isArray(res.data)) setServersCache(res.data);
-                                    }).catch(() => {});
-                                }
-                            }}
-                            onOpenTerminal={handleOpenTerminalForServer}
-                            onOpenSystemSettings={(tab = 'monitor') => setSystemSettingsDialog({ isOpen: true, tab })}
-                        />
-                    ) : view === 'agent' ? (
-                        <AgentView
-                            onNotify={showNotification}
-                            onOpenSystemSettings={(tab = 'ai') => setSystemSettingsDialog({ isOpen: true, tab })}
-                            onOverviewChanged={refreshOverview}
-                            settingsVersion={agentSettingsVersion}
-                            reloadVersion={agentReloadVersion}
-                        />
-                    ) : view === 'terminal' ? null : view === 'list' ? (
-                        <AccountListView
-                            accounts={filteredAccounts}
-                            allAccounts={accounts}
-                            accountCategories={accountCategories}
-                            onCreateCategory={handleCreateAccountCategory}
-                            onUpdateCategory={handleUpdateAccountCategory}
-                            onDeleteCategory={handleDeleteAccountCategory}
-                            search={search}
-                            setSearch={setSearch}
-                            groupFilter={groupFilter}
-                            setGroupFilter={setGroupFilter}
-                            allGroups={allGroups}
-                            copyToClipboard={copyToClipboard}
-                            toggleStatus={toggleStatus}
-                            onEdit={setEditingAccount}
-                            onDelete={handleDelete}
-                            onBatchDelete={handleBatchDelete}
-                            onInlineEdit={handleInlineEdit}
-                            onInlineEditMany={handleInlineEditMany}
-                            onRefreshAccounts={() => loadAccounts()}
-                            loading={loading}
-                            onNotify={showNotification}
-                            openBrowserSettings={openBrowserSettings}
-                            pendingAction={pendingListAction}
-                            onConsumePendingAction={consumePendingListAction}
-                        />
-                    ) : view === 'recycle' ? (
-                        <RecycleView
-                            accountCategories={accountCategories}
-                            onRefreshAccounts={() => loadAccounts()}
-                            onNotify={showNotification}
-                            onNavigateList={() => navigateToView('list')}
-                        />
-                    ) : view === 'import' ? (
-                        <ImportView
-                            onImport={handleImport}
-                            onCancel={() => navigateToView('list')}
-                            importing={importing}
-                            accountCategories={accountCategories}
-                            onCreateCategory={handleCreateAccountCategory}
-                        />
-                    ) : (
-                        <div className="max-w-3xl mx-auto gm-card p-8 text-center space-y-2 gm-view-enter">
-                            <h2 className="gm-title">模块建设中</h2>
-                            <p className="gm-subtitle">该工作区模块将在后续阶段接入。</p>
-                        </div>
-                    )}
+                <main className={`main main-wrapper ${scrolled ? 'scrolled' : ''}`}>
+                    <div
+                        className="scroller"
+                        ref={scrollerRef}
+                        onScroll={handleScrollerScroll}
+                    >
+                        {view === 'home' ? (
+                            <HomeView
+                                accounts={accounts}
+                                accountCategories={accountCategories}
+                                browserStatuses={homeBrowserStatuses}
+                                overview={workspaceOverview}
+                                fxInfo={fxInfo}
+                                onRefreshFxRate={refreshFxRate}
+                                loading={loading}
+                                onTriggerSearch={triggerSearchAction}
+                                onTriggerImport={triggerImportAction}
+                                onTriggerExport={triggerExportAction}
+                                onNavigateList={() => navigateToView('list')}
+                                onNavigate={navigateToView}
+                                onOpenBrowser={handleHomeOpenBrowser}
+                                onCopyEmail={(email) => copyToClipboard(email, '邮箱')}
+                            />
+                        ) : view === 'renewals' ? (
+                            <RenewalsView
+                                fxInfo={fxInfo}
+                                onRefreshFxRate={refreshFxRate}
+                                onNotify={showNotification}
+                                onNavigate={navigateToView}
+                                onOverviewChanged={refreshOverview}
+                            />
+                        ) : view === 'cards' ? (
+                            <CardsView
+                                darkMode={darkMode}
+                                fxRate={fxInfo.rate}
+                                onNotify={showNotification}
+                                onCopy={copyToClipboard}
+                                onOverviewChanged={refreshOverview}
+                            />
+                        ) : view === 'domains' ? (
+                            <DomainsView
+                                servers={serversCache}
+                                fxRate={fxInfo.rate}
+                                onNotify={showNotification}
+                                onOverviewChanged={refreshOverview}
+                            />
+                        ) : view === 'ai' ? (
+                            <AiSubscriptionsView
+                                googleAccounts={accounts}
+                                paymentCards={paymentCardsCache}
+                                fxRate={fxInfo.rate}
+                                onNotify={showNotification}
+                                onOverviewChanged={refreshOverview}
+                            />
+                        ) : view === 'servers' ? (
+                            <ServersView
+                                fxRate={fxInfo.rate}
+                                onNotify={showNotification}
+                                onOverviewChanged={() => {
+                                    refreshOverview();
+                                    if (typeof api?.getServers === 'function') {
+                                        api.getServers().then(res => {
+                                            if (res?.success && Array.isArray(res.data)) setServersCache(res.data);
+                                        }).catch(() => {});
+                                    }
+                                }}
+                                onOpenTerminal={handleOpenTerminalForServer}
+                                onOpenSystemSettings={(tab = 'monitor') => setSystemSettingsDialog({ isOpen: true, tab })}
+                            />
+                        ) : view === 'agent' ? (
+                            <AgentView
+                                onNotify={showNotification}
+                                onOpenSystemSettings={(tab = 'ai') => setSystemSettingsDialog({ isOpen: true, tab })}
+                                onOverviewChanged={refreshOverview}
+                                settingsVersion={agentSettingsVersion}
+                                reloadVersion={agentReloadVersion}
+                            />
+                        ) : view === 'terminal' ? null : view === 'list' ? (
+                            <AccountListView
+                                accounts={filteredAccounts}
+                                allAccounts={accounts}
+                                accountCategories={accountCategories}
+                                onCreateCategory={handleCreateAccountCategory}
+                                onUpdateCategory={handleUpdateAccountCategory}
+                                onDeleteCategory={handleDeleteAccountCategory}
+                                search={search}
+                                setSearch={setSearch}
+                                groupFilter={groupFilter}
+                                setGroupFilter={setGroupFilter}
+                                allGroups={allGroups}
+                                copyToClipboard={copyToClipboard}
+                                toggleStatus={toggleStatus}
+                                onEdit={setEditingAccount}
+                                onDelete={handleDelete}
+                                onBatchDelete={handleBatchDelete}
+                                onInlineEdit={handleInlineEdit}
+                                onInlineEditMany={handleInlineEditMany}
+                                onRefreshAccounts={() => loadAccounts()}
+                                loading={loading}
+                                onNotify={showNotification}
+                                openBrowserSettings={openBrowserSettings}
+                                pendingAction={pendingListAction}
+                                onConsumePendingAction={consumePendingListAction}
+                            />
+                        ) : view === 'recycle' ? (
+                            <RecycleView
+                                accountCategories={accountCategories}
+                                onRefreshAccounts={() => loadAccounts()}
+                                onNotify={showNotification}
+                                onNavigateList={() => navigateToView('list')}
+                            />
+                        ) : view === 'import' ? (
+                            <ImportView
+                                onImport={handleImport}
+                                onCancel={() => navigateToView('list')}
+                                importing={importing}
+                                accountCategories={accountCategories}
+                                onCreateCategory={handleCreateAccountCategory}
+                            />
+                        ) : (
+                            <div className="page page-in">
+                                <div className="empty">
+                                    <FluentIcon name="inbox" />
+                                    <h3>模块建设中</h3>
+                                    <p>该工作区模块将在后续阶段接入。</p>
+                                </div>
+                            </div>
+                        )}
 
-                    {/* 持久挂载懒加载终端，切换左侧视图不中断已连会话 */}
-                    {terminalMounted && (
-                        <div style={{ display: view === 'terminal' ? 'block' : 'none' }}>
-                            <Suspense
-                                fallback={
-                                    <div className="gm-card p-8 text-center text-xs text-[var(--text-secondary)]">
-                                        正在加载 SSH 终端组件...
-                                    </div>
-                                }
-                            >
-                                <TerminalView
-                                    servers={serversCache}
-                                    darkMode={darkMode}
-                                    isActiveView={view === 'terminal'}
-                                    pendingOpenServer={pendingTerminalTarget}
-                                    onConsumePendingOpen={consumePendingTerminalTarget}
-                                    onNotify={showNotification}
-                                    onNavigateServers={() => navigateToView('servers')}
-                                />
-                            </Suspense>
-                        </div>
-                    )}
+                        {/* 持久挂载懒加载终端，切换左侧视图不中断已连会话 */}
+                        {terminalMounted && (
+                            <div style={{ display: view === 'terminal' ? 'block' : 'none', height: '100%' }}>
+                                <Suspense
+                                    fallback={
+                                        <div className="page">
+                                            <div className="group p-8 text-center text-xs gm-text-2">
+                                                正在加载 SSH 终端组件...
+                                            </div>
+                                        </div>
+                                    }
+                                >
+                                    <TerminalView
+                                        servers={serversCache}
+                                        darkMode={darkMode}
+                                        isActiveView={view === 'terminal'}
+                                        pendingOpenServer={pendingTerminalTarget}
+                                        onConsumePendingOpen={consumePendingTerminalTarget}
+                                        onNotify={showNotification}
+                                        onNavigateServers={() => navigateToView('servers')}
+                                    />
+                                </Suspense>
+                            </div>
+                        )}
+                    </div>
                 </main>
             </div>
 
-            {/* Notification Toast */}
+            <div className="scrim" hidden={!navOpen} onClick={closeNav} />
+
+            {/* Liquid Glass Notification Toast */}
             {notification && (
                 <div
                     key={notification.id}
-                    className={`gm-toast ${notification.type === 'success' ? 'gm-toast-success' : 'gm-toast-error'}`}
+                    className={`gm-toast toast glass ${notification.type === 'success' ? 'gm-toast-success' : 'gm-toast-error is-error'}`}
+                    data-lens="cap"
+                    role="status"
                 >
-                    {notification.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                    <FluentIcon name={notification.type === 'success' ? 'checkCircle' : 'warning'} filled />
                     <span className="text-[13px] font-medium">{notification.msg}</span>
                     {deletedAccounts.length > 0 && notification.type === 'success' && (
-                        <button onClick={undoDelete} className="gm-toast-action">
+                        <button type="button" onClick={undoDelete} className="gm-toast-action">
                             撤回
                         </button>
                     )}
@@ -939,6 +1029,8 @@ const App = () => {
             <SystemSettingsDialog
                 isOpen={systemSettingsDialog.isOpen}
                 initialTab={systemSettingsDialog.tab}
+                themeMode={themeMode}
+                onChangeThemeMode={handleChangeThemeMode}
                 onClose={() => setSystemSettingsDialog(prev => ({ ...prev, isOpen: false }))}
                 onNotify={showNotification}
                 onAgentSettingsSaved={() => setAgentSettingsVersion(v => v + 1)}
@@ -958,5 +1050,11 @@ const App = () => {
         </div>
     );
 };
+
+const App = () => (
+    <LiquidGlassProvider>
+        <AppShell />
+    </LiquidGlassProvider>
+);
 
 export default App;

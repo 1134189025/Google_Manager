@@ -195,7 +195,7 @@ const AgentMemoryDialog = ({
 
     return renderInBody(
         <div className="gm-overlay" role="dialog" aria-modal="true" aria-label="Hermes 本地长期记忆">
-            <div className="gm-modal w-full max-w-2xl max-h-[90vh] flex flex-col p-6 space-y-4">
+            <div className="gm-modal glass w-full max-w-2xl max-h-[90vh] flex flex-col p-6 space-y-4" data-lens="sheet">
                 <div className="flex items-center justify-between gap-2">
                     <div>
                         <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">

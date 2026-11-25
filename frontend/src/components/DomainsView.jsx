@@ -14,6 +14,15 @@ import {
     Server,
 } from 'lucide-react';
 import api from '../services/api';
+import {
+    BrandLogo,
+    EmptyState,
+    FluentIcon,
+    GlassButton,
+    GlassSearch,
+    PageToolbar,
+    SegmentedControl,
+} from './glass';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { resolveBrandIconUrl } from '../utils/brandIcons';
@@ -428,160 +437,128 @@ const DomainsView = ({ servers = [], fxRate = DEFAULT_USD_CNY_RATE, onNotify, on
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-5 gm-view-enter">
-            {/* 页头 */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <Globe size={20} style={{ color: 'var(--primary)' }} />
-                        <span>域名管理</span>
-                    </h1>
-                    <p className="gm-subtitle mt-1">
-                        管理域名到期与费用，一键 WHOIS / DoH NS 探测，支持 Cloudflare 账户导入与 DNS 记录预览编辑。
-                    </p>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setCfModalOpen(true)}
-                        className="gm-btn gm-btn-ghost"
-                    >
-                        <Cloud size={14} />
-                        <span>Cloudflare ({connections.length})</span>
-                    </button>
-                    <button type="button" onClick={openCreateDomain} className="gm-btn gm-btn-primary">
-                        <Plus size={14} />
-                        <span>添加域名</span>
-                    </button>
-                </div>
-            </div>
+        <>
+            <PageToolbar
+                title="域名管理"
+                subtitle="WHOIS / DoH NS 探测 · Cloudflare 账户导入与 DNS 管理"
+                right={
+                    <div className="flex flex-wrap items-center gap-2">
+                        <GlassButton
+                            glass
+                            pill
+                            onClick={() => setCfModalOpen(true)}
+                        >
+                            <Cloud size={15} />
+                            <span>Cloudflare ({connections.length})</span>
+                        </GlassButton>
+                        <GlassButton glass pill prominent onClick={openCreateDomain}>
+                            <FluentIcon name="add" size={16} />
+                            <span>添加域名</span>
+                        </GlassButton>
+                    </div>
+                }
+            />
 
-            {/* 顶部 4 格域名汇总（统一人民币） */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-[11.5px] gm-text-3 font-medium">域名总数</div>
-                    <div className="mt-1.5 flex items-baseline gap-2">
-                        <span className="text-2xl font-bold font-mono gm-text-1">{domainStats.total}</span>
-                        <span className="text-[11px] gm-text-3 font-mono">
-                            {domainStats.missingExpiry > 0 ? `${domainStats.missingExpiry} 待补日期` : '日期完整'}
+            <div className="page page-wide page-in space-y-5">
+                {/* 顶部 4 格域名排版汇总（统一人民币） */}
+                <section className="figures" style={{ marginTop: 8 }} aria-label="域名概览">
+                    <div className="figure">
+                        <span className="v">{domainStats.total}</span>
+                        <span className="k">
+                            域名总数 · {domainStats.missingExpiry > 0 ? `${domainStats.missingExpiry} 待补日期` : '日期完整'}
                         </span>
                     </div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-[11.5px] gm-text-3 font-medium">30 天内到期</div>
-                    <div className="mt-1.5 flex items-baseline gap-2">
+                    <div className="figure">
                         <span
-                            className="text-2xl font-bold font-mono"
-                            style={{ color: domainStats.expiringSoon > 0 ? 'var(--warning)' : 'var(--success)' }}
+                            className="v"
+                            style={{ color: domainStats.expiringSoon > 0 ? 'var(--orange)' : 'var(--green)' }}
                         >
                             {domainStats.expiringSoon}
                         </span>
-                        <span className="text-[11px] gm-text-3">
-                            {domainStats.expiringSoon > 0 ? '需关注续费' : '状态健康'}
+                        <span className="k">
+                            30 天内到期 · {domainStats.expiringSoon > 0 ? '需关注续费' : '状态健康'}
                         </span>
                     </div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-[11.5px] gm-text-3 font-medium">Cloudflare 托管</div>
-                    <div className="mt-1.5 flex items-baseline gap-2">
-                        <span className="text-2xl font-bold font-mono" style={{ color: 'var(--primary)' }}>
+                    <div className="figure">
+                        <span className="v" style={{ color: 'var(--accent)' }}>
                             {domainStats.cfManaged}
                         </span>
-                        <span className="text-[11px] gm-text-3 font-mono">{connections.length} 个账号</span>
+                        <span className="k">Cloudflare 托管 · {connections.length} 个账号</span>
                     </div>
-                </div>
-                <div className="gm-card gm-pixel-card p-4">
-                    <div className="text-[11.5px] gm-text-3 font-medium">年度域名费用 (CNY)</div>
-                    <div className="mt-1.5 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-bold font-mono gm-text-1">
-                            {formatCnyAmount(domainStats.yearlyCny)}
-                        </span>
-                        <span className="text-[11px] gm-text-3">/ 年</span>
+                    <div className="figure">
+                        <span className="v">{formatCnyAmount(domainStats.yearlyCny)}</span>
+                        <span className="k">年度域名费用 (CNY / 年)</span>
                     </div>
-                </div>
-            </div>
+                </section>
 
-            {/* 搜索与状态筛选 */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="relative flex-1 min-w-[240px] max-w-md">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 gm-text-3" />
-                    <input
-                        type="text"
-                        className="gm-input w-full pl-9"
+                {/* 搜索与状态筛选 */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <GlassSearch
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
+                        onClear={() => setSearch('')}
                         placeholder="搜索域名、注册商、NS 或备注…"
+                        ariaLabel="搜索域名"
+                    />
+                    <SegmentedControl
+                        label="域名状态筛选"
+                        value={filterMode}
+                        onChange={setFilterMode}
+                        options={[
+                            { value: 'all', label: `全部 (${domainStats.total})` },
+                            { value: 'expiring', label: `30天到期 (${domainStats.expiringSoon})` },
+                            { value: 'cf', label: `CF 托管 (${domainStats.cfManaged})` },
+                            { value: 'unset', label: `未填日期 (${domainStats.missingExpiry})` },
+                        ]}
                     />
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                    {[
-                        { id: 'all', label: `全部 (${domainStats.total})` },
-                        { id: 'expiring', label: `30天到期 (${domainStats.expiringSoon})` },
-                        { id: 'cf', label: `CF 托管 (${domainStats.cfManaged})` },
-                        { id: 'unset', label: `未填日期 (${domainStats.missingExpiry})` },
-                    ].map(tab => (
-                        <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setFilterMode(tab.id)}
-                            className={`gm-filter-pill ${filterMode === tab.id ? 'is-active' : ''}`}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
 
-            {/* 域名列表 */}
-            {filteredDomains.length === 0 ? (
-                <div className="gm-card gm-pixel-card p-10 text-center text-[13px] gm-text-3">
-                    {loading ? '正在加载域名…' : '暂无匹配域名记录，可手动添加或通过 Cloudflare 连接导入'}
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {filteredDomains.map(dom => {
-                        const days = dom.expiresAt ? daysUntilDay(dom.expiresAt) : null;
-                        const rawBadge = days != null ? formatDaysBadge(days) : null;
-                        const badgeTone = !rawBadge
-                            ? 'muted'
-                            : rawBadge.tone === 'muted' && days > 30
-                                ? 'healthy'
-                                : rawBadge.tone;
-                        const urgencyRail = days == null
-                            ? 'unset'
-                            : days <= 7
-                                ? 'danger'
-                                : days <= 30
-                                    ? 'warning'
-                                    : 'healthy';
-                        const regIcon = resolveBrandIconUrl([dom.registrar]);
-                        const tld = dom.name?.includes('.') ? `.${dom.name.split('.').pop().toUpperCase()}` : '';
-                        const cnyCost = typeof dom.billingAmount === 'number'
-                            ? convertToCny(dom.billingAmount, dom.billingCurrency, fxRate)
-                            : null;
-                        const nsList = Array.isArray(dom.nameservers) ? dom.nameservers : [];
+                {/* 域名列表 */}
+                {filteredDomains.length === 0 ? (
+                    <div className="group">
+                        <EmptyState
+                            icon="globe"
+                            title={loading ? '正在加载域名…' : '暂无匹配域名记录'}
+                            description="可手动添加域名，或点击右上角「Cloudflare」批量导入托管区域。"
+                        />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {filteredDomains.map(dom => {
+                            const days = dom.expiresAt ? daysUntilDay(dom.expiresAt) : null;
+                            const rawBadge = days != null ? formatDaysBadge(days) : null;
+                            const badgeTone = !rawBadge
+                                ? 'muted'
+                                : rawBadge.tone === 'muted' && days > 30
+                                    ? 'healthy'
+                                    : rawBadge.tone;
+                            const urgencyRail = days == null
+                                ? 'unset'
+                                : days <= 7
+                                    ? 'danger'
+                                    : days <= 30
+                                        ? 'warning'
+                                        : 'healthy';
+                            const tld = dom.name?.includes('.') ? `.${dom.name.split('.').pop().toUpperCase()}` : '';
+                            const cnyCost = typeof dom.billingAmount === 'number'
+                                ? convertToCny(dom.billingAmount, dom.billingCurrency, fxRate)
+                                : null;
+                            const nsList = Array.isArray(dom.nameservers) ? dom.nameservers : [];
 
-                        return (
-                            <div
-                                key={dom.id}
-                                data-urgency={urgencyRail}
-                                className="gm-domain-card"
-                            >
-                                {/* 顶行：核心域名标识 + 右上角静默操作 */}
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        {regIcon ? (
-                                            <img
-                                                src={regIcon}
-                                                alt=""
-                                                className="w-9 h-9 rounded-lg bg-white/95 border border-black/10 p-1.5 object-contain shrink-0"
+                            return (
+                                <div
+                                    key={dom.id}
+                                    data-urgency={urgencyRail}
+                                    className="gm-domain-card"
+                                >
+                                    {/* 顶行：核心域名标识 + 右上角静默操作 */}
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <BrandLogo
+                                                name={dom.registrar || dom.name}
+                                                hints={[dom.registrar, dom.cfZoneId ? 'cloudflare' : '']}
                                             />
-                                        ) : (
-                                            <div className="gm-domain-icon shrink-0">
-                                                <Globe size={16} />
-                                            </div>
-                                        )}
-                                        <div className="min-w-0">
+                                            <div className="min-w-0">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <h3 className="text-[17px] font-bold tracking-tight gm-text-1 truncate font-mono">
                                                     {dom.name}
@@ -1193,7 +1170,8 @@ const DomainsView = ({ servers = [], fxRate = DEFAULT_USD_CNY_RATE, onNotify, on
                     </div>
                 </div>,
             )}
-        </div>
+            </div>
+        </>
     );
 };
 

@@ -1,7 +1,6 @@
 import { X, Download, RefreshCw } from 'lucide-react';
 import { RELEASES_URL } from '../hooks/useAppUpdater';
 import { renderInBody } from '../utils/portal';
-import { PixelProgress } from './PixelArt';
 
 const formatPercent = (progress) => `${Math.round((progress || 0) * 100)}%`;
 
@@ -28,7 +27,7 @@ const UpdateDialog = ({ updater }) => {
 
     return renderInBody(
         <div className="gm-overlay">
-            <div className="gm-modal w-full max-w-lg" role="dialog" aria-label={title}>
+            <div className="gm-modal glass w-full max-w-lg" data-lens="sheet" role="dialog" aria-label={title}>
                 <div className="gm-modal-header">
                     <h3 className="gm-title text-base">{title}</h3>
                     {!busy && (
@@ -62,7 +61,22 @@ const UpdateDialog = ({ updater }) => {
 
                     {busy && (
                         <div>
-                            <PixelProgress progress={progress} />
+                            <div
+                                className="h-2 rounded-full overflow-hidden"
+                                style={{ background: 'var(--fill-2)' }}
+                                role="progressbar"
+                                aria-valuenow={progress === null ? undefined : Math.round((progress || 0) * 100)}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                            >
+                                <div
+                                    className="h-full rounded-full transition-all duration-300"
+                                    style={{
+                                        width: progress === null ? '45%' : `${Math.min(100, Math.max(4, Math.round((progress || 0) * 100)))}%`,
+                                        background: 'var(--accent)',
+                                    }}
+                                />
+                            </div>
                             <p className="mt-2 text-xs font-mono gm-text-3">
                                 {status === 'installing'
                                     ? '下载完成，正在安装，应用稍后会自动重启…'

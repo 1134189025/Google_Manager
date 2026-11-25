@@ -13,6 +13,14 @@ import {
     X,
 } from 'lucide-react';
 import api from '../services/api';
+import {
+    EmptyState,
+    FluentIcon,
+    GlassButton,
+    GlassSearch,
+    PageToolbar,
+    SegmentedControl,
+} from './glass';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import {
@@ -244,60 +252,51 @@ const CardsView = ({ darkMode, fxRate = DEFAULT_USD_CNY_RATE, onNotify, onCopy, 
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-5 gm-view-enter">
-            {/* 页头 */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <CreditCard size={20} style={{ color: 'var(--primary)' }} />
-                        <span>U 卡与支付卡</span>
-                    </h1>
-                    <p className="gm-subtitle mt-1">
-                        管理虚拟 U 卡与银行卡，支持点击翻转查看私密卡号/CVV、离线 BIN 银行识别与年费追踪。
-                    </p>
-                </div>
-                <button type="button" onClick={openCreateModal} className="gm-btn gm-btn-primary">
-                    <Plus size={14} />
-                    <span>添加卡片</span>
-                </button>
-            </div>
+        <>
+            <PageToolbar
+                title="U 卡与支付卡"
+                subtitle="点击翻转查看卡号与 CVV · 离线 BIN 银行识别与年费追踪"
+                right={
+                    <div className="flex flex-wrap items-center gap-2">
+                        <GlassSearch
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            onClear={() => setSearch('')}
+                            placeholder="搜索卡名、发行方、尾号、地区或备注…"
+                            ariaLabel="搜索支付卡"
+                        />
+                        <GlassButton glass pill prominent onClick={openCreateModal}>
+                            <FluentIcon name="add" size={16} />
+                            <span>添加卡片</span>
+                        </GlassButton>
+                    </div>
+                }
+            />
 
-            {/* 筛选栏 */}
-            <div className="flex flex-wrap items-center gap-3">
-                <div className="relative flex-1 min-w-[200px]">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 gm-text-3" />
-                    <input
-                        type="text"
-                        className="gm-input w-full pl-9"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="搜索卡名、发行方、尾号、地区或备注…"
+            <div className="page page-wide page-in space-y-5">
+                {/* 地区分段筛选 */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <SegmentedControl
+                        label="卡片地区筛选"
+                        value={regionGroup}
+                        onChange={setRegionGroup}
+                        options={CARD_REGION_GROUPS.map(g => ({ value: g.id, label: g.label }))}
                     />
+                    <span className="text-[12px] muted tabular-nums">
+                        共 {filteredCards.length} 张卡片
+                    </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                    {CARD_REGION_GROUPS.map(g => (
-                        <button
-                            key={g.id}
-                            type="button"
-                            onClick={() => setRegionGroup(g.id)}
-                            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
-                                regionGroup === g.id
-                                    ? 'bg-[var(--primary-light)] text-[var(--primary)]'
-                                    : 'gm-card gm-text-2 hover:text-[var(--text-primary)]'
-                            }`}
-                        >
-                            {g.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
 
-            {/* 卡片网格 */}
-            {filteredCards.length === 0 ? (
-                <div className="gm-card p-10 text-center text-[13px] gm-text-3">
-                    {loading ? '正在加载卡片…' : '暂无支付卡记录，点击右上角「添加卡片」'}
-                </div>
-            ) : (
+                {/* 卡片网格 */}
+                {filteredCards.length === 0 ? (
+                    <div className="group">
+                        <EmptyState
+                            icon="card"
+                            title={loading ? '正在加载卡片…' : '暂无支付卡记录'}
+                            description="点击右上角「添加卡片」录入虚拟 U 卡或实体银行卡。"
+                        />
+                    </div>
+                ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                     {filteredCards.map(card => {
                         const appearance = cardAppearance(card.issuer || card.name, card.network, card.bankCode, {
@@ -876,7 +875,8 @@ const CardsView = ({ darkMode, fxRate = DEFAULT_USD_CNY_RATE, onNotify, onCopy, 
                     </div>
                 </div>,
             )}
-        </div>
+            </div>
+        </>
     );
 };
 

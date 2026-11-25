@@ -15,6 +15,14 @@ import {
 } from 'lucide-react';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import api from '../services/api';
+import {
+    BrandLogo,
+    EmptyState,
+    FluentIcon,
+    GlassButton,
+    GlassCapsule,
+    PageToolbar,
+} from './glass';
 import { confirmDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
 import { resolveBrandIconUrl } from '../utils/brandIcons';
@@ -408,137 +416,127 @@ const AiSubscriptionsView = ({
     );
 
     return (
-        <div className="max-w-6xl mx-auto space-y-5 gm-view-enter">
-            {/* 页头 */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <h1 className="gm-title flex items-center gap-2">
-                        <Sparkles size={20} style={{ color: 'var(--primary)' }} />
-                        <span>AI 订阅</span>
-                    </h1>
-                    <p className="gm-subtitle mt-1">
-                        管理 AI 会员套餐与续费，支持 OpenAI / Claude / Grok / Gemini OAuth 授权与 Antigravity CLI 分类额度刷新。
-                        {totalMonthlyCny > 0 && ` 当前折合月费 ${formatCnyAmount(totalMonthlyCny)}/月。`}
-                    </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => openGeminiConfigModal(null)}
-                        className="gm-btn gm-btn-ghost"
-                        title={geminiConfig?.configured ? `当前来源：${geminiConfig.source}` : '配置 Gemini OAuth 客户端'}
-                    >
-                        <Settings size={14} />
-                        <span>
-                            Gemini OAuth{geminiConfig?.configured ? ' ✓' : ''}
-                        </span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleReadAntigravity}
-                        disabled={agyLoading}
-                        className="gm-btn gm-btn-ghost"
-                    >
-                        <Terminal size={14} />
-                        <span>{agyLoading ? '读取中…' : 'Antigravity CLI 额度'}</span>
-                    </button>
-                    <button type="button" onClick={openCreate} className="gm-btn gm-btn-primary">
-                        <Plus size={14} />
-                        <span>添加订阅</span>
-                    </button>
-                </div>
-            </div>
-
-            {/* Antigravity CLI 结果区 */}
-            {(agyQuota || agyError) && (
-                <div className="gm-card p-4 space-y-2.5" aria-label="Antigravity CLI 额度结果">
-                    <div className="flex items-center justify-between">
-                        <div className="text-[13px] font-semibold gm-text-1 flex items-center gap-2">
-                            <Terminal size={14} style={{ color: 'var(--primary)' }} />
-                            <span>本机 Antigravity CLI 额度</span>
-                            {agyQuota?.checkedAt && (
-                                <span className="text-[11px] font-mono gm-text-3">
-                                    · {formatResetTime(agyQuota.checkedAt)}
-                                </span>
-                            )}
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setAgyQuota(null);
-                                setAgyError('');
-                            }}
-                            className="gm-btn gm-btn-ghost p-1"
-                            aria-label="收起 Antigravity 结果"
-                        >
-                            <X size={14} />
-                        </button>
+        <>
+            <PageToolbar
+                title="AI 订阅"
+                subtitle={
+                    totalMonthlyCny > 0
+                        ? `当前折合月费 ${formatCnyAmount(totalMonthlyCny)}/月 · 支持 OAuth 与 CLI 额度刷新`
+                        : '管理 AI 会员套餐、OAuth 授权与 Antigravity CLI 额度'
+                }
+                right={
+                    <div className="flex flex-wrap items-center gap-2">
+                        <GlassCapsule>
+                            <GlassButton
+                                onClick={() => openGeminiConfigModal(null)}
+                                title={geminiConfig?.configured ? `当前来源：${geminiConfig.source}` : '配置 Gemini OAuth 客户端'}
+                            >
+                                <FluentIcon name="settings" size={16} />
+                                <span>Gemini OAuth{geminiConfig?.configured ? ' ✓' : ''}</span>
+                            </GlassButton>
+                            <GlassButton
+                                onClick={handleReadAntigravity}
+                                disabled={agyLoading}
+                            >
+                                <FluentIcon name="terminal" size={16} />
+                                <span>{agyLoading ? '读取中…' : 'Antigravity CLI 额度'}</span>
+                            </GlassButton>
+                        </GlassCapsule>
+                        <GlassButton glass pill prominent onClick={openCreate}>
+                            <FluentIcon name="add" size={16} />
+                            <span>添加订阅</span>
+                        </GlassButton>
                     </div>
-                    {agyError && (
-                        <div className="text-[12px]" style={{ color: 'var(--danger)' }}>{agyError}</div>
-                    )}
-                    {agyQuota?.windows?.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                            {agyQuota.windows.map(w => (
-                                <div key={w.label} className="p-2.5 rounded-lg bg-[var(--bg-elevated)] space-y-1">
-                                    <div className="flex justify-between text-[12px]">
-                                        <span className="font-mono gm-text-1 truncate">{w.label}</span>
-                                        <span className="font-mono gm-text-2">
-                                            已用 {w.usedPercent ?? 0}%
-                                        </span>
-                                    </div>
-                                    <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
-                                        <div
-                                            className="h-full rounded-full"
-                                            style={{
-                                                width: `${Math.min(100, Math.max(0, w.usedPercent || 0))}%`,
-                                                background: (w.usedPercent || 0) > 85 ? 'var(--danger)' : 'var(--primary)',
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
+                }
+            />
 
-            {/* 订阅卡片列表 */}
-            {subs.length === 0 ? (
-                <div className="gm-card p-10 text-center text-[13px] gm-text-3">
-                    {loading ? '正在加载 AI 订阅…' : '暂无 AI 订阅，点击右上角「添加订阅」'}
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {subs.map(sub => {
-                        const iconUrl = resolveBrandIconUrl([sub.oauthProvider, sub.provider, sub.name]);
-                        const usage = sub.usage;
-                        return (
-                            <div key={sub.id} className="gm-card p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                        {iconUrl ? (
-                                            <img
-                                                src={iconUrl}
-                                                alt=""
-                                                className="w-8 h-8 rounded-lg bg-white/10 p-1.5 object-contain shrink-0"
+            <div className="page page-wide page-in space-y-5">
+                {/* Antigravity CLI 结果区 */}
+                {(agyQuota || agyError) && (
+                    <div className="gm-card p-4 space-y-2.5" aria-label="Antigravity CLI 额度结果">
+                        <div className="flex items-center justify-between">
+                            <div className="text-[13px] font-semibold gm-text-1 flex items-center gap-2">
+                                <Terminal size={14} style={{ color: 'var(--primary)' }} />
+                                <span>本机 Antigravity CLI 额度</span>
+                                {agyQuota?.checkedAt && (
+                                    <span className="text-[11px] font-mono gm-text-3">
+                                        · {formatResetTime(agyQuota.checkedAt)}
+                                    </span>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAgyQuota(null);
+                                    setAgyError('');
+                                }}
+                                className="gm-btn gm-btn-ghost p-1"
+                                aria-label="收起 Antigravity 结果"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                        {agyError && (
+                            <div className="text-[12px]" style={{ color: 'var(--danger)' }}>{agyError}</div>
+                        )}
+                        {agyQuota?.windows?.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                                {agyQuota.windows.map(w => (
+                                    <div key={w.label} className="p-2.5 rounded-lg bg-[var(--bg-elevated)] space-y-1">
+                                        <div className="flex justify-between text-[12px]">
+                                            <span className="font-mono gm-text-1 truncate">{w.label}</span>
+                                            <span className="font-mono gm-text-2">
+                                                已用 {w.usedPercent ?? 0}%
+                                            </span>
+                                        </div>
+                                        <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
+                                            <div
+                                                className="h-full rounded-full"
+                                                style={{
+                                                    width: `${Math.min(100, Math.max(0, w.usedPercent || 0))}%`,
+                                                    background: (w.usedPercent || 0) > 85 ? 'var(--danger)' : 'var(--primary)',
+                                                }}
                                             />
-                                        ) : (
-                                            <div className="w-8 h-8 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center shrink-0">
-                                                <Sparkles size={15} style={{ color: 'var(--primary)' }} />
-                                            </div>
-                                        )}
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="text-[14.5px] font-semibold gm-text-1 truncate">{sub.name}</h3>
-                                                {sub.plan && <span className="gm-chip gm-chip-accent">{sub.plan}</span>}
-                                            </div>
-                                            <div className="text-[11.5px] gm-text-3 truncate">
-                                                {sub.provider}
-                                                {sub.accountEmail ? ` · ${sub.accountEmail}` : ''}
-                                            </div>
                                         </div>
                                     </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* 订阅卡片列表 */}
+                {subs.length === 0 ? (
+                    <div className="group">
+                        <EmptyState
+                            icon="sparkle"
+                            title={loading ? '正在加载 AI 订阅…' : '暂无 AI 订阅'}
+                            description="点击右上角「添加订阅」录入会员与 OAuth 额度监控。"
+                        />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {subs.map(sub => {
+                            const usage = sub.usage;
+                            return (
+                                <div key={sub.id} className="gm-card p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <BrandLogo
+                                                name={sub.name}
+                                                hints={[sub.oauthProvider, sub.provider, sub.name]}
+                                            />
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="text-[14.5px] font-semibold gm-text-1 truncate">{sub.name}</h3>
+                                                    {sub.plan && <span className="gm-chip gm-chip-accent">{sub.plan}</span>}
+                                                </div>
+                                                <div className="text-[11.5px] gm-text-3 truncate">
+                                                    {sub.provider}
+                                                    {sub.accountEmail ? ` · ${sub.accountEmail}` : ''}
+                                                </div>
+                                            </div>
+                                        </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                         <button
                                             type="button"
@@ -1048,7 +1046,8 @@ const AiSubscriptionsView = ({
                     </div>
                 </div>,
             )}
-        </div>
+            </div>
+        </>
     );
 };
 

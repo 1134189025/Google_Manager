@@ -113,7 +113,7 @@ const EditModal = ({ account, accountCategories = [], onCreateCategory, onClose,
 
     return renderInBody(
         <div className="gm-overlay">
-            <div className="gm-modal w-full max-w-2xl" role="dialog" aria-label="编辑账号信息">
+            <div className="gm-modal glass w-full max-w-2xl" data-lens="sheet" role="dialog" aria-label="编辑账号信息">
                 <div className="gm-modal-header">
                     <h3 className="gm-title text-base">编辑账号信息</h3>
                     <button onClick={onClose} className="gm-icon-btn" style={{ width: 30, height: 30 }} aria-label="关闭">

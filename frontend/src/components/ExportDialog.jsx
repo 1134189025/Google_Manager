@@ -285,7 +285,7 @@ const ExportDialog = ({
 
     return renderInBody(
         <div className="gm-overlay">
-            <div className="w-full max-w-2xl gm-modal" role="dialog" aria-label="导出账号配置">
+            <div className="w-full max-w-2xl gm-modal glass" data-lens="sheet" role="dialog" aria-label="导出账号配置">
                 <div className="gm-modal-header">
                     <div>
                         <h2 className="gm-title text-base">导出账号配置</h2>

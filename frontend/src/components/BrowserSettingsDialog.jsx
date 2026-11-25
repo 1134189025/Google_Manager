@@ -139,7 +139,7 @@ const BrowserSettingsDialog = ({ isOpen, firstRun = false, onClose, onNotify }) 
 
     return renderInBody(
         <div className="gm-overlay">
-            <div className="gm-modal w-full max-w-2xl" role="dialog" aria-label={firstRun ? '首次使用：确认浏览器设置' : '账号浏览器设置'}>
+            <div className="gm-modal glass w-full max-w-2xl" data-lens="sheet" role="dialog" aria-label={firstRun ? '首次使用：确认浏览器设置' : '账号浏览器设置'}>
                 <div className="gm-modal-header">
                     <h3 className="gm-title text-base">{firstRun ? '首次使用：确认浏览器设置' : '账号浏览器设置'}</h3>
                     <button onClick={() => onClose(false)} className="gm-icon-btn" style={{ width: 30, height: 30 }} aria-label="关闭">

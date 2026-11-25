@@ -1,201 +1,239 @@
 /* ============================================
-   GoogleManager 设计令牌（MosMos 暗黑极简 + 克制像素风）
-   - 暗黑优先（Dark-First）：:root 与 :root[data-theme="dark"] 保持一致
-   - 全部使用系统字体与等宽字体，不加载网络字体
+   Google Manager · Windows 11 Liquid Glass + Mica 设计令牌
+   - 完整还原预览页浅色/深色 Mica + Liquid Glass 材质色板
+   - 同步映射所有遗留 --bg-* / --text-* / --primary / --border-* 令牌，确保全模块无割裂
    ============================================ */
 
-:root,
-:root[data-theme="dark"] {
-  /* 字体栈 */
-  --font-sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI",
-    "Microsoft YaHei", "PingFang SC", "Noto Sans SC", Roboto, Arial, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", Menlo,
-    monospace;
-
-  /* 尺寸令牌 */
-  --control-h: 34px;
-  --sidebar-w: 212px;
+:root {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, "PingFang SC", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, "PingFang SC", sans-serif;
+  --font-sans: var(--font);
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SFMono-Regular", Menlo, ui-monospace, monospace;
   --titlebar-h: 38px;
+  --control-h: 34px;
 
-  /* 表面色板（柔和石墨深灰 + 层次环境光） */
-  --bg-canvas: #161922;
-  --bg-panel: #1d212c;
-  --bg-panel-glass: rgba(28, 32, 43, 0.78);
-  --bg-elevated: #252a37;
-  --bg-hover: rgba(255, 255, 255, 0.055);
-  --bg-active: rgba(255, 255, 255, 0.095);
+  --fs-xs: 12px;
+  --fs-s: 13px;
+  --fs-m: 14px;
+  --fs-b: 15px;
+  --fs-l: 18px;
+  --fs-xl: 24px;
+  --fs-xxl: 32px;
+  --track: .01em;
 
-  /* 非纯色多层空间氛围背景：右上冷蓝天光 + 左下雾蓝托底 + 清晰像素点阵 + 深石板渐变 */
-  --bg-body:
-    radial-gradient(ellipse 68% 58% at 84% 6%, rgba(107, 155, 247, 0.16) 0%, rgba(107, 155, 247, 0.04) 46%, transparent 74%),
-    radial-gradient(ellipse 58% 52% at 10% 94%, rgba(92, 132, 194, 0.12) 0%, rgba(74, 114, 168, 0.03) 48%, transparent 72%),
-    radial-gradient(ellipse 46% 42% at 52% 48%, rgba(148, 163, 184, 0.04) 0%, transparent 70%),
-    radial-gradient(rgba(228, 231, 238, 0.075) 1px, transparent 1px),
-    linear-gradient(158deg, #1d2230 0%, #171b25 48%, #13161f 100%);
-  --bg-body-size: 100% 100%, 100% 100%, 100% 100%, 16px 16px, 100% 100%;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s8: 32px;
+  --s10: 40px;
+  --s12: 48px;
 
-  /* 兼容旧别名 */
+  /* 同心圆角：window 16 → panel 14 → group 10 → ctl 8 → pill 999 */
+  --r-window: 16px;
+  --r-panel: 14px;
+  --r-group: 10px;
+  --r-ctl: 8px;
+  --r-pill: 999px;
+  --inset: 10px;
+  --sidebar-w: 248px;
+
+  --spring: cubic-bezier(.32, 1.4, .46, 1);
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in: cubic-bezier(.4, 0, 1, 1);
+  --t-fast: 160ms;
+  --t-base: 260ms;
+  --t-drop: 380ms;
+  --t-exit: 170ms;
+
+  /* Light — Windows 11 Mica base + translucent layer */
+  --wallpaper: url("/wallpapers/mica-light.jpg");
+  --mica-base: #e9edf2;
+  --mica-veil: rgba(238, 241, 245, .78);
+  --layer: rgba(255, 255, 255, .82);
+  --layer-stroke: rgba(0, 0, 0, .06);
+  --win: #ffffff;
+  --win-2: #f5f6f8;
+  --sel-soft: rgba(10, 108, 214, .09);
+  --cap-hover: rgba(0, 0, 0, .055);
+  --cap-press: rgba(0, 0, 0, .035);
+  --text: #1d1d1f;
+  --text-2: #55555a;
+  --text-3: #6e6e73;
+  --sep: rgba(0, 0, 0, .09);
+  --fill: rgba(0, 0, 0, .05);
+  --fill-2: rgba(0, 0, 0, .08);
+  --accent: #0a6cd6;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(10, 108, 214, .12);
+  --green: #1d7a34;
+  --orange: #a24b00;
+  --red: #c41a1a;
+  --green-dot: #34c759;
+  --orange-dot: #ff9500;
+  --red-dot: #ff3b30;
+  --sel: #0a6cd6;
+  --sel-ink: #ffffff;
+  --row-hover: rgba(0, 0, 0, .035);
+
+  /* Liquid Glass tokens (Light) */
+  --g-bg: rgba(255, 255, 255, .36);
+  --g-bg-strong: rgba(255, 255, 255, .62);
+  --g-blur: 8px;
+  --g-sat: 190%;
+  --g-bright: 1.06;
+  --g-rim: rgba(255, 255, 255, .9);
+  --g-rim-low: rgba(255, 255, 255, .25);
+  --g-shade: rgba(0, 0, 0, .08);
+  --g-shadow: 0 10px 30px rgba(0, 0, 0, .10), 0 1px 3px rgba(0, 0, 0, .08);
+  --g-tint-accent: rgba(10, 108, 214, .78);
+
+  /* 兼容映射（旧模块与 Tailwind arbitrary tokens 无缝继承新色板） */
+  --bg-canvas: var(--mica-base);
+  --bg-base: var(--mica-base);
+  --bg-panel: var(--win-2);
+  --bg-surface: var(--win);
+  --bg-panel-glass: rgba(255, 255, 255, .64);
+  --bg-elevated: color-mix(in srgb, var(--win) 82%, transparent);
+  --bg-hover: var(--fill);
+  --bg-active: var(--fill-2);
   --bg-primary: var(--bg-canvas);
   --bg-secondary: var(--bg-panel);
   --bg-tertiary: var(--bg-elevated);
   --bg-card: var(--bg-panel);
 
-  /* 极细发丝边框 */
-  --border: rgba(255, 255, 255, 0.085);
-  --border-light: rgba(255, 255, 255, 0.055);
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.15);
+  --border: var(--sep);
+  --border-light: color-mix(in srgb, var(--sep) 65%, transparent);
+  --border-subtle: var(--sep);
+  --border-strong: rgba(0, 0, 0, .15);
 
-  /* 文本层级（柔和暖灰白，避免高反差白字刺眼，同时拉升次级与弱文字可读性） */
-  --text-primary: #e4e7ee;
-  --text-secondary: #a2aab8;
-  --text-muted: #727b8c;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--text-3);
+  --text-tertiary: var(--text-3);
 
-  /* 强调与语义色（柔和钢蓝 + 柔翠验证码绿） */
-  --primary: #6b9bf7;
-  --primary-hover: #82acf9;
-  --primary-light: rgba(107, 155, 247, 0.15);
-  --accent: #6b9bf7;
+  --primary: var(--accent);
+  --primary-hover: color-mix(in srgb, var(--accent) 88%, #000);
+  --primary-light: var(--accent-soft);
+  --primary-border: color-mix(in srgb, var(--accent) 32%, transparent);
 
-  --success: #4ade80;
-  --success-soft: rgba(74, 222, 128, 0.13);
-  --warning: #fbbf24;
-  --warning-soft: rgba(251, 191, 36, 0.14);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.14);
+  --success: var(--green);
+  --success-soft: rgba(52, 199, 89, .14);
+  --warning: var(--orange);
+  --warning-soft: rgba(255, 149, 0, .15);
+  --danger: var(--red);
+  --danger-soft: rgba(255, 59, 48, .12);
 
-  /* 渐变令牌（用于兼容旧语义引用，保持低饱和极简） */
-  --gradient-primary: #6b9bf7;
-  --gradient-success: #4ade80;
-  --gradient-danger: #f87171;
+  --gradient-primary: var(--accent);
+  --gradient-success: var(--green);
+  --gradient-danger: var(--red);
 
-  /* 柔和层次阴影 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
-  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.42);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .06);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, .09), 0 1px 3px rgba(0, 0, 0, .05);
+  --shadow-lg: var(--g-shadow);
 
-  /* 像素点阵氛围参数 */
-  --dither-ink: #e4e7ee;
-  --dither-opacity: 0.15;
-  --pixel-corner: rgba(148, 163, 184, 0.34);
-  --pixel-shadow: 0 2px 0 rgba(0, 0, 0, 0.36);
-
-  /* 键帽与反色徽标 */
-  --kbd-bg: #232731;
-  --kbd-border: rgba(255, 255, 255, 0.16);
-  --kbd-text: #ced4df;
-  --brand-badge-bg: #e4e7ee;
-  --brand-badge-fg: #16181d;
-
-  /* 克制像素硬朗微圆角 */
-  --radius-sm: 4px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
-  --radius-xl: 13px;
-  --radius-full: 9999px;
-
-  color-scheme: dark;
-}
-
-:root[data-theme="light"] {
-  --bg-canvas: #f1f3f8;
-  --bg-panel: #ffffff;
-  --bg-panel-glass: rgba(255, 255, 255, 0.82);
-  --bg-elevated: #f6f7fb;
-  --bg-hover: rgba(17, 24, 39, 0.045);
-  --bg-active: rgba(17, 24, 39, 0.08);
-
-  --bg-body:
-    radial-gradient(ellipse 68% 58% at 84% 6%, rgba(37, 99, 235, 0.09) 0%, transparent 72%),
-    radial-gradient(ellipse 56% 52% at 10% 94%, rgba(148, 163, 184, 0.15) 0%, transparent 70%),
-    radial-gradient(rgba(17, 24, 39, 0.075) 1px, transparent 1px),
-    linear-gradient(158deg, #f8f9fc 0%, #f1f4f9 52%, #eaedf5 100%);
-  --bg-body-size: 100% 100%, 100% 100%, 16px 16px, 100% 100%;
-
-  --bg-primary: var(--bg-canvas);
-  --bg-secondary: var(--bg-panel);
-  --bg-tertiary: var(--bg-elevated);
-  --bg-card: var(--bg-panel);
-
-  --border: rgba(17, 24, 39, 0.09);
-  --border-light: rgba(17, 24, 39, 0.055);
-  --border-subtle: rgba(17, 24, 39, 0.08);
-  --border-strong: rgba(17, 24, 39, 0.16);
-
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
-
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: rgba(37, 99, 235, 0.1);
-  --accent: #2563eb;
-
-  --success: #15803d;
-  --success-soft: rgba(21, 128, 61, 0.1);
-  --warning: #d97706;
-  --warning-soft: rgba(217, 119, 6, 0.12);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.1);
-
-  --gradient-primary: #2563eb;
-  --gradient-success: #15803d;
-  --gradient-danger: #dc2626;
-
-  --shadow-sm: 0 1px 3px rgba(17, 24, 39, 0.06);
-  --shadow-md: 0 8px 24px rgba(17, 24, 39, 0.08);
-  --shadow-lg: 0 20px 44px rgba(17, 24, 39, 0.12);
-
-  --dither-ink: #111827;
-  --dither-opacity: 0.115;
-  --pixel-corner: rgba(37, 99, 235, 0.28);
-  --pixel-shadow: 0 2px 0 rgba(15, 23, 42, 0.07);
-
-  --kbd-bg: #f1f3f5;
-  --kbd-border: rgba(17, 24, 39, 0.14);
-  --kbd-text: #374151;
-  --brand-badge-bg: #111827;
+  --kbd-bg: color-mix(in srgb, var(--win) 82%, transparent);
+  --kbd-border: var(--sep);
+  --kbd-text: var(--text-2);
+  --brand-badge-bg: var(--accent);
   --brand-badge-fg: #ffffff;
+
+  --radius-sm: 6px;
+  --radius-md: var(--r-ctl);
+  --radius-lg: var(--r-group);
+  --radius-xl: var(--r-panel);
+  --radius-full: var(--r-pill);
 
   color-scheme: light;
 }
 
-* {
-  box-sizing: border-box;
+:root[data-scheme="dark"],
+:root[data-theme="dark"] {
+  --wallpaper: url("/wallpapers/mica-dark.jpg");
+  --mica-base: #1c1f24;
+  --mica-veil: rgba(26, 28, 33, .82);
+  --layer: rgba(40, 42, 46, .72);
+  --layer-stroke: rgba(255, 255, 255, .06);
+  --win: #23252a;
+  --win-2: #2b2d32;
+  --sel-soft: rgba(61, 155, 255, .16);
+  --cap-hover: rgba(255, 255, 255, .07);
+  --cap-press: rgba(255, 255, 255, .04);
+  --text: #f5f5f7;
+  --text-2: #c7c7cc;
+  --text-3: #a1a1a6;
+  --sep: rgba(255, 255, 255, .1);
+  --fill: rgba(255, 255, 255, .06);
+  --fill-2: rgba(255, 255, 255, .1);
+  --accent: #3d9bff;
+  --accent-ink: #00152b;
+  --accent-soft: rgba(61, 155, 255, .18);
+  --green: #4ade6b;
+  --orange: #ffb44a;
+  --red: #ff7a70;
+  --sel: #2b7de0;
+  --sel-ink: #ffffff;
+  --row-hover: rgba(255, 255, 255, .04);
+
+  /* Liquid Glass tokens (Dark) */
+  --g-bg: rgba(40, 40, 44, .38);
+  --g-bg-strong: rgba(44, 44, 48, .7);
+  --g-bright: 1;
+  --g-rim: rgba(255, 255, 255, .32);
+  --g-rim-low: rgba(255, 255, 255, .06);
+  --g-shade: rgba(0, 0, 0, .3);
+  --g-shadow: 0 12px 36px rgba(0, 0, 0, .45), 0 1px 3px rgba(0, 0, 0, .3);
+  --g-tint-accent: rgba(43, 125, 224, .82);
+
+  --bg-panel-glass: rgba(44, 46, 52, .68);
+  --bg-elevated: color-mix(in srgb, var(--win) 80%, transparent);
+  --border-strong: rgba(255, 255, 255, .16);
+  --primary-hover: color-mix(in srgb, var(--accent) 88%, #fff);
+
+  --success-soft: rgba(74, 222, 107, .15);
+  --warning-soft: rgba(255, 180, 74, .16);
+  --danger-soft: rgba(255, 122, 112, .16);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .24);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, .32), 0 1px 3px rgba(0, 0, 0, .2);
+  --shadow-lg: var(--g-shadow);
+
+  color-scheme: dark;
 }
+
+* { box-sizing: border-box; }
 
 html,
 body,
 #root {
-  min-height: 100%;
+  margin: 0;
   height: 100%;
+  min-height: 100%;
 }
 
 body {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.55;
-  background-color: var(--bg-canvas);
-  background-image: var(--bg-body);
-  background-size: var(--bg-body-size);
-  background-attachment: fixed;
-  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--fs-b);
+  line-height: 1.6;
+  letter-spacing: var(--track);
+  color: var(--text);
+  background: var(--mica-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
 }
 
-button,
-input,
-select,
-textarea {
-  font-family: inherit;
+/* Windows 11 风格滚动条：常态极细，悬停略微增厚 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 30%, transparent) transparent;
 }
 
-/* 极简细滚动条 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
@@ -203,13 +241,34 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(142, 149, 162, 0.22);
-  border: 2px solid transparent;
-  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text) 28%, transparent);
+  border: 4px solid transparent;
   background-clip: padding-box;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(142, 149, 162, 0.42);
-  background-clip: padding-box;
+  border-width: 3px;
+  background-color: color-mix(in srgb, var(--text) 46%, transparent);
 }
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-3); }

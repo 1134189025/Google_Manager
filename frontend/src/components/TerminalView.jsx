@@ -19,6 +19,7 @@ import '@xterm/xterm/css/xterm.css';
 import { listen } from '@tauri-apps/api/event';
 import api from '../services/api';
 import { parseHostKeyMismatch } from './ServersView';
+import { EmptyState, FluentIcon, GlassCapsule, PageToolbar } from './glass';
 
 const FONT_SIZE_KEY = 'gm.terminal.fontSize';
 
@@ -50,16 +51,16 @@ function readInitialFontSize() {
 function getTerminalTheme(darkMode) {
     return darkMode
         ? {
-              background: '#0d1117',
-              foreground: '#e6edf3',
-              cursor: '#60a5fa',
-              selectionBackground: 'rgba(96, 165, 250, 0.3)',
+              background: '#1b1b1d',
+              foreground: '#f5f5f7',
+              cursor: '#0a84ff',
+              selectionBackground: 'rgba(10, 132, 255, 0.30)',
           }
         : {
-              background: '#f8fafc',
-              foreground: '#0f172a',
-              cursor: '#2563eb',
-              selectionBackground: 'rgba(37, 99, 235, 0.22)',
+              background: '#fbfbfd',
+              foreground: '#1d1d1f',
+              cursor: '#007aff',
+              selectionBackground: 'rgba(0, 122, 255, 0.22)',
           };
 }
 
@@ -487,242 +488,255 @@ const TerminalView = ({
         handleRetryTab(tab);
     };
 
+    const toolbarControls = (
+        <GlassCapsule>
+            <button
+                type="button"
+                className="gbtn icon"
+                onClick={() => updateFontSize(-1)}
+                title="减小字号"
+                aria-label="减小字号"
+            >
+                <ZoomOut size={14} />
+            </button>
+            <span className="text-[11px] font-mono muted px-1 tabular-nums">
+                {fontSize}px
+            </span>
+            <button
+                type="button"
+                className="gbtn icon"
+                onClick={() => updateFontSize(1)}
+                title="增大字号"
+                aria-label="增大字号"
+            >
+                <ZoomIn size={14} />
+            </button>
+            <button
+                type="button"
+                className="gbtn icon"
+                onClick={() => {
+                    if (activeTab) {
+                        controlsMapRef.current.get(activeTab.tabId)?.clear();
+                        controlsMapRef.current.get(activeTab.tabId)?.focus();
+                    }
+                }}
+                title="清空屏幕"
+                aria-label="清空屏幕"
+                disabled={!activeTab}
+            >
+                <Eraser size={14} />
+            </button>
+            <button
+                type="button"
+                className={`gbtn ${snippetsOpen ? 'prominent glass' : ''}`}
+                onClick={() => setSnippetsOpen(v => !v)}
+                title="快捷命令条"
+            >
+                <Command size={13} />
+                <span>快捷命令</span>
+            </button>
+            <button
+                type="button"
+                className="gbtn icon"
+                onClick={() => setFocusMode(v => !v)}
+                title={focusMode ? '退出专注模式' : '专注模式'}
+                aria-label={focusMode ? '退出专注模式' : '专注模式'}
+            >
+                {focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+        </GlassCapsule>
+    );
+
     return (
-        <div
-            className={`${
-                focusMode ? 'fixed inset-0 z-50 p-4 bg-[var(--bg-base)]' : 'max-w-7xl mx-auto'
-            } flex flex-col gap-3 h-[calc(100vh-110px)] gm-view-enter`}
-        >
-            {/* 顶部标签栏与工具栏 */}
-            <div className="gm-card px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 overflow-x-auto">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)] pr-2">
-                        <TerminalIcon size={15} className="text-[var(--primary)]" />
-                        SSH 终端
-                    </span>
-                    {tabs.map(tab => (
-                        <div
-                            key={tab.tabId}
-                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors ${
-                                tab.tabId === activeTabId
-                                    ? 'bg-[var(--primary-light)] border-[var(--primary)] text-[var(--text-primary)]'
-                                    : 'bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
-                            }`}
-                        >
+        <>
+            {!focusMode && (
+                <PageToolbar
+                    title="SSH 终端"
+                    subtitle="多标签持久化会话 · 切换视图不中断"
+                    right={toolbarControls}
+                />
+            )}
+
+            <div
+                className={`${
+                    focusMode
+                        ? 'fixed inset-0 z-50 p-4 bg-[var(--win)] h-screen'
+                        : 'page page-full page-in'
+                } flex flex-col gap-3`}
+                style={focusMode ? undefined : { height: 'calc(100vh - var(--titlebar-h) - 82px)', paddingBottom: 20 }}
+            >
+                {/* 顶部标签栏 */}
+                <div className="gm-card px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 overflow-x-auto">
+                        <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)] pr-2">
+                            <FluentIcon name="terminal" size={16} style={{ color: 'var(--accent)' }} />
+                            <span>会话标签</span>
+                        </span>
+                        {tabs.map(tab => (
+                            <div
+                                key={tab.tabId}
+                                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border transition-colors ${
+                                    tab.tabId === activeTabId
+                                        ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--text-primary)] font-semibold'
+                                        : 'bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                                }`}
+                            >
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5"
+                                    onClick={() => setActiveTabId(tab.tabId)}
+                                >
+                                    <span
+                                        className="w-2 h-2 rounded-full"
+                                        style={{
+                                            background:
+                                                tab.status === 'open'
+                                                    ? 'var(--success)'
+                                                    : tab.status === 'connecting'
+                                                        ? 'var(--warning)'
+                                                        : 'var(--danger)',
+                                        }}
+                                    />
+                                    <span>{tab.serverName}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className="hover:text-[var(--danger)]"
+                                    onClick={() => closeTab(tab)}
+                                    aria-label={`关闭标签 ${tab.serverName}`}
+                                >
+                                    <X size={12} />
+                                </button>
+                            </div>
+                        ))}
+                        <div className="relative">
                             <button
                                 type="button"
-                                className="flex items-center gap-1.5"
-                                onClick={() => setActiveTabId(tab.tabId)}
+                                className="btn"
+                                style={{ height: 28, padding: '0 10px', fontSize: '12px' }}
+                                onClick={() => setPickerOpen(v => !v)}
                             >
-                                <span
-                                    className="w-2 h-2 rounded-full"
-                                    style={{
-                                        background:
-                                            tab.status === 'open'
-                                                ? 'var(--success)'
-                                                : tab.status === 'connecting'
-                                                    ? 'var(--warning)'
-                                                    : 'var(--danger)',
-                                    }}
-                                />
-                                <span>{tab.serverName}</span>
+                                <Plus size={13} />
+                                <span>新建连接</span>
                             </button>
-                            <button
-                                type="button"
-                                className="hover:text-[var(--danger)]"
-                                onClick={() => closeTab(tab)}
-                                aria-label={`关闭标签 ${tab.serverName}`}
-                            >
-                                <X size={12} />
-                            </button>
-                        </div>
-                    ))}
-                    <div className="relative">
-                        <button
-                            type="button"
-                            className="gm-btn gm-btn-ghost text-xs py-1 px-2"
-                            onClick={() => setPickerOpen(v => !v)}
-                        >
-                            <Plus size={13} />
-                            新建连接
-                        </button>
-                        {pickerOpen && (
-                            <div className="absolute left-0 top-full mt-1 w-64 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-xl p-2 z-30 space-y-1">
-                                {servers.length === 0 ? (
-                                    <div className="p-2 text-xs text-[var(--text-secondary)] space-y-2">
-                                        <div>暂无可用服务器</div>
-                                        {onNavigateServers && (
+                            {pickerOpen && (
+                                <div className="gm-panel glass absolute left-0 top-full mt-1 w-64 p-2 z-30 space-y-1" data-lens="panel">
+                                    {servers.length === 0 ? (
+                                        <div className="p-2 text-xs text-[var(--text-secondary)] space-y-2">
+                                            <div>暂无可用服务器</div>
+                                            {onNavigateServers && (
+                                                <button
+                                                    type="button"
+                                                    className="gm-btn gm-btn-primary text-xs w-full"
+                                                    onClick={() => {
+                                                        setPickerOpen(false);
+                                                        onNavigateServers();
+                                                    }}
+                                                >
+                                                    前往添加服务器
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        servers.map(srv => (
                                             <button
+                                                key={srv.id}
                                                 type="button"
-                                                className="gm-btn gm-btn-primary text-xs w-full"
-                                                onClick={() => {
-                                                    setPickerOpen(false);
-                                                    onNavigateServers();
-                                                }}
+                                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-xs flex items-center justify-between gap-2"
+                                                onClick={() => openServerTab(srv)}
                                             >
-                                                前往添加服务器
+                                                <span className="truncate font-medium text-[var(--text-primary)]">
+                                                    {srv.name}
+                                                </span>
+                                                <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">
+                                                    {srv.host}
+                                                </span>
                                             </button>
-                                        )}
+                                        ))
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {focusMode && toolbarControls}
+                </div>
+
+                {/* 快捷运维命令条（只插入不自动回车） */}
+                {snippetsOpen && (
+                    <div className="gm-card px-3 py-2 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-[var(--text-secondary)] mr-1">
+                            快捷命令（点击插入不回车）：
+                        </span>
+                        {QUICK_SNIPPETS.map(item => (
+                            <button
+                                key={item.label}
+                                type="button"
+                                className="gm-btn gm-btn-ghost text-xs py-0.5 px-2"
+                                onClick={() => handleInsertSnippet(item)}
+                                title={item.command}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {/* 主终端区域或空状态 */}
+                {tabs.length === 0 ? (
+                    <div className="group flex-1 flex flex-col items-center justify-center p-8 text-center">
+                        <EmptyState
+                            icon="terminal"
+                            title="选择一个服务器开启多标签 SSH 会话"
+                            description="切换左侧工作区视图时，已打开的终端标签将保持连接不中断。"
+                            action={
+                                servers.length > 0 ? (
+                                    <div className="flex flex-wrap justify-center gap-2 max-w-xl mt-3">
+                                        {servers.map(srv => (
+                                            <button
+                                                key={srv.id}
+                                                type="button"
+                                                className="btn primary"
+                                                onClick={() => openServerTab(srv)}
+                                            >
+                                                <TerminalIcon size={13} />
+                                                <span>连接 {srv.name}</span>
+                                            </button>
+                                        ))}
                                     </div>
                                 ) : (
-                                    servers.map(srv => (
+                                    onNavigateServers && (
                                         <button
-                                            key={srv.id}
                                             type="button"
-                                            className="w-full text-left px-2.5 py-1.5 rounded hover:bg-[var(--bg-hover)] text-xs flex items-center justify-between gap-2"
-                                            onClick={() => openServerTab(srv)}
+                                            className="btn primary mt-3"
+                                            onClick={onNavigateServers}
                                         >
-                                            <span className="truncate font-medium text-[var(--text-primary)]">
-                                                {srv.name}
-                                            </span>
-                                            <span className="font-mono text-[10px] text-[var(--text-muted)] shrink-0">
-                                                {srv.host}
-                                            </span>
+                                            前往服务器台账添加主机
                                         </button>
-                                    ))
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* 字体缩放 / 清屏 / 快捷命令 / 专注模式 */}
-                <div className="flex items-center gap-1">
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost p-1.5"
-                        onClick={() => updateFontSize(-1)}
-                        title="减小字号"
-                        aria-label="减小字号"
-                    >
-                        <ZoomOut size={14} />
-                    </button>
-                    <span className="text-[11px] font-mono text-[var(--text-secondary)] px-1">
-                        {fontSize}px
-                    </span>
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost p-1.5"
-                        onClick={() => updateFontSize(1)}
-                        title="增大字号"
-                        aria-label="增大字号"
-                    >
-                        <ZoomIn size={14} />
-                    </button>
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost p-1.5"
-                        onClick={() => {
-                            if (activeTab) {
-                                controlsMapRef.current.get(activeTab.tabId)?.clear();
-                                controlsMapRef.current.get(activeTab.tabId)?.focus();
+                                    )
+                                )
                             }
-                        }}
-                        title="清空屏幕"
-                        aria-label="清空屏幕"
-                        disabled={!activeTab}
-                    >
-                        <Eraser size={14} />
-                    </button>
-                    <button
-                        type="button"
-                        className={`gm-btn text-xs py-1 px-2 ${
-                            snippetsOpen ? 'gm-btn-primary' : 'gm-btn-ghost'
-                        }`}
-                        onClick={() => setSnippetsOpen(v => !v)}
-                        title="快捷命令条"
-                    >
-                        <Command size={13} />
-                        快捷命令
-                    </button>
-                    <button
-                        type="button"
-                        className="gm-btn gm-btn-ghost p-1.5"
-                        onClick={() => setFocusMode(v => !v)}
-                        title={focusMode ? '退出专注模式' : '专注模式'}
-                        aria-label={focusMode ? '退出专注模式' : '专注模式'}
-                    >
-                        {focusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                    </button>
-                </div>
-            </div>
-
-            {/* 快捷运维命令条（只插入不自动回车） */}
-            {snippetsOpen && (
-                <div className="gm-card px-3 py-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] text-[var(--text-secondary)] mr-1">
-                        快捷命令（点击插入不回车）：
-                    </span>
-                    {QUICK_SNIPPETS.map(item => (
-                        <button
-                            key={item.label}
-                            type="button"
-                            className="gm-btn gm-btn-ghost text-xs py-0.5 px-2"
-                            onClick={() => handleInsertSnippet(item)}
-                            title={item.command}
-                        >
-                            {item.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-
-            {/* 主终端区域或空状态 */}
-            {tabs.length === 0 ? (
-                <div className="gm-card flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
-                    <Server size={32} className="text-[var(--text-muted)]" />
-                    <div className="space-y-1">
-                        <h2 className="text-base font-semibold text-[var(--text-primary)]">
-                            选择一个服务器开启多标签 SSH 会话
-                        </h2>
-                        <p className="text-xs text-[var(--text-secondary)]">
-                            切换左侧工作区视图时，已打开的终端标签将保持连接不中断。
-                        </p>
-                    </div>
-                    {servers.length > 0 ? (
-                        <div className="flex flex-wrap justify-center gap-2 max-w-xl">
-                            {servers.map(srv => (
-                                <button
-                                    key={srv.id}
-                                    type="button"
-                                    className="gm-btn gm-btn-primary text-xs"
-                                    onClick={() => openServerTab(srv)}
-                                >
-                                    <TerminalIcon size={13} />
-                                    连接 {srv.name}
-                                </button>
-                            ))}
-                        </div>
-                    ) : (
-                        onNavigateServers && (
-                            <button
-                                type="button"
-                                className="gm-btn gm-btn-primary text-xs"
-                                onClick={onNavigateServers}
-                            >
-                                前往服务器台账添加主机
-                            </button>
-                        )
-                    )}
-                </div>
-            ) : (
-                <div className="flex-1 flex flex-col min-h-0">
-                    {tabs.map(tab => (
-                        <TerminalPane
-                            key={tab.tabId}
-                            tab={tab}
-                            isActive={tab.tabId === activeTabId}
-                            isViewVisible={isActiveView}
-                            fontSize={fontSize}
-                            darkMode={darkMode}
-                            registerControls={registerControls}
-                            onRetry={handleRetryTab}
-                            onResetFingerprint={handleResetFingerprintAndRetry}
                         />
-                    ))}
-                </div>
-            )}
-        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 flex flex-col min-h-0">
+                        {tabs.map(tab => (
+                            <TerminalPane
+                                key={tab.tabId}
+                                tab={tab}
+                                isActive={tab.tabId === activeTabId}
+                                isViewVisible={isActiveView}
+                                fontSize={fontSize}
+                                darkMode={darkMode}
+                                registerControls={registerControls}
+                                onRetry={handleRetryTab}
+                                onResetFingerprint={handleResetFingerprintAndRetry}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+        </>
     );
 };
 

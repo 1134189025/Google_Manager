@@ -1,14 +1,8 @@
 import {
-    Search,
-    Edit3,
-    Trash2,
-    Copy,
-    Link2,
-    History,
     ArrowDown,
     ArrowUp,
     ArrowUpDown,
-    Globe,
+    Loader2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
@@ -16,7 +10,7 @@ import { isMultilineField, splitMultiValueLines, getCategoryColorMeta } from '..
 import { describeSmsUrl } from '../utils/smsUtils';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import SmsCodeCell from './SmsCodeCell';
-import { PixelLoader, PixelMascot, PixelCountdownBar } from './PixelArt';
+import { EmptyState, FluentIcon, RingCountdown } from './glass';
 
 const BROWSER_STATUS_LABELS = {
     none: '未创建',
@@ -44,7 +38,7 @@ const BrowserButton = ({ account, status, opening, onOpen }) => {
             aria-label={`打开浏览器（${BROWSER_STATUS_LABELS[browserStatus]}）`}
             disabled={opening}
         >
-            <Globe size={14} />
+            <FluentIcon name="browser" size={14} />
         </button>
     );
 };
@@ -556,11 +550,11 @@ const AccountTable = ({
                         className={`gm-cell gm-code-pill select-none flex flex-col items-start gap-1 ${flashedCellKey === codeKey ? 'gm-copy-flash' : ''}`}
                         title="单击复制2FA验证码，双击编辑密钥"
                     >
-                        <span className="flex items-baseline gap-1.5 w-full">
-                            <span className="gm-code-text">{codeInfo.code}</span>
+                        <span className="otp-wrap w-full">
+                            <RingCountdown remaining={codeInfo.expiry} size={14} strokeWidth={2} />
+                            <span className="gm-code-text otp">{codeInfo.code}</span>
                             <span className="text-[10px] font-mono gm-text-3 tabular-nums">{codeInfo.expiry}s</span>
                         </span>
-                        <PixelCountdownBar expiry={codeInfo.expiry} />
                     </button>
                 ) : (
                     <span className="gm-text-3 text-[11px] px-1.5 py-1">
@@ -675,8 +669,9 @@ const AccountTable = ({
                         {loading ? (
                             <tr>
                                 <td colSpan="14">
-                                    <div className="gm-empty flex flex-col items-center">
-                                        <PixelLoader label="加载中..." />
+                                    <div className="gm-empty flex flex-col items-center gap-2">
+                                        <Loader2 size={20} className="animate-spin gm-text-3" />
+                                        <span className="text-xs gm-text-3">加载中...</span>
                                     </div>
                                 </td>
                             </tr>
@@ -697,7 +692,7 @@ const AccountTable = ({
                                             onToggleCheckbox(acc.id);
                                         }}
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        className="gm-checkbox"
+                                        className="gm-checkbox check"
                                     />
                                 </td>
                                 {/* 序号 */}
@@ -711,7 +706,8 @@ const AccountTable = ({
                                     <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
                                             <span
-                                                className={`gm-row-signal ${browserStatuses?.[acc.email] === 'running' ? 'is-running gm-pixel-status-pulse' : acc.status === 'pro' ? 'is-pro' : ''}`}
+                                                className={`gm-row-signal signal ${browserStatuses?.[acc.email] === 'running' ? 'is-running running' : acc.status === 'pro' ? 'is-pro pro' : ''}`}
+                                                style={{ marginTop: 0 }}
                                                 aria-hidden="true"
                                             />
                                             <div className="flex-1 min-w-0">
@@ -724,7 +720,7 @@ const AccountTable = ({
                                                 style={{ width: 22, height: 22 }}
                                                 title="查看修改历史"
                                             >
-                                                <History size={12} />
+                                                <FluentIcon name="clock" size={13} />
                                             </button>
                                         </div>
                                         <div className="pl-3">
@@ -762,7 +758,7 @@ const AccountTable = ({
                                         onClick={() => toggleStatus(acc.id)}
                                         onMouseDown={(e) => e.stopPropagation()}
                                         title="点击切换 Pro 状态"
-                                        className={`gm-badge whitespace-nowrap ${acc.status === 'pro' ? 'gm-badge-on' : 'gm-badge-off'}`}
+                                        className={`gm-badge pro-toggle whitespace-nowrap ${acc.status === 'pro' ? 'gm-badge-on on' : 'gm-badge-off'}`}
                                     >
                                         {acc.status === 'pro' ? 'Pro' : '普通'}
                                     </button>
@@ -793,7 +789,7 @@ const AccountTable = ({
                                             style={{ width: 25, height: 25 }}
                                             title="编辑"
                                         >
-                                            <Edit3 size={14} />
+                                            <FluentIcon name="edit" size={14} />
                                         </button>
                                         <button
                                             onClick={() => onDelete(acc.id)}
@@ -802,7 +798,7 @@ const AccountTable = ({
                                             style={{ width: 25, height: 25 }}
                                             title="删除"
                                         >
-                                            <Trash2 size={14} />
+                                            <FluentIcon name="trash" size={14} />
                                         </button>
                                         <button
                                             onClick={() => copyAllInfo(acc)}
@@ -811,7 +807,7 @@ const AccountTable = ({
                                             style={{ width: 25, height: 25 }}
                                             title="复制全部信息"
                                         >
-                                            <Copy size={14} />
+                                            <FluentIcon name="copy" size={14} />
                                         </button>
                                         <button
                                             onClick={() => copyPhoneWithSmsUrl(acc)}
@@ -821,7 +817,7 @@ const AccountTable = ({
                                             title="复制号码与接码地址"
                                             disabled={!acc.smsUrl}
                                         >
-                                            <Link2 size={14} />
+                                            <FluentIcon name="link" size={14} />
                                         </button>
                                     </div>
                                 </td>
@@ -833,13 +829,11 @@ const AccountTable = ({
                         )) : (
                             <tr>
                                 <td colSpan="14">
-                                    <div className="gm-empty flex flex-col items-center gap-3">
-                                        <PixelMascot size={48} variant="sleep" className="gm-text-3" />
-                                        <div>
-                                            <p className="text-sm font-semibold gm-text-2">未找到相关账号</p>
-                                            <p className="text-xs mt-1 gm-text-3">尝试更换关键词或导入新账号</p>
-                                        </div>
-                                    </div>
+                                    <EmptyState
+                                        icon="people"
+                                        title="未找到相关账号"
+                                        description="尝试更换关键词或导入新账号"
+                                    />
                                 </td>
                             </tr>
                         )}

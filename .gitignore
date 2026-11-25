@@ -47,6 +47,7 @@ src-tauri/WixTools/
 static/assets/*.js
 static/assets/*.css
 static/brands/
+static/wallpapers/
 frontend/dist/
 
 # Database files

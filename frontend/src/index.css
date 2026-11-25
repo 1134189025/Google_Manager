@@ -1,73 +1,40 @@
-@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 主题与组件样式由 styles/*.css 提供（在 main.jsx 中后置引入） */
-
-/* 自定义动画 */
+/* 保留兼容动效工具类（严格使用 backwards，避免祖先保留 transform 破坏 fixed 弹窗定位） */
 @keyframes zoom-in-95 {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slide-in-from-bottom-4 {
-  from {
-    transform: translateY(16px);
-  }
-  to {
-    transform: translateY(0);
-  }
+  from { transform: translateY(16px); }
+  to { transform: translateY(0); }
 }
 
 @keyframes slide-in-from-top-2 {
-  from {
-    transform: translateY(-8px);
-  }
-  to {
-    transform: translateY(0);
-  }
+  from { transform: translateY(-8px); }
+  to { transform: translateY(0); }
 }
 
 .animate-in {
-  animation-duration: 0.3s;
-  /* 只用 backwards：动画结束后不保留 transform（见 styles/layout.css 的 .main-wrapper） */
+  animation-duration: 0.26s;
   animation-fill-mode: backwards;
 }
 
-.zoom-in-95 {
-  animation-name: zoom-in-95;
-}
+.zoom-in-95 { animation-name: zoom-in-95; }
+.fade-in { animation-name: fade-in; }
+.slide-in-from-bottom-4 { animation-name: slide-in-from-bottom-4; }
+.slide-in-from-top-2 { animation-name: slide-in-from-top-2; }
 
-.fade-in {
-  animation-name: fade-in;
-}
-
-.slide-in-from-bottom-4 {
-  animation-name: slide-in-from-bottom-4;
-}
-
-.slide-in-from-top-2 {
-  animation-name: slide-in-from-top-2;
-}
-
-/* 滚动条（细） */
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
@@ -75,6 +42,8 @@
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.4);
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 24%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
 }

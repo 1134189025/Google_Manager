@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Minus, Square, Copy, X } from 'lucide-react';
+import { FluentIcon } from './glass';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 
 /**
@@ -17,7 +17,7 @@ const getSafeWindow = async () => {
 
 const VIEW_LABELS = {
     home: '首页',
-    list: '账号列表',
+    list: '账号库',
     import: '导入账号',
     recycle: '回收站',
     renewals: '费用与续费',
@@ -30,11 +30,16 @@ const VIEW_LABELS = {
 };
 
 /**
- * 独立无边框顶部标题栏
- * - 独占顶部 38px 空间，与下方内容区严格分离，滚动列表绝不遮挡窗口按钮
- * - 质感与悬浮侧栏保持一致（半透明石墨磨砂 + 极细底分割线 + 统一圆角窗口按钮）
+ * Windows 11 风格无边框标题栏 (.titlebar)
+ * - 独占顶部 38px 空间，右侧集成主题快速切换与 10x10 锐利窗口控制按钮
+ * - 完整保留 Tauri 窗口最小化、最大化/还原状态同步及关闭拦截行为
  */
-const TitleBar = ({ view = 'home', onRequestClose }) => {
+const TitleBar = ({
+    view = 'home',
+    darkMode = true,
+    onToggleDarkMode,
+    onRequestClose,
+}) => {
     const [maximized, setMaximized] = useState(false);
 
     const syncMaximized = useCallback(async () => {
@@ -116,55 +121,108 @@ const TitleBar = ({ view = 'home', onRequestClose }) => {
     const currentLabel = VIEW_LABELS[view] || '工作区';
 
     return (
-        <header className="gm-titlebar" data-tauri-drag-region>
+        <header className="titlebar" data-tauri-drag-region>
             <div
-                className="gm-titlebar-drag"
+                className="tb-app"
                 data-tauri-drag-region
                 onDoubleClick={handleToggleMaximize}
             >
-                <span className="gm-titlebar-brand" data-tauri-drag-region>
-                    <span className="gm-titlebar-pixel-strip" aria-hidden="true">
-                        <span className="gm-titlebar-pixel" />
-                        <span className="gm-titlebar-pixel is-mid" />
-                        <span className="gm-titlebar-pixel is-dim" />
-                    </span>
-                    <span className="gm-titlebar-app" data-tauri-drag-region>GoogleManager</span>
-                    <span className="gm-titlebar-sep" aria-hidden="true">/</span>
-                    <span className="gm-titlebar-view" data-tauri-drag-region>{currentLabel}</span>
-                </span>
+                <span className="tb-mark" aria-hidden="true">G</span>
+                <span className="name" data-tauri-drag-region>Google Manager</span>
+                <span className="sep" aria-hidden="true" />
+                <span className="view" data-tauri-drag-region>{currentLabel}</span>
             </div>
-            <div className="gm-titlebar-controls">
+
+            <div
+                className="tb-grow"
+                data-tauri-drag-region
+                onDoubleClick={handleToggleMaximize}
+            />
+
+            {typeof onToggleDarkMode === 'function' && (
+                <div className="tb-tools">
+                    <button
+                        type="button"
+                        onClick={onToggleDarkMode}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="gbtn icon"
+                        data-theme-mode={darkMode ? 'dark' : 'light'}
+                        title={darkMode ? '切换亮色模式' : '切换暗色模式'}
+                        aria-label={darkMode ? '切换亮色模式' : '切换暗色模式'}
+                    >
+                        <FluentIcon name={darkMode ? 'sun' : 'moon'} size={16} />
+                    </button>
+                </div>
+            )}
+
+            <div className="caption" role="group" aria-label="窗口控制">
                 <button
                     type="button"
                     onClick={handleMinimize}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-titlebar-btn"
                     title="最小化"
                     aria-label="最小化窗口"
                 >
-                    <Minus size={13} strokeWidth={1.85} />
+                    <svg
+                        className="od-icon"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1"
+                        aria-hidden="true"
+                    >
+                        <path d="M0 5.5h10" />
+                    </svg>
                 </button>
                 <button
                     type="button"
                     onClick={handleToggleMaximize}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-titlebar-btn"
                     title={maximized ? '还原窗口' : '最大化窗口'}
                     aria-label={maximized ? '还原窗口' : '最大化窗口'}
                 >
-                    {maximized
-                        ? <Copy size={11.5} strokeWidth={1.85} />
-                        : <Square size={11.5} strokeWidth={1.85} />}
+                    {maximized ? (
+                        <svg
+                            className="od-icon"
+                            viewBox="0 0 10 10"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1"
+                            aria-hidden="true"
+                        >
+                            <path d="M2.5 2.5V.5h7v7h-2M.5 2.5h7v7h-7z" />
+                        </svg>
+                    ) : (
+                        <svg
+                            className="od-icon"
+                            viewBox="0 0 10 10"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1"
+                            aria-hidden="true"
+                        >
+                            <path d="M.5.5h9v9h-9z" />
+                        </svg>
+                    )}
                 </button>
                 <button
                     type="button"
                     onClick={handleClose}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className="gm-titlebar-btn gm-titlebar-close"
+                    className="close"
                     title="关闭"
                     aria-label="关闭窗口"
                 >
-                    <X size={13.5} strokeWidth={1.85} />
+                    <svg
+                        className="od-icon"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1"
+                        aria-hidden="true"
+                    >
+                        <path d="M.5.5l9 9M9.5.5l-9 9" />
+                    </svg>
                 </button>
             </div>
         </header>
