@@ -9,6 +9,7 @@ import {
     PageToolbar,
 } from './glass';
 import { splitGroupNameValues } from '../utils/multiValueField';
+import { getAccountStatusMeta } from '../utils/accountStatus';
 import { formatDbTimestamp } from '../utils/timeUtils';
 import {
     DEFAULT_USD_CNY_RATE,
@@ -91,15 +92,21 @@ const HomeView = ({
 
     const stats = useMemo(() => {
         let proCount = 0;
+        let ultraLiteCount = 0;
+        let ultraCount = 0;
         let smsCount = 0;
         for (const acc of accounts) {
             if (acc.status === 'pro') proCount += 1;
+            else if (acc.status === 'ultra_lite') ultraLiteCount += 1;
+            else if (acc.status === 'ultra') ultraCount += 1;
             if (acc.smsUrl && String(acc.smsUrl).trim()) smsCount += 1;
         }
         const runningAccounts = accounts.filter(acc => browserStatuses[acc.email] === 'running');
         return {
             total: accounts.length,
             pro: proCount,
+            ultraLite: ultraLiteCount,
+            ultra: ultraCount,
             sms: smsCount,
             runningAccounts,
             runningCount: runningAccounts.length,
@@ -282,6 +289,14 @@ const HomeView = ({
                             {stats.pro}
                         </span>
                         <span className="k">Pro 账号</span>
+                        {(stats.ultra > 0 || stats.ultraLite > 0) && (
+                            <span className="text-[11px] gm-text-3 mt-0.5 font-mono">
+                                {[
+                                    stats.ultra > 0 ? `Ultra ${stats.ultra}` : null,
+                                    stats.ultraLite > 0 ? `Ultra Lite ${stats.ultraLite}` : null,
+                                ].filter(Boolean).join(' · ')}
+                            </span>
+                        )}
                     </div>
                     <div className="figure gm-stat-item">
                         <span className="v gm-stat-value">{stats.sms}</span>
@@ -568,9 +583,9 @@ const HomeView = ({
                                 <ul className="rows flush">
                                     {recentAccounts.map(acc => {
                                         const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
-                                        const badgeText = tags[0] || (acc.status === 'pro' ? 'Pro' : '普通');
+                                        const statusMeta = getAccountStatusMeta(acc.status);
+                                        const badgeText = tags[0] || statusMeta.label;
                                         const timeText = formatDbTimestamp(acc.updatedAt || acc.createdAt);
-                                        const isPro = acc.status === 'pro';
                                         return (
                                             <li key={acc.id}>
                                                 <button
@@ -581,7 +596,7 @@ const HomeView = ({
                                                     title="点击复制邮箱"
                                                 >
                                                     <span
-                                                        className={`signal ${isPro ? 'pro' : ''}`}
+                                                        className={`signal ${statusMeta.signalClass}`}
                                                         style={{ marginTop: 0 }}
                                                         aria-hidden="true"
                                                     />
@@ -593,7 +608,9 @@ const HomeView = ({
                                                             </span>
                                                         )}
                                                     </span>
-                                                    <Chip tone={isPro ? 'accent' : ''}>{badgeText}</Chip>
+                                                    <Chip tone={tags[0] ? (statusMeta.isPaid ? statusMeta.chipTone : '') : statusMeta.chipTone}>
+                                                        {badgeText}
+                                                    </Chip>
                                                     <span className="font-mono text-[11.5px] muted tabular-nums shrink-0">
                                                         {timeText ? timeText.slice(5, 16) : '-'}
                                                     </span>

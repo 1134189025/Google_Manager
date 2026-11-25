@@ -112,7 +112,7 @@ export class TauriAdapter implements ApiAdapter {
       country: account.country ?? currentAccount.country ?? null,
       groupName: account.groupName ?? currentAccount.groupName ?? null,
       remark: account.remark ?? currentAccount.remark ?? null,
-      status: currentAccount.status,
+      status: account.status ?? currentAccount.status,
       createdAt: currentAccount.createdAt,
       updatedAt: currentAccount.updatedAt,
     };
@@ -141,8 +141,9 @@ export class TauriAdapter implements ApiAdapter {
     await this.invokeCommand('delete_account', { id });
   }
 
-  async toggleStatus(id: number): Promise<Account> {
-    const result = await this.invokeCommand<any>('toggle_status', { id });
+  async toggleStatus(id: number, status?: Account['status']): Promise<Account> {
+    const payload = status ? { id, status } : { id };
+    const result = await this.invokeCommand<any>('toggle_status', payload);
     return snakeToCamel<Account>(result);
   }
 

@@ -196,4 +196,30 @@ describe('HomeView 首页总览', () => {
         const recentSection = screen.getByLabelText('最近更新');
         expect(within(recentSection).getByText('AI 订阅')).toBeInTheDocument();
     });
+
+    it('包含 Ultra 与 Ultra Lite 账号时展示统计副行与对应等级徽章', () => {
+        const props = defaultProps();
+        render(
+            <HomeView
+                {...props}
+                accounts={[
+                    buildAccount(21, { status: 'pro', updatedAt: '2026-11-24 10:00:00' }),
+                    buildAccount(22, { status: 'ultra_lite', updatedAt: '2026-11-24 11:00:00' }),
+                    buildAccount(23, { status: 'ultra', updatedAt: '2026-11-24 12:00:00' }),
+                    buildAccount(24, { status: 'ultra', updatedAt: '2026-11-24 12:30:00' }),
+                ]}
+            />,
+        );
+
+        const statsAside = screen.getByLabelText('账号统计');
+        const proItem = within(statsAside).getByText('Pro 账号').closest('.gm-stat-item');
+        expect(proItem.querySelector('.gm-stat-value').textContent).toBe('1');
+        expect(within(proItem).getByText('Ultra 2 · Ultra Lite 1')).toBeInTheDocument();
+
+        const recentSection = screen.getByLabelText('最近更新');
+        expect(within(recentSection).getAllByText('Ultra')).toHaveLength(2);
+        expect(within(recentSection).getByText('Ultra Lite')).toBeInTheDocument();
+        expect(recentSection.querySelector('.signal.is-ultra')).toBeInTheDocument();
+        expect(recentSection.querySelector('.signal.is-ultra-lite')).toBeInTheDocument();
+    });
 });

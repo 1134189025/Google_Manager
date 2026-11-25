@@ -10,6 +10,7 @@ import {
     PageToolbar,
 } from './glass';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { getAccountStatusMeta } from '../utils/accountStatus';
 import { splitGroupNameValues } from '../utils/multiValueField';
 import { confirmDialog, messageDialog } from '../utils/dialogs';
 
@@ -233,19 +234,22 @@ const RecycleView = ({ onRefreshAccounts, onNotify, onNavigateList, accountCateg
                         <ul className="rows flush" role="list" aria-label="已删除账号列表">
                             {filteredAccounts.map((acc) => {
                                 const tags = splitGroupNameValues(acc.groupName, knownCategoryNames);
+                                const statusMeta = getAccountStatusMeta(acc.status);
                                 const isBusy = busyId === acc.id || purgingAll;
                                 return (
                                     <li key={acc.id} role="listitem">
                                         <div className="row flex-wrap sm:flex-nowrap">
                                             <span
-                                                className={`signal ${acc.status === 'pro' ? 'pro' : ''}`}
+                                                className={`signal ${statusMeta.signalClass}`}
                                                 style={{ marginTop: 0 }}
                                                 aria-hidden="true"
                                             />
                                             <div className="od-field od-fill">
                                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                                                     <span className="t od-truncate">{acc.email}</span>
-                                                    {acc.status === 'pro' && <Chip tone="accent">Pro</Chip>}
+                                                    {statusMeta.isPaid && (
+                                                        <Chip tone={statusMeta.chipTone}>{statusMeta.label}</Chip>
+                                                    )}
                                                     {tags.slice(0, 3).map((tag) => (
                                                         <Chip key={tag}>{tag}</Chip>
                                                     ))}

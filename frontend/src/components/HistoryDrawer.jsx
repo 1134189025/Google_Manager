@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { formatAccountStatusLabel } from '../utils/accountStatus';
 import { renderInBody } from '../utils/portal';
 
 // 旧数据库可能残留已下线字段的历史记录，渲染时静默跳过
@@ -33,8 +34,7 @@ const HistoryDrawer = ({ isOpen, onClose, account }) => {
 
     const formatValue = (fieldKey, value) => {
         if (fieldKey === 'status') {
-            if (value === 'pro') return 'Pro';
-            if (value === 'inactive') return '普通';
+            return formatAccountStatusLabel(value);
         }
         return value;
     };

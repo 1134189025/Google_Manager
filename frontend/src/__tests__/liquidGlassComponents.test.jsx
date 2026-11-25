@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
     BrandLogo,
+    CountdownBar,
     FluentIcon,
     LiquidGlassProvider,
     LogoStack,
@@ -23,6 +24,12 @@ describe('Liquid Glass 可复用组件库', () => {
 
         rerender(<FluentIcon name="gear" />);
         expect(container.querySelector('svg path')).not.toBeNull();
+
+        rerender(<FluentIcon name="browser" />);
+        const browserSvg = container.querySelector('svg');
+        expect(browserSvg).not.toBeNull();
+        expect(browserSvg.getAttribute('stroke')).toBe('currentColor');
+        expect(browserSvg.querySelectorAll('path').length).toBe(5);
 
         rerender(<FluentIcon name="non-existent-icon" />);
         expect(container.querySelector('svg')).toBeNull();
@@ -72,12 +79,27 @@ describe('Liquid Glass 可复用组件库', () => {
         expect(onChange).toHaveBeenCalledWith('year');
     });
 
-    it('RingCountdown 在剩余时间 <= 5 秒时切换为低剩余提醒样式', () => {
+    it('RingCountdown 使用无冲突 .gm-ring 且在剩余时间 <= 5 秒时切换为低剩余样式', () => {
         const { container, rerender } = render(<RingCountdown remaining={18} />);
-        expect(container.querySelector('.ring')).not.toHaveClass('low');
+        expect(container.querySelector('.gm-ring')).not.toHaveClass('low');
 
         rerender(<RingCountdown remaining={4} />);
-        expect(container.querySelector('.ring')).toHaveClass('low');
+        expect(container.querySelector('.gm-ring')).toHaveClass('low');
+    });
+
+    it('CountdownBar 按剩余秒数渲染进度宽度与预警状态', () => {
+        const { container, rerender } = render(<CountdownBar remaining={15} period={30} />);
+        const bar = container.querySelector('.otp-bar');
+        expect(bar).not.toBeNull();
+        expect(bar.querySelector('span').style.width).toBe('50%');
+        expect(bar).not.toHaveClass('low');
+        expect(bar).not.toHaveClass('crit');
+
+        rerender(<CountdownBar remaining={8} period={30} />);
+        expect(container.querySelector('.otp-bar')).toHaveClass('low');
+
+        rerender(<CountdownBar remaining={3} period={30} />);
+        expect(container.querySelector('.otp-bar')).toHaveClass('crit');
     });
 
     it('LiquidGlassProvider 与 PageToolbar 在 jsdom 中安全挂载并支持窄屏导航抽屉开关', () => {

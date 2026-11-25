@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Plus } from 'lucide-react';
 import { extractPhoneAndSmsUrl, normalizeSmsUrlInput } from '../utils/smsUtils';
 import { normalizePhoneNumber } from '../utils/phoneUtils';
+import { ACCOUNT_STATUS_OPTIONS, normalizeAccountStatus } from '../utils/accountStatus';
 import { renderInBody } from '../utils/portal';
 import {
     getCategoryColorMeta,
@@ -171,6 +172,19 @@ const EditModal = ({ account, accountCategories = [], onCreateCategory, onClose,
                             <div>
                                 <label className="block text-xs font-medium gm-text-2 mb-1">国家</label>
                                 <input name="country" defaultValue={account.country} placeholder="如：China" className={inputClassName} />
+                            </div>
+                            <div className="sm:col-span-2">
+                                <label htmlFor="gm-edit-status" className="block text-xs font-medium gm-text-2 mb-1">账号状态</label>
+                                <select
+                                    id="gm-edit-status"
+                                    name="status"
+                                    defaultValue={normalizeAccountStatus(account.status)}
+                                    className={inputClassName}
+                                >
+                                    {ACCOUNT_STATUS_OPTIONS.map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-xs font-medium gm-text-2 mb-1">分类 / 标签</label>

@@ -97,9 +97,13 @@ pub fn restore_backup(db: State<Database>, backup_name: String) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn toggle_status(db: State<Database>, id: i64) -> Result<Account, String> {
+pub fn toggle_status(
+    db: State<Database>,
+    id: i64,
+    status: Option<String>,
+) -> Result<Account, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    database::toggle_status(&conn, id)
+    database::set_or_cycle_status(&conn, id, status.as_deref())
 }
 
 #[tauri::command]
@@ -242,15 +246,24 @@ fn render_export(
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let total = accounts.len();
         let pro_count = accounts.iter().filter(|a| a.status == "pro").count();
-        let normal_count = total - pro_count;
+        let ultra_lite_count = accounts.iter().filter(|a| a.status == "ultra_lite").count();
+        let ultra_count = accounts.iter().filter(|a| a.status == "ultra").count();
+        let normal_count = total - pro_count - ultra_lite_count - ultra_count;
 
         output.push_str(&format!("========== 账号统计汇总 ==========\n"));
         output.push_str(&format!("导出时间: {}\n", now));
         output.push_str(&format!("总账号数: {}\n", total));
-        output.push_str(&format!(
-            "Pro账号: {} | 普通账号: {}\n",
-            pro_count, normal_count
-        ));
+        if ultra_lite_count > 0 || ultra_count > 0 {
+            output.push_str(&format!(
+                "Ultra账号: {} | Ultra Lite账号: {} | Pro账号: {} | 普通账号: {}\n",
+                ultra_count, ultra_lite_count, pro_count, normal_count
+            ));
+        } else {
+            output.push_str(&format!(
+                "Pro账号: {} | 普通账号: {}\n",
+                pro_count, normal_count
+            ));
+        }
 
         // 标签分布（识别已知自定义分类，避免把含空格分类名拆碎统计）
         let known_categories_lower: HashSet<String> =
@@ -825,5 +838,32 @@ mod tests {
         assert!(text.contains("AI 订阅: 1 个"), "actual output:\n{}", text);
         assert!(!text.contains("  - AI: 1 个"));
         assert!(!text.contains("  - 订阅: 1 个"));
+    }
+
+    #[test]
+    fn test_render_export_stats_includes_ultra_and_ultra_lite() {
+        let conn = setup_export_query_test_db();
+        for (email, status) in [
+            ("u1@example.com", "ultra"),
+            ("ul1@example.com", "ultra_lite"),
+            ("p1@example.com", "pro"),
+            ("n1@example.com", "inactive"),
+        ] {
+            conn.execute(
+                "INSERT INTO accounts (email, password, status, sold_status) VALUES (?1, 'pwd', ?2, 'unsold')",
+                params![email, status],
+            )
+            .unwrap();
+        }
+
+        let mut config = build_base_export_config();
+        config.include_stats = true;
+        let (text, count) = render_export(&conn, None, None, &config).unwrap();
+        assert_eq!(count, 4);
+        assert!(
+            text.contains("Ultra账号: 1 | Ultra Lite账号: 1 | Pro账号: 1 | 普通账号: 1"),
+            "actual output:\n{}",
+            text
+        );
     }
 }

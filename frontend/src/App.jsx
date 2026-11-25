@@ -576,11 +576,13 @@ const AppShell = () => {
         setDeletedAccounts([]);
     };
 
-    const toggleStatus = async (id) => {
+    const toggleStatus = async (id, nextStatus) => {
         try {
-            const result = await api.toggleStatus(id);
+            const result = nextStatus
+                ? await api.toggleStatus(id, nextStatus)
+                : await api.toggleStatus(id);
             if (result.success) {
-                setAccounts(accounts.map(acc =>
+                setAccounts(prev => prev.map(acc =>
                     acc.id === id ? result.data : acc
                 ));
             } else {
@@ -616,6 +618,7 @@ const AppShell = () => {
     const handleUpdate = async (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
+        const statusValue = formData.get('status');
         const updated = {
             email: formData.get('email'),
             password: formData.get('password'),
@@ -627,6 +630,7 @@ const AppShell = () => {
             country: formData.get('country'),
             groupName: joinMultiValueLines(splitDelimitedGroupNames(formData.get('groupName') ?? editingAccount.groupName ?? '')),
             remark: normalizeMultiValueValue('remark', formData.get('remark') ?? ''),
+            ...(statusValue ? { status: statusValue } : {}),
         };
 
         try {

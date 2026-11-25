@@ -37,6 +37,7 @@ import {
     formatCycleLabel,
     formatMoney,
 } from '../utils/renewalUtils';
+import { buildQuotaDisplayModel } from '../utils/aiQuotaUtils';
 
 const OAUTH_PROVIDERS = [
     { id: 'openai', label: 'OpenAI / ChatGPT (Codex)' },
@@ -74,6 +75,45 @@ const extractGoogleValidationUrl = (text) => {
     const match = String(text).match(/https:\/\/(?:accounts\.)?google\.com\/[^\s]+/i);
     return match ? match[0] : null;
 };
+
+const renderQuotaGroups = (groups, wrapperClassName = 'space-y-2.5') => (
+    <div className={wrapperClassName}>
+        {groups.map(group => (
+            <div key={group.id} className="gm-quota-group">
+                <div className="gm-quota-group-title">{group.title}</div>
+                <div className={`gm-quota-grid ${group.items.length === 1 ? 'is-single' : ''}`}>
+                    {group.items.map(item => (
+                        <div
+                            key={item.key}
+                            className="gm-quota-metric"
+                            title={item.usedPercent != null ? `已用 ${item.usedPercent.toFixed(1)}%` : undefined}
+                        >
+                            <div className="gm-quota-metric-head">
+                                <span className="gm-quota-metric-label">{item.label}</span>
+                                <span className="gm-quota-metric-pct">
+                                    {item.remainingPercent != null
+                                        ? `${item.remainingPercent.toFixed(1)}%`
+                                        : '—'}
+                                </span>
+                            </div>
+                            <div className="gm-quota-bar">
+                                <span
+                                    className={`gm-quota-bar-fill is-${item.level}`}
+                                    style={{ width: `${item.remainingPercent ?? 0}%` }}
+                                />
+                            </div>
+                            {item.resetsAt && (
+                                <div className="gm-quota-metric-foot">
+                                    <span>{formatResetTime(item.resetsAt)}</span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        ))}
+    </div>
+);
 
 const AiSubscriptionsView = ({
     googleAccounts = [],
@@ -479,29 +519,58 @@ const AiSubscriptionsView = ({
                         {agyError && (
                             <div className="text-[12px]" style={{ color: 'var(--danger)' }}>{agyError}</div>
                         )}
-                        {agyQuota?.windows?.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                                {agyQuota.windows.map(w => (
-                                    <div key={w.label} className="p-2.5 rounded-lg bg-[var(--bg-elevated)] space-y-1">
-                                        <div className="flex justify-between text-[12px]">
-                                            <span className="font-mono gm-text-1 truncate">{w.label}</span>
-                                            <span className="font-mono gm-text-2">
-                                                已用 {w.usedPercent ?? 0}%
-                                            </span>
-                                        </div>
-                                        <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
-                                            <div
-                                                className="h-full rounded-full"
-                                                style={{
-                                                    width: `${Math.min(100, Math.max(0, w.usedPercent || 0))}%`,
-                                                    background: (w.usedPercent || 0) > 85 ? 'var(--danger)' : 'var(--primary)',
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                        {agyQuota?.windows?.length > 0 && (() => {
+                            const hasKeywordSummary = agyQuota.windows.some(w =>
+                                /周额度|5小时额度|gemini-weekly|gemini-5h|3p-weekly|3p-5h|gemini:weekly|gemini:5h|claude:weekly|claude:5h/i
+                                    .test(`${w.model || ''} ${w.label || ''}`),
+                            );
+                            const hasWeeklyCycle = agyQuota.windows.some(w =>
+                                w.windowSeconds === 604800 || /seven_day/i.test(`${w.model || ''} ${w.label || ''}`),
+                            );
+                            const hasGeminiWindow = agyQuota.windows.some(w =>
+                                /gemini/i.test(`${w.model || ''} ${w.label || ''}`),
+                            );
+                            const hasClaudeOrGptWindow = agyQuota.windows.some(w =>
+                                /claude|gpt/i.test(`${w.model || ''} ${w.label || ''}`),
+                            );
+                            const hasRichSummary = hasKeywordSummary
+                                || hasWeeklyCycle
+                                || (hasGeminiWindow && hasClaudeOrGptWindow);
+                            if (hasRichSummary) {
+                                const display = buildQuotaDisplayModel(agyQuota, 'gemini');
+                                if (display.mode === 'grouped') {
+                                    return renderQuotaGroups(display.groups, 'grid grid-cols-1 md:grid-cols-2 gap-3');
+                                }
+                            }
+                            return (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                                    {agyQuota.windows.map(w => {
+                                        const safeUsed = typeof w.usedPercent === 'number' && Number.isFinite(w.usedPercent)
+                                            ? Math.min(100, Math.max(0, w.usedPercent))
+                                            : 0;
+                                        return (
+                                            <div key={w.label} className="p-2.5 rounded-lg bg-[var(--bg-elevated)] space-y-1">
+                                                <div className="flex justify-between text-[12px]">
+                                                    <span className="font-mono gm-text-1 truncate">{w.label}</span>
+                                                    <span className="font-mono gm-text-2">
+                                                        已用 {safeUsed}%
+                                                    </span>
+                                                </div>
+                                                <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
+                                                    <div
+                                                        className="h-full rounded-full"
+                                                        style={{
+                                                            width: `${safeUsed}%`,
+                                                            background: safeUsed > 85 ? 'var(--danger)' : 'var(--primary)',
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })()}
                     </div>
                 )}
 
@@ -646,42 +715,83 @@ const AiSubscriptionsView = ({
                                         );
                                     })()}
 
-                                    {usage?.windows?.length > 0 && (
-                                        <div className="space-y-2">
-                                            {usage.windows.map(w => {
-                                                const remainingPct = w.usedPercent != null
-                                                    ? Math.max(0, Math.min(100, 100 - w.usedPercent))
-                                                    : null;
-                                                return (
-                                                    <div key={w.label} className="space-y-1">
-                                                        <div className="flex items-center justify-between gap-2 text-[11.5px]">
-                                                            <span className="font-mono gm-text-1 truncate">{w.label}</span>
-                                                            <span className="font-mono gm-text-2 shrink-0">
-                                                                {w.usedPercent != null && `剩余 ${remainingPct.toFixed(0)}% · 已用 ${w.usedPercent.toFixed(1)}%`}
-                                                                {w.remaining != null && ` 剩余 ${w.remaining} ${w.unit || ''}`}
-                                                                {w.used != null && w.limit != null && ` ${w.used.toFixed(2)}/${w.limit.toFixed(2)} ${w.unit || ''}`}
-                                                                {w.resetsAt ? ` · 重置 ${formatResetTime(w.resetsAt)}` : ''}
-                                                            </span>
+                                    {usage?.windows?.length > 0 && (() => {
+                                        const display = buildQuotaDisplayModel(usage, sub.oauthProvider);
+                                        if (display.mode === 'grouped') {
+                                            return (
+                                                <div className="space-y-2.5">
+                                                    {renderQuotaGroups(display.groups, 'space-y-2.5')}
+                                                    {display.credits?.length > 0 && (
+                                                        <div className="space-y-1">
+                                                            {display.credits.map(c => {
+                                                                const hasUsedPct = typeof c.usedPercent === 'number' && Number.isFinite(c.usedPercent);
+                                                                const remPct = hasUsedPct
+                                                                    ? Math.max(0, Math.min(100, 100 - c.usedPercent))
+                                                                    : null;
+                                                                const hasRemaining = typeof c.remaining === 'number' && Number.isFinite(c.remaining);
+                                                                const hasUsedLimit = typeof c.used === 'number' && Number.isFinite(c.used)
+                                                                    && typeof c.limit === 'number' && Number.isFinite(c.limit);
+                                                                return (
+                                                                    <div
+                                                                        key={c.label}
+                                                                        className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-light)] text-[11.5px]"
+                                                                    >
+                                                                        <span className="font-mono gm-text-2 truncate">{c.label}</span>
+                                                                        <span className="font-mono gm-text-1 shrink-0">
+                                                                            {hasRemaining && `剩余 ${c.remaining}${c.unit ? ` ${c.unit}` : ''}`}
+                                                                            {!hasRemaining && hasUsedLimit && `${c.used.toFixed(2)}/${c.limit.toFixed(2)}${c.unit ? ` ${c.unit}` : ''}`}
+                                                                            {!hasRemaining && !hasUsedLimit && hasUsedPct && `剩余 ${remPct.toFixed(1)}%`}
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })}
                                                         </div>
-                                                        {w.usedPercent != null && (
-                                                            <div className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden">
-                                                                <div
-                                                                    className="h-full rounded-full transition-all"
-                                                                    style={{
-                                                                        width: `${Math.min(100, Math.max(0, w.usedPercent))}%`,
-                                                                        background: w.usedPercent > 85 ? 'var(--danger)' : 'var(--primary)',
-                                                                    }}
-                                                                />
+                                                    )}
+                                                    {usage.scopeNote && (
+                                                        <div className="text-[10.5px] gm-text-3">{usage.scopeNote}</div>
+                                                    )}
+                                                </div>
+                                            );
+                                        }
+
+                                        return (
+                                            <div className="space-y-2">
+                                                {display.flatWindows.map(w => {
+                                                    const hasUsedPct = typeof w.usedPercent === 'number' && Number.isFinite(w.usedPercent);
+                                                    const remainingPct = hasUsedPct
+                                                        ? Math.max(0, Math.min(100, 100 - w.usedPercent))
+                                                        : null;
+                                                    const hasRemaining = typeof w.remaining === 'number' && Number.isFinite(w.remaining);
+                                                    const hasUsedLimit = typeof w.used === 'number' && Number.isFinite(w.used)
+                                                        && typeof w.limit === 'number' && Number.isFinite(w.limit);
+                                                    return (
+                                                        <div key={w.label} className="space-y-1">
+                                                            <div className="flex items-center justify-between gap-2 text-[11.5px]">
+                                                                <span className="font-mono gm-text-1 truncate">{w.label}</span>
+                                                                <span className="font-mono gm-text-2 shrink-0">
+                                                                    {hasUsedPct && `剩余 ${remainingPct.toFixed(0)}% · 已用 ${w.usedPercent.toFixed(1)}%`}
+                                                                    {hasRemaining && ` 剩余 ${w.remaining} ${w.unit || ''}`}
+                                                                    {hasUsedLimit && ` ${w.used.toFixed(2)}/${w.limit.toFixed(2)} ${w.unit || ''}`}
+                                                                    {w.resetsAt ? ` · 重置 ${formatResetTime(w.resetsAt)}` : ''}
+                                                                </span>
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                            {usage.scopeNote && (
-                                                <div className="text-[10.5px] gm-text-3">{usage.scopeNote}</div>
-                                            )}
-                                        </div>
-                                    )}
+                                                            {hasUsedPct && (
+                                                                <div className="gm-quota-bar">
+                                                                    <span
+                                                                        className={`gm-quota-bar-fill ${remainingPct <= 10 ? 'is-crit' : remainingPct <= 25 ? 'is-low' : 'is-normal'}`}
+                                                                        style={{ width: `${remainingPct}%` }}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                                {usage.scopeNote && (
+                                                    <div className="text-[10.5px] gm-text-3">{usage.scopeNote}</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         );

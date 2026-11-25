@@ -13,6 +13,7 @@ export {
     GlassSearch,
     PageToolbar,
     RingCountdown,
+    CountdownBar,
     StatusDot,
     Chip,
     InsetGroup,

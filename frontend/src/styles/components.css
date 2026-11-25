@@ -647,16 +647,8 @@
   background: var(--sel-soft);
 }
 
-.gm-table tbody tr.is-selected td:first-child::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 3px;
-  height: 18px;
-  margin-top: -9px;
-  border-radius: 2px;
-  background: var(--accent);
+.gm-table tbody tr.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .gm-row-signal {
@@ -670,6 +662,12 @@
 }
 
 .gm-row-signal.is-pro { background: var(--accent); opacity: 1; }
+.gm-row-signal.is-ultra-lite { background: #5e5ce6; opacity: 1; }
+.gm-row-signal.is-ultra { background: #f59e0b; opacity: 1; }
+:root[data-scheme="dark"] .gm-row-signal.is-ultra-lite,
+:root[data-theme="dark"] .gm-row-signal.is-ultra-lite { background: #818cf8; }
+:root[data-scheme="dark"] .gm-row-signal.is-ultra,
+:root[data-theme="dark"] .gm-row-signal.is-ultra { background: #fbbf24; }
 .gm-row-signal.is-running {
   background: var(--green-dot);
   opacity: 1;
@@ -752,8 +750,22 @@
 }
 
 .gm-badge-on { background: var(--accent-soft); color: var(--accent); }
+.gm-badge-ultra-lite { background: rgba(94, 92, 230, .14); color: #5e5ce6; }
+.gm-badge-ultra { background: rgba(245, 158, 11, .16); color: #b45309; }
 .gm-badge-off { background: var(--fill-2); color: var(--text-2); }
 .gm-badge:hover { box-shadow: inset 0 0 0 1px currentColor; }
+
+:root[data-scheme="dark"] .gm-badge-ultra-lite,
+:root[data-theme="dark"] .gm-badge-ultra-lite {
+  background: rgba(129, 140, 248, .22);
+  color: #a5b4fc;
+}
+
+:root[data-scheme="dark"] .gm-badge-ultra,
+:root[data-theme="dark"] .gm-badge-ultra {
+  background: rgba(245, 158, 11, .22);
+  color: #fbbf24;
+}
 
 .gm-chip {
   display: inline-flex;

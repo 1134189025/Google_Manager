@@ -9,8 +9,9 @@ import { splitPhoneParts, formatCountryDisplay } from '../utils/phoneUtils';
 import { isMultilineField, splitMultiValueLines, getCategoryColorMeta } from '../utils/multiValueField';
 import { describeSmsUrl } from '../utils/smsUtils';
 import { formatDbTimestamp } from '../utils/timeUtils';
+import { getAccountStatusMeta } from '../utils/accountStatus';
 import SmsCodeCell from './SmsCodeCell';
-import { EmptyState, FluentIcon, RingCountdown } from './glass';
+import { CountdownBar, EmptyState, FluentIcon } from './glass';
 
 const BROWSER_STATUS_LABELS = {
     none: '未创建',
@@ -38,7 +39,7 @@ const BrowserButton = ({ account, status, opening, onOpen }) => {
             aria-label={`打开浏览器（${BROWSER_STATUS_LABELS[browserStatus]}）`}
             disabled={opening}
         >
-            <FluentIcon name="browser" size={14} />
+            <FluentIcon name="browser" size={15} />
         </button>
     );
 };
@@ -541,26 +542,6 @@ const AccountTable = ({
 
         return (
             <div className="flex flex-col gap-0.5">
-                {codeInfo ? (
-                    <button
-                        type="button"
-                        onClick={() => handleCopyCell(codeKey, codeInfo.code, '2FA验证码')}
-                        onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', acc.secret)}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className={`gm-cell gm-code-pill select-none flex flex-col items-start gap-1 ${flashedCellKey === codeKey ? 'gm-copy-flash' : ''}`}
-                        title="单击复制2FA验证码，双击编辑密钥"
-                    >
-                        <span className="otp-wrap w-full">
-                            <RingCountdown remaining={codeInfo.expiry} size={14} strokeWidth={2} />
-                            <span className="gm-code-text otp">{codeInfo.code}</span>
-                            <span className="text-[10px] font-mono gm-text-3 tabular-nums">{codeInfo.expiry}s</span>
-                        </span>
-                    </button>
-                ) : (
-                    <span className="gm-text-3 text-[11px] px-1.5 py-1">
-                        生成中…
-                    </span>
-                )}
                 <button
                     type="button"
                     onClick={() => handleCopyCell(secretKey, acc.secret, '2FA密钥')}
@@ -572,6 +553,26 @@ const AccountTable = ({
                 >
                     {acc.secret}
                 </button>
+                {codeInfo ? (
+                    <button
+                        type="button"
+                        onClick={() => handleCopyCell(codeKey, codeInfo.code, '2FA验证码')}
+                        onDoubleClick={(e) => onCellDoubleClick(e, acc.id, 'secret', acc.secret)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className={`gm-cell gm-code-pill select-none flex flex-col items-stretch gap-1 ${flashedCellKey === codeKey ? 'gm-copy-flash' : ''}`}
+                        title="单击复制2FA验证码，双击编辑密钥"
+                    >
+                        <span className="flex items-baseline justify-between gap-1.5 w-full">
+                            <span className="gm-code-text otp">{codeInfo.code}</span>
+                            <span className="text-[10px] font-mono gm-text-3 tabular-nums">{codeInfo.expiry}s</span>
+                        </span>
+                        <CountdownBar remaining={codeInfo.expiry} period={30} />
+                    </button>
+                ) : (
+                    <span className="gm-text-3 text-[11px] px-1.5 py-1">
+                        生成中…
+                    </span>
+                )}
             </div>
         );
     };
@@ -658,7 +659,7 @@ const AccountTable = ({
                             {renderSortableHeader('标签', 'groupName', 'gm-col-tags px-2 py-2.5 w-[96px]')}
                             {/* 备注不设宽度：占用其余全部空间 */}
                             {renderSortableHeader('备注', 'remark', 'px-2.5 py-2.5')}
-                            {renderSortableHeader('状态', 'status', 'px-1.5 py-2.5 !text-center w-[58px]', 'center')}
+                            {renderSortableHeader('状态', 'status', 'px-1.5 py-2.5 !text-center w-[82px]', 'center')}
                             {renderSortableHeader('年份', 'regYear', 'gm-col-year px-1.5 py-2.5 !text-center w-[50px]', 'center')}
                             {renderSortableHeader('国家', 'country', 'gm-col-country px-1.5 py-2.5 !text-center w-[66px]', 'center')}
                             <th className="px-1.5 py-2.5 !text-center w-[144px]">操作</th>
@@ -675,7 +676,9 @@ const AccountTable = ({
                                     </div>
                                 </td>
                             </tr>
-                        ) : paginatedData.length > 0 ? paginatedData.map((acc, index) => (
+                        ) : paginatedData.length > 0 ? paginatedData.map((acc, index) => {
+                            const statusMeta = getAccountStatusMeta(acc.status);
+                            return (
                             <tr
                                 key={acc.id}
                                 className={`group ${selectedIds.has(acc.id) ? 'is-selected' : ''}`}
@@ -706,7 +709,7 @@ const AccountTable = ({
                                     <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
                                             <span
-                                                className={`gm-row-signal signal ${browserStatuses?.[acc.email] === 'running' ? 'is-running running' : acc.status === 'pro' ? 'is-pro pro' : ''}`}
+                                                className={`gm-row-signal signal ${browserStatuses?.[acc.email] === 'running' ? 'is-running running' : statusMeta.signalClass}`}
                                                 style={{ marginTop: 0 }}
                                                 aria-hidden="true"
                                             />
@@ -752,15 +755,15 @@ const AccountTable = ({
                                 <td className="px-2.5 py-2 align-top">
                                     {renderRemarkCell(acc)}
                                 </td>
-                                {/* 状态（Pro / 普通） */}
+                                {/* 状态（普通 / Pro / Ultra Lite / Ultra） */}
                                 <td className="px-1.5 py-2 text-center">
                                     <button
                                         onClick={() => toggleStatus(acc.id)}
                                         onMouseDown={(e) => e.stopPropagation()}
-                                        title="点击切换 Pro 状态"
-                                        className={`gm-badge pro-toggle whitespace-nowrap ${acc.status === 'pro' ? 'gm-badge-on on' : 'gm-badge-off'}`}
+                                        title="点击切换状态（普通 → Pro → Ultra Lite → Ultra）"
+                                        className={`gm-badge pro-toggle whitespace-nowrap ${statusMeta.badgeClass}`}
                                     >
-                                        {acc.status === 'pro' ? 'Pro' : '普通'}
+                                        {statusMeta.label}
                                     </button>
                                 </td>
                                 {/* 年份 */}
@@ -826,7 +829,8 @@ const AccountTable = ({
                                     {renderCreatedAtCell(acc.createdAt)}
                                 </td>
                             </tr>
-                        )) : (
+                            );
+                        }) : (
                             <tr>
                                 <td colSpan="14">
                                     <EmptyState

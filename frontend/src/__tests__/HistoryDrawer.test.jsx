@@ -60,4 +60,20 @@ describe('HistoryDrawer 修改历史', () => {
         expect(await screen.findByText(date)).toBeInTheDocument();
         expect(screen.getByText(time)).toBeInTheDocument();
     });
+
+    it('正确显示 Ultra Lite 与 Ultra 状态变更记录', async () => {
+        api.getAccountHistory.mockResolvedValue({
+            success: true,
+            data: [
+                record(1, 'status', 'pro', 'ultra_lite'),
+                record(2, 'status', 'ultra_lite', 'ultra'),
+            ],
+        });
+
+        render(<HistoryDrawer isOpen onClose={vi.fn()} account={{ id: 2, email: 'ultra@gmail.com' }} />);
+
+        expect(await screen.findByText('Ultra')).toBeInTheDocument();
+        expect(screen.getAllByText('Ultra Lite').length).toBeGreaterThanOrEqual(2);
+        expect(screen.getByText('Pro')).toBeInTheDocument();
+    });
 });

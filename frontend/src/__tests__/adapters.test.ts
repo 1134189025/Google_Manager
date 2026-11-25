@@ -349,3 +349,70 @@ describe('账号独立浏览器命令契约', () => {
     expect(mockedInvoke).toHaveBeenLastCalledWith('open_browser_profile_dir', { accountId: 9 });
   });
 });
+
+describe('账号四档状态契约（toggleStatus / updateAccount）', () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+  });
+
+  it('toggleStatus 不传 status 时仅发送 id，传 status 时透传顶层 status', async () => {
+    const adapter = new TauriAdapter();
+    mockedInvoke.mockResolvedValue({
+      id: 5,
+      email: 'tier@gmail.com',
+      password: 'p',
+      status: 'pro',
+      created_at: '2026-11-01 00:00:00',
+      updated_at: '2026-11-01 00:00:00',
+    } as never);
+
+    const cycled = await adapter.toggleStatus(5);
+    expect(mockedInvoke).toHaveBeenLastCalledWith('toggle_status', { id: 5 });
+    expect(cycled.status).toBe('pro');
+
+    mockedInvoke.mockResolvedValue({
+      id: 5,
+      email: 'tier@gmail.com',
+      password: 'p',
+      status: 'ultra',
+      created_at: '2026-11-01 00:00:00',
+      updated_at: '2026-11-01 00:00:00',
+    } as never);
+
+    const direct = await adapter.toggleStatus(5, 'ultra');
+    expect(mockedInvoke).toHaveBeenLastCalledWith('toggle_status', { id: 5, status: 'ultra' });
+    expect(direct.status).toBe('ultra');
+  });
+
+  it('updateAccount 支持显式透传 status，未传时默认保留原账号 status', async () => {
+    const adapter = new TauriAdapter();
+    mockedInvoke.mockImplementation((async (command: string) => {
+      if (command === 'get_account_by_id') {
+        return {
+          id: 8,
+          email: 'u@gmail.com',
+          password: 'p',
+          status: 'ultra',
+          created_at: '2026-11-01 00:00:00',
+          updated_at: '2026-11-01 00:00:00',
+        };
+      }
+      return {
+        id: 8,
+        email: 'u@gmail.com',
+        password: 'p',
+        status: 'ultra_lite',
+      };
+    }) as never);
+
+    await adapter.updateAccount(8, { status: 'ultra_lite' });
+    const explicitCall = mockedInvoke.mock.calls.find(([cmd]) => cmd === 'update_account')!;
+    expect((explicitCall[1] as any).account.status).toBe('ultra_lite');
+
+    mockedInvoke.mockClear();
+    await adapter.updateAccount(8, { remark: '仅更新备注' });
+    const preserveCall = mockedInvoke.mock.calls.find(([cmd]) => cmd === 'update_account')!;
+    expect((preserveCall[1] as any).account.status).toBe('ultra');
+    expect((preserveCall[1] as any).account.remark).toBe('仅更新备注');
+  });
+});

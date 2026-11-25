@@ -252,7 +252,7 @@ export const PageToolbar = ({
 };
 
 /**
- * 2FA 环形倒计时指示器 (.ring)
+ * 2FA 环形倒计时指示器 (.gm-ring，避免与 Tailwind .ring 焦点环工具类冲突)
  */
 export const RingCountdown = ({
     remaining = 30,
@@ -269,7 +269,7 @@ export const RingCountdown = ({
 
     return (
         <span
-            className={`ring ${low ? 'low' : ''} ${className}`.trim()}
+            className={`gm-ring ${low ? 'low' : ''} ${className}`.trim()}
             style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
             aria-hidden="true"
         >
@@ -291,6 +291,28 @@ export const RingCountdown = ({
                     style={{ strokeWidth }}
                 />
             </svg>
+        </span>
+    );
+};
+
+/**
+ * 2FA 无框平滑倒计时进度条 (.otp-bar)
+ */
+export const CountdownBar = ({
+    remaining = 30,
+    period = 30,
+    className = '',
+}) => {
+    const parsedRemaining = Number(remaining);
+    const numRemaining = Number.isFinite(parsedRemaining) ? parsedRemaining : 0;
+    const parsedPeriod = Number(period);
+    const numPeriod = Number.isFinite(parsedPeriod) ? parsedPeriod : 0;
+    const pct = Math.max(0, Math.min(100, (numRemaining / Math.max(1, numPeriod)) * 100));
+    const tone = numRemaining <= 5 ? 'crit' : numRemaining <= 10 ? 'low' : '';
+
+    return (
+        <span className={`otp-bar ${tone} ${className}`.trim()} aria-hidden="true">
+            <span style={{ width: `${pct.toFixed(1)}%` }} />
         </span>
     );
 };

@@ -1,5 +1,7 @@
 // frontend/src/services/types.ts
 
+export type AccountStatus = 'inactive' | 'pro' | 'ultra_lite' | 'ultra';
+
 export interface Account {
   id: number;
   email: string;
@@ -12,7 +14,7 @@ export interface Account {
   country: string | null;
   groupName: string | null;
   remark: string | null;
-  status: 'pro' | 'inactive';
+  status: AccountStatus;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -29,6 +31,7 @@ export interface AccountInput {
   country?: string;
   groupName?: string;
   remark?: string;
+  status?: AccountStatus;
 }
 
 export interface BatchImportResult {
@@ -782,7 +785,7 @@ export interface ApiAdapter {
   purgeAccount(id: number): Promise<void>;
   purgeAllDeleted(): Promise<number>;
   deleteAllAccounts(): Promise<number>;
-  toggleStatus(id: number): Promise<Account>;
+  toggleStatus(id: number, status?: AccountStatus): Promise<Account>;
   batchImport(accounts: AccountInput[]): Promise<BatchImportResult>;
   generateTotp(secret: string): Promise<TotpResult>;
   fetchSmsCode(accountId: number): Promise<SmsCodeResult>;

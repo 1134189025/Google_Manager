@@ -27,6 +27,8 @@ const FluentIcon = ({
     if (!def) return null;
 
     const paths = (filled && def.f) || def.r || def.f || [];
+    const fillPaths = filled && Array.isArray(def.fFill) ? def.fFill : [];
+    const isStroke = Boolean(def.stroke);
     const mergedStyle = size != null
         ? {
             '--od-icon-size': typeof size === 'number' ? `${size}px` : size,
@@ -38,7 +40,11 @@ const FluentIcon = ({
         <svg
             className={`od-icon ${className}`.trim()}
             viewBox="0 0 20 20"
-            fill="currentColor"
+            fill={isStroke ? 'none' : 'currentColor'}
+            stroke={isStroke ? 'currentColor' : undefined}
+            strokeWidth={isStroke ? (def.strokeWidth || 1.5) : undefined}
+            strokeLinecap={isStroke ? 'round' : undefined}
+            strokeLinejoin={isStroke ? 'round' : undefined}
             aria-hidden="true"
             focusable="false"
             style={mergedStyle}
@@ -46,6 +52,9 @@ const FluentIcon = ({
         >
             {paths.map((d, idx) => (
                 <path key={idx} d={d} />
+            ))}
+            {fillPaths.map((d, idx) => (
+                <path key={`f-${idx}`} d={d} fill="currentColor" stroke="none" />
             ))}
         </svg>
     );

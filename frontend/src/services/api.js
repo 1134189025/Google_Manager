@@ -108,10 +108,10 @@ const api = {
         }
     },
 
-    // 切换状态
-    async toggleStatus(id) {
+    // 切换或直接设置账号状态（inactive / pro / ultra_lite / ultra）
+    async toggleStatus(id, status) {
         try {
-            const account = await adapter.toggleStatus(id);
+            const account = status ? await adapter.toggleStatus(id, status) : await adapter.toggleStatus(id);
             return { success: true, data: account };
         } catch (error) {
             console.error('Failed to toggle status:', error);

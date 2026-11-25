@@ -42,6 +42,9 @@ pub struct AccountInput {
     pub country: Option<String>,
     pub group_name: Option<String>,
     pub remark: Option<String>,
+    /// 可选账号状态：inactive / pro / ultra_lite / ultra（省略时新建默认 inactive、更新保持原值）
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -218,10 +221,14 @@ pub fn create_account(conn: &Connection, input: &AccountInput) -> Result<Account
         _ => None,
     };
     let sms_url = normalize_optional(input.sms_url.as_deref());
+    let initial_status = match input.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => normalize_account_status(raw)?,
+        None => "inactive",
+    };
 
     conn.execute(
         "INSERT INTO accounts (email, password, recovery, phone, secret, sms_url, reg_year, country, group_name, remark, status, sold_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![input.email, plain_password, input.recovery, input.phone, plain_secret, sms_url, input.reg_year, input.country, input.group_name, input.remark, "inactive", "unsold"],
+        params![input.email, plain_password, input.recovery, input.phone, plain_secret, sms_url, input.reg_year, input.country, input.group_name, input.remark, initial_status, "unsold"],
     ).map_err(|e| e.to_string())?;
 
     let id = conn.last_insert_rowid();
@@ -238,6 +245,10 @@ pub fn update_account(conn: &Connection, id: i64, input: &AccountInput) -> Resul
         _ => None,
     };
     let sms_url = normalize_optional(input.sms_url.as_deref());
+    let next_status = match input.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => normalize_account_status(raw)?.to_string(),
+        None => old.status.clone(),
+    };
 
     // 构造新账号用于字段对比
     let new_account = Account {
@@ -252,7 +263,7 @@ pub fn update_account(conn: &Connection, id: i64, input: &AccountInput) -> Resul
         country: input.country.clone(),
         group_name: input.group_name.clone(),
         remark: input.remark.clone(),
-        status: old.status.clone(),
+        status: next_status.clone(),
         sold_status: old.sold_status.clone(),
         created_at: old.created_at.clone(),
         updated_at: old.updated_at.clone(),
@@ -263,9 +274,16 @@ pub fn update_account(conn: &Connection, id: i64, input: &AccountInput) -> Resul
         .unchecked_transaction()
         .map_err(|e| format!("开启事务失败: {}", e))?;
     record_field_changes(&tx, id, &old, &new_account)?;
+    if old.status != next_status {
+        tx.execute(
+            "INSERT INTO account_history (account_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+            params![id, "status", old.status, next_status],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     tx.execute(
-        "UPDATE accounts SET email = ?1, password = ?2, recovery = ?3, phone = ?4, secret = ?5, sms_url = ?6, reg_year = ?7, country = ?8, group_name = ?9, remark = ?10, updated_at = CURRENT_TIMESTAMP WHERE id = ?11 AND deleted_at IS NULL",
-        params![input.email, plain_password, input.recovery, input.phone, plain_secret, sms_url, input.reg_year, input.country, input.group_name, input.remark, id],
+        "UPDATE accounts SET email = ?1, password = ?2, recovery = ?3, phone = ?4, secret = ?5, sms_url = ?6, reg_year = ?7, country = ?8, group_name = ?9, remark = ?10, status = ?11, updated_at = CURRENT_TIMESTAMP WHERE id = ?12 AND deleted_at IS NULL",
+        params![input.email, plain_password, input.recovery, input.phone, plain_secret, sms_url, input.reg_year, input.country, input.group_name, input.remark, next_status, id],
     ).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
 
@@ -332,8 +350,45 @@ pub fn purge_all_deleted(conn: &Connection) -> Result<usize, String> {
         .map_err(|e| e.to_string())
 }
 
-/// 切换 status（inactive/pro）
-pub fn toggle_status(conn: &Connection, id: i64) -> Result<Account, String> {
+/// 校验并规范化账号状态（inactive / pro / ultra_lite / ultra）
+pub fn normalize_account_status(raw: &str) -> Result<&'static str, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "inactive" | "normal" | "普通" => Ok("inactive"),
+        "pro" => Ok("pro"),
+        "ultra_lite" | "ultralite" | "ultra lite" | "ultra-lite" => Ok("ultra_lite"),
+        "ultra" => Ok("ultra"),
+        other => Err(format!("不支持的账号状态: {}", other)),
+    }
+}
+
+/// 按顺序循环切换账号状态：inactive -> pro -> ultra_lite -> ultra -> inactive
+pub fn next_account_status(current: &str) -> &'static str {
+    match current.trim().to_ascii_lowercase().as_str() {
+        "inactive" => "pro",
+        "pro" => "ultra_lite",
+        "ultra_lite" => "ultra",
+        "ultra" => "inactive",
+        _ => "pro",
+    }
+}
+
+/// 账号四档状态排序等级：inactive(0) < pro(1) < ultra_lite(2) < ultra(3)
+pub fn account_status_rank(status: &str) -> u8 {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "inactive" => 0,
+        "pro" => 1,
+        "ultra_lite" => 2,
+        "ultra" => 3,
+        _ => 4,
+    }
+}
+
+/// 切换或直接设置账号 status（inactive / pro / ultra_lite / ultra）
+pub fn set_or_cycle_status(
+    conn: &Connection,
+    id: i64,
+    target_status: Option<&str>,
+) -> Result<Account, String> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("开启事务失败: {}", e))?;
@@ -345,19 +400,31 @@ pub fn toggle_status(conn: &Connection, id: i64) -> Result<Account, String> {
         )
         .map_err(|e| e.to_string())?;
 
-    let new_status = if current == "pro" { "inactive" } else { "pro" };
-    tx.execute(
-        "INSERT INTO account_history (account_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
-        params![id, "status", current, new_status],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.execute(
-        "UPDATE accounts SET status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND deleted_at IS NULL",
-        params![new_status, id],
-    )
-    .map_err(|e| e.to_string())?;
+    let new_status = match target_status.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => normalize_account_status(raw)?,
+        None => next_account_status(&current),
+    };
+
+    if current != new_status {
+        tx.execute(
+            "INSERT INTO account_history (account_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+            params![id, "status", current, new_status],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE accounts SET status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND deleted_at IS NULL",
+            params![new_status, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     tx.commit().map_err(|e| e.to_string())?;
     get_account_by_id(conn, id)
+}
+
+/// 切换 status（向后兼容包装：按 inactive -> pro -> ultra_lite -> ultra 循环）
+#[allow(dead_code)]
+pub fn toggle_status(conn: &Connection, id: i64) -> Result<Account, String> {
+    set_or_cycle_status(conn, id, None)
 }
 
 /// 批量导入（使用事务保证原子性，自用版：明文入库）
@@ -380,6 +447,19 @@ pub fn batch_import(conn: &Connection, accounts: &[AccountInput]) -> Result<(i32
             _ => None,
         };
 
+        let initial_status = match account
+            .status
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(raw) => match normalize_account_status(raw) {
+                Ok(s) => s,
+                Err(_) => "inactive",
+            },
+            None => "inactive",
+        };
+
         let result = insert_stmt.execute(params![
             account.email,
             plain_password,
@@ -391,7 +471,7 @@ pub fn batch_import(conn: &Connection, accounts: &[AccountInput]) -> Result<(i32
             account.country,
             account.group_name,
             account.remark,
-            "inactive",
+            initial_status,
             "unsold"
         ]);
         match result {
@@ -1239,7 +1319,9 @@ impl ExportField {
                 .as_deref()
                 .unwrap_or("")
                 .cmp(right.remark.as_deref().unwrap_or("")),
-            Self::Status => left.status.cmp(&right.status),
+            Self::Status => account_status_rank(&left.status)
+                .cmp(&account_status_rank(&right.status))
+                .then_with(|| left.status.cmp(&right.status)),
             Self::CreatedAt => left.created_at.cmp(&right.created_at),
             Self::UpdatedAt => left.updated_at.cmp(&right.updated_at),
             Self::DeletedAt => left
@@ -1404,7 +1486,15 @@ fn build_grouped_export_output(
     }
 
     let mut group_keys: Vec<String> = grouped_accounts.keys().cloned().collect();
-    group_keys.sort();
+    if group_field == ExportField::Status {
+        group_keys.sort_by(|left, right| {
+            account_status_rank(left)
+                .cmp(&account_status_rank(right))
+                .then_with(|| left.cmp(right))
+        });
+    } else {
+        group_keys.sort();
+    }
     if SortDirection::from_config(config.category_sort.direction.as_deref()) == SortDirection::Desc
     {
         group_keys.reverse();
@@ -1558,6 +1648,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: Some("old-remark".to_string()),
+            status: None,
         };
         let account = create_account(&conn, &input).unwrap();
         assert_eq!(account.email, "test@example.com");
@@ -1578,6 +1669,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         let account = create_account(&conn, &input).unwrap();
 
@@ -1595,6 +1687,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: Some("new-remark".to_string()),
+            status: None,
         };
         let updated = update_account(&conn, account.id, &updated_input).unwrap();
 
@@ -1622,6 +1715,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         let account = create_account(&conn, &input).unwrap();
 
@@ -1636,6 +1730,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         let _ = update_account(&conn, account.id, &updated_input).unwrap();
 
@@ -1657,6 +1752,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         let account = create_account(&conn, &input).unwrap();
         delete_account(&conn, account.id).unwrap();
@@ -1688,6 +1784,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         let account = create_account(&conn, &input).unwrap();
 
@@ -1714,6 +1811,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         create_account(&conn, &input).unwrap();
         let result = create_account(&conn, &input);
@@ -1734,6 +1832,7 @@ mod tests {
                 country: None,
                 group_name: None,
                 remark: Some("备注A".into()),
+                status: None,
             },
             AccountInput {
                 email: "bob@gmail.com".into(),
@@ -1746,6 +1845,7 @@ mod tests {
                 country: Some("India".into()),
                 group_name: None,
                 remark: None,
+                status: None,
             },
             AccountInput {
                 email: "charlie@gmail.com".into(),
@@ -1758,6 +1858,7 @@ mod tests {
                 country: None,
                 group_name: None,
                 remark: None,
+                status: None,
             },
             AccountInput {
                 email: "david@gmail.com".into(),
@@ -1770,6 +1871,7 @@ mod tests {
                 country: None,
                 group_name: None,
                 remark: None,
+                status: None,
             },
             AccountInput {
                 email: "echo@gmail.com".into(),
@@ -1782,6 +1884,7 @@ mod tests {
                 country: None,
                 group_name: None,
                 remark: None,
+                status: None,
             },
             AccountInput {
                 email: "frank@gmail.com".into(),
@@ -1794,6 +1897,7 @@ mod tests {
                 country: None,
                 group_name: Some("主号".into()),
                 remark: Some("VIP".into()),
+                status: None,
             },
             AccountInput {
                 email: "grace@gmail.com".into(),
@@ -1806,6 +1910,7 @@ mod tests {
                 country: Some("China".into()),
                 group_name: None,
                 remark: None,
+                status: None,
             },
             AccountInput {
                 email: "min1@gmail.com".into(),
@@ -1818,6 +1923,7 @@ mod tests {
                 country: None,
                 group_name: None,
                 remark: None,
+                status: None,
             },
         ]
     }
@@ -1966,6 +2072,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         }];
         batch_import(&conn, &accounts).unwrap();
 
@@ -1999,6 +2106,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
         create_account(&conn, &input).unwrap();
 
@@ -2034,6 +2142,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         };
 
         let created = create_account(&conn, &input).unwrap();
@@ -2107,6 +2216,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: Some("target remark".to_string()),
+            status: None,
         };
         let input2 = AccountInput {
             email: "bob@example.com".to_string(),
@@ -2119,6 +2229,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: Some("other".to_string()),
+            status: None,
         };
         create_account(&conn, &input1).unwrap();
         create_account(&conn, &input2).unwrap();
@@ -2153,6 +2264,7 @@ mod tests {
             country: None,
             group_name: None,
             remark: None,
+            status: None,
         }
     }
 
@@ -2398,5 +2510,189 @@ mod tests {
         );
         assert_eq!(utc_timestamp_to_tz("not a time", &beijing), "not a time");
         assert_eq!(utc_timestamp_to_tz("", &beijing), "");
+    }
+
+    #[test]
+    fn test_toggle_status_cycles_four_tiers() {
+        let conn = setup_test_db();
+        let created = create_account(&conn, &sample_input("tier@example.com")).unwrap();
+        assert_eq!(created.status, "inactive");
+
+        let s1 = toggle_status(&conn, created.id).unwrap();
+        assert_eq!(s1.status, "pro");
+        let s2 = toggle_status(&conn, created.id).unwrap();
+        assert_eq!(s2.status, "ultra_lite");
+        let s3 = toggle_status(&conn, created.id).unwrap();
+        assert_eq!(s3.status, "ultra");
+        let s4 = toggle_status(&conn, created.id).unwrap();
+        assert_eq!(s4.status, "inactive");
+
+        let history = get_account_history(&conn, created.id).unwrap();
+        let status_history: Vec<_> = history
+            .iter()
+            .filter(|h| h.field_name == "status")
+            .collect();
+        assert_eq!(status_history.len(), 4);
+    }
+
+    #[test]
+    fn test_set_status_directly_and_reject_invalid() {
+        let conn = setup_test_db();
+        let created = create_account(&conn, &sample_input("direct@example.com")).unwrap();
+
+        let lite = set_or_cycle_status(&conn, created.id, Some("Ultra Lite")).unwrap();
+        assert_eq!(lite.status, "ultra_lite");
+
+        // 相同状态不重复写历史
+        let same = set_or_cycle_status(&conn, created.id, Some("ultra_lite")).unwrap();
+        assert_eq!(same.status, "ultra_lite");
+        assert_eq!(get_account_history(&conn, created.id).unwrap().len(), 1);
+
+        let ultra = set_or_cycle_status(&conn, created.id, Some("ultra")).unwrap();
+        assert_eq!(ultra.status, "ultra");
+
+        let err = set_or_cycle_status(&conn, created.id, Some("invalid_tier")).unwrap_err();
+        assert!(err.contains("不支持的账号状态"));
+    }
+
+    #[test]
+    fn test_create_and_update_account_with_ultra_status() {
+        let conn = setup_test_db();
+        let input = AccountInput {
+            status: Some("ultra_lite".to_string()),
+            ..sample_input("ultra_edit@example.com")
+        };
+        let created = create_account(&conn, &input).unwrap();
+        assert_eq!(created.status, "ultra_lite");
+
+        let updated = update_account(
+            &conn,
+            created.id,
+            &AccountInput {
+                status: Some("ultra".to_string()),
+                ..input
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.status, "ultra");
+
+        let history = get_account_history(&conn, created.id).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].field_name, "status");
+        assert_eq!(history[0].old_value.as_deref(), Some("ultra_lite"));
+        assert_eq!(history[0].new_value.as_deref(), Some("ultra"));
+    }
+
+    #[test]
+    fn test_batch_import_handles_valid_and_invalid_status() {
+        let conn = setup_test_db();
+        let inputs = vec![
+            AccountInput {
+                status: Some("pro".to_string()),
+                ..sample_input("imp_pro@example.com")
+            },
+            AccountInput {
+                status: Some("Ultra Lite".to_string()),
+                ..sample_input("imp_lite@example.com")
+            },
+            AccountInput {
+                status: Some("ultra".to_string()),
+                ..sample_input("imp_ultra@example.com")
+            },
+            AccountInput {
+                status: Some("not_a_real_tier".to_string()),
+                ..sample_input("imp_bad@example.com")
+            },
+            AccountInput {
+                status: None,
+                ..sample_input("imp_none@example.com")
+            },
+        ];
+
+        let (ok, fail) = batch_import(&conn, &inputs).unwrap();
+        assert_eq!((ok, fail), (5, 0));
+
+        let by_email: std::collections::HashMap<String, String> = query_accounts(&conn, None)
+            .unwrap()
+            .into_iter()
+            .map(|a| (a.email, a.status))
+            .collect();
+        assert_eq!(by_email.get("imp_pro@example.com").map(String::as_str), Some("pro"));
+        assert_eq!(by_email.get("imp_lite@example.com").map(String::as_str), Some("ultra_lite"));
+        assert_eq!(by_email.get("imp_ultra@example.com").map(String::as_str), Some("ultra"));
+        assert_eq!(by_email.get("imp_bad@example.com").map(String::as_str), Some("inactive"));
+        assert_eq!(by_email.get("imp_none@example.com").map(String::as_str), Some("inactive"));
+    }
+
+    #[test]
+    fn test_export_status_sort_and_group_uses_four_tier_rank() {
+        let conn = setup_test_db();
+        for (email, status) in [
+            ("e_ultra@example.com", "ultra"),
+            ("e_inactive@example.com", "inactive"),
+            ("e_lite@example.com", "ultra_lite"),
+            ("e_pro@example.com", "pro"),
+        ] {
+            create_account(
+                &conn,
+                &AccountInput {
+                    status: Some(status.to_string()),
+                    ..sample_input(email)
+                },
+            )
+            .unwrap();
+        }
+
+        let accounts = query_accounts(&conn, None).unwrap();
+        let flat_asc = build_export_accounts_output(
+            accounts.clone(),
+            &ExportConfig {
+                separator: "|".to_string(),
+                fields: vec!["email".to_string(), "status".to_string()],
+                include_stats: false,
+                account_order: ExportAccountOrder {
+                    field: Some("status".to_string()),
+                    direction: Some("asc".to_string()),
+                },
+                category_sort: ExportCategorySort {
+                    field: None,
+                    direction: None,
+                },
+                category_label_template: None,
+            },
+        );
+        let asc_lines: Vec<&str> = flat_asc.lines().collect();
+        assert_eq!(
+            asc_lines,
+            vec![
+                "e_inactive@example.com|inactive",
+                "e_pro@example.com|pro",
+                "e_lite@example.com|ultra_lite",
+                "e_ultra@example.com|ultra",
+            ]
+        );
+
+        let grouped_desc = build_export_accounts_output(
+            accounts,
+            &ExportConfig {
+                separator: "|".to_string(),
+                fields: vec!["email".to_string()],
+                include_stats: false,
+                account_order: ExportAccountOrder {
+                    field: Some("email".to_string()),
+                    direction: Some("asc".to_string()),
+                },
+                category_sort: ExportCategorySort {
+                    field: Some("status".to_string()),
+                    direction: Some("desc".to_string()),
+                },
+                category_label_template: Some("{groupValue}".to_string()),
+            },
+        );
+        let group_headers: Vec<&str> = grouped_desc
+            .lines()
+            .filter(|line| matches!(*line, "inactive" | "pro" | "ultra_lite" | "ultra"))
+            .collect();
+        assert_eq!(group_headers, vec!["ultra", "ultra_lite", "pro", "inactive"]);
     }
 }

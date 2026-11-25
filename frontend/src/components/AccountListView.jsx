@@ -29,6 +29,7 @@ import {
     UNCATEGORIZED_FILTER_KEY,
 } from '../utils/multiValueField';
 import { describeClearCacheResult } from '../utils/browserUtils';
+import { ACCOUNT_STATUS_RANK } from '../utils/accountStatus';
 import { isTauriRuntime } from '../utils/tauriRuntime';
 import { messageDialog } from '../utils/dialogs';
 import { renderInBody } from '../utils/portal';
@@ -283,9 +284,8 @@ const AccountListView = ({
                     return direction === 'asc' ? aValid - bValid : bValid - aValid;
                 }
                 case 'status': {
-                    const statusRank = { inactive: 0, pro: 1 };
-                    const aStatus = statusRank[a.status] ?? -1;
-                    const bStatus = statusRank[b.status] ?? -1;
+                    const aStatus = ACCOUNT_STATUS_RANK[a.status] ?? -1;
+                    const bStatus = ACCOUNT_STATUS_RANK[b.status] ?? -1;
                     return direction === 'asc' ? aStatus - bStatus : bStatus - aStatus;
                 }
                 case 'createdAt': {
@@ -891,7 +891,7 @@ const AccountListView = ({
                 }
             />
 
-            <div className="list-wrap page-in space-y-3.5">
+            <div className={`list-wrap page-in space-y-3.5 ${selection.selectedIds.size > 0 ? 'has-floatbar' : ''}`}>
                 {/* 横向液态玻璃分类筛选条（常驻显示，支持添加/管理自定义分类与未分类筛选） */}
                 <div className="gm-filter-strip" role="group" aria-label="账号分类筛选">
                     <button

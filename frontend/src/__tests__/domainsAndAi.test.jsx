@@ -277,4 +277,143 @@ describe('Phase 3: DomainsView & AiSubscriptionsView', () => {
             'https://accounts.google.com/signin/continue?authuser=u%40gmail.com',
         );
     });
+
+    it('AiSubscriptionsView 对 Gemini / Google AI Ultra 仅展示双分组核心限额并过滤冗余分模型条目', async () => {
+        mockApi.getAiSubscriptions.mockResolvedValueOnce({
+            success: true,
+            data: [
+                {
+                    id: 15,
+                    name: 'gemini',
+                    provider: 'google',
+                    plan: 'Google AI Ultra',
+                    oauthProvider: 'gemini',
+                    oauthConnected: true,
+                    usage: {
+                        source: 'gemini-cloudcode',
+                        status: 'available',
+                        windows: [
+                            { label: 'Gemini 5小时额度', model: 'gemini-5h', usedPercent: 3.2, windowSeconds: 18000, resetsAt: '2026-11-25T01:00:00Z' },
+                            { label: 'Gemini 周额度', model: 'gemini-weekly', usedPercent: 2.1, windowSeconds: 604800, resetsAt: '2026-12-01T04:06:00Z' },
+                            { label: 'Claude 5小时额度', model: '3p-5h', usedPercent: 0, windowSeconds: 18000, resetsAt: '2026-11-25T03:51:00Z' },
+                            { label: 'Claude 周额度', model: '3p-weekly', usedPercent: 9.6, windowSeconds: 604800, resetsAt: '2026-12-01T22:51:00Z' },
+                            { label: 'Claude Opus 5.5 (High)', model: 'claude-opus-5-5-high', usedPercent: 0 },
+                            { label: 'Claude Sonnet 5.5 (Medium)', model: 'claude-sonnet-5-5-medium', usedPercent: 0 },
+                            { label: 'Gemini 2.5 Pro', model: 'gemini-2.5-pro', usedPercent: 3.2 },
+                            { label: 'Gemini 3.1 Flash Lite', model: 'gemini-3.1-flash-lite', usedPercent: 3.2 },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        const { container } = render(<AiSubscriptionsView onNotify={vi.fn()} />);
+
+        await screen.findByText('Gemini 模型');
+        expect(screen.getByText('Claude 和 GPT 模型')).toBeInTheDocument();
+        expect(screen.getAllByText('周限额')).toHaveLength(2);
+        expect(screen.getAllByText('5 小时限额')).toHaveLength(2);
+        expect(screen.getByText('97.9%')).toBeInTheDocument();
+        expect(screen.getByText('96.8%')).toBeInTheDocument();
+        expect(screen.getByText('90.4%')).toBeInTheDocument();
+        expect(screen.getByText('100.0%')).toBeInTheDocument();
+
+        // 冗余的分模型行全部被过滤，不再杂乱展示
+        expect(screen.queryByText('Claude Opus 5.5 (High)')).not.toBeInTheDocument();
+        expect(screen.queryByText('Gemini 2.5 Pro')).not.toBeInTheDocument();
+        expect(screen.queryByText('Gemini 3.1 Flash Lite')).not.toBeInTheDocument();
+
+        // 进度条按剩余比例填充（97.9%）
+        const fills = Array.from(container.querySelectorAll('.gm-quota-bar-fill')).map(el => el.style.width);
+        expect(fills).toContain('97.9%');
+        expect(fills).toContain('96.8%');
+        expect(fills).toContain('90.4%');
+        expect(fills).toContain('100%');
+    });
+
+    it('AiSubscriptionsView 在 Gemini grouped 模式下保留 scopeNote 与 credits 积分，且 OpenAI 含 gpt-* 附加限额不丢主限额', async () => {
+        mockApi.getAiSubscriptions.mockResolvedValueOnce({
+            success: true,
+            data: [
+                {
+                    id: 16,
+                    name: 'Gemini Code Assist',
+                    provider: 'Google',
+                    plan: 'Ultra',
+                    oauthProvider: 'gemini',
+                    oauthConnected: true,
+                    usage: {
+                        source: 'gemini-cloudcode',
+                        scopeNote: '此处展示 Google Cloud Code 聚合配额。',
+                        status: 'available',
+                        windows: [
+                            { label: 'Gemini 周额度', model: 'gemini-weekly', usedPercent: 10, windowSeconds: 604800 },
+                            { label: 'Gemini 5小时额度', model: 'gemini-5h', usedPercent: 5, windowSeconds: 18000 },
+                            { label: 'credits/GOOGLE_ONE_AI', remaining: 1200, unit: 'credits' },
+                        ],
+                    },
+                },
+                {
+                    id: 17,
+                    name: 'OpenAI Codex Pro',
+                    provider: 'OpenAI',
+                    plan: 'Pro',
+                    oauthProvider: 'openai',
+                    oauthConnected: true,
+                    usage: {
+                        source: 'openai-wham',
+                        scopeNote: '此处为 Codex 额度。',
+                        status: 'available',
+                        windows: [
+                            { label: 'primary_window', usedPercent: 22, windowSeconds: 18000 },
+                            { label: 'secondary_window', usedPercent: 40, windowSeconds: 604800 },
+                            { label: 'gpt-5-codex', model: 'gpt-5-codex', usedPercent: 15, windowSeconds: 18000 },
+                            { label: 'credits', remaining: 18.5, unit: 'USD' },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        render(<AiSubscriptionsView onNotify={vi.fn()} />);
+
+        await screen.findByText('Gemini Code Assist');
+        expect(screen.getByText('此处展示 Google Cloud Code 聚合配额。')).toBeInTheDocument();
+        expect(screen.getByText('credits/GOOGLE_ONE_AI')).toBeInTheDocument();
+        expect(screen.getByText('剩余 1200 credits')).toBeInTheDocument();
+
+        // OpenAI 订阅不应被 gpt-5-codex 窗口误分组，主限额与余额完整保留
+        expect(screen.getByText('primary_window')).toBeInTheDocument();
+        expect(screen.getByText('secondary_window')).toBeInTheDocument();
+        expect(screen.getByText('gpt-5-codex')).toBeInTheDocument();
+        expect(screen.getByText('credits')).toBeInTheDocument();
+        expect(screen.getByText(/剩余 18\.5 USD/)).toBeInTheDocument();
+    });
+
+    it('AiSubscriptionsView 在 Antigravity CLI 返回多周期汇总时走双分组渲染', async () => {
+        const user = userEvent.setup();
+        mockApi.readAntigravityCliQuota.mockResolvedValueOnce({
+            success: true,
+            data: {
+                checkedAt: '2026-11-24T12:00:00Z',
+                windows: [
+                    { label: 'Gemini/five_hour', model: 'Gemini', usedPercent: 10, windowSeconds: 18000 },
+                    { label: 'Gemini/seven_day', model: 'Gemini', usedPercent: 25, windowSeconds: 604800 },
+                    { label: 'Claude/five_hour', model: 'Claude', usedPercent: 5, windowSeconds: 18000 },
+                    { label: 'Claude/seven_day', model: 'Claude', usedPercent: 30, windowSeconds: 604800 },
+                ],
+            },
+        });
+
+        render(<AiSubscriptionsView onNotify={vi.fn()} />);
+        await screen.findByText('Codex Plus');
+        await user.click(screen.getByRole('button', { name: /Antigravity CLI 额度/ }));
+
+        await screen.findByText('Gemini 模型');
+        expect(screen.getByText('Claude 和 GPT 模型')).toBeInTheDocument();
+        expect(screen.getByText('75.0%')).toBeInTheDocument();
+        expect(screen.getByText('90.0%')).toBeInTheDocument();
+        expect(screen.getByText('70.0%')).toBeInTheDocument();
+        expect(screen.getByText('95.0%')).toBeInTheDocument();
+    });
 });
